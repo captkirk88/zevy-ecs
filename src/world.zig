@@ -76,7 +76,7 @@ pub const ComponentInstance = struct {
     }
 
     /// Write this component to any std.io.Writer
-    pub fn writeTo(self: ComponentInstance, writer: anytype) !void {
+    pub fn writeTo(self: ComponentInstance, writer: std.io.AnyWriter) !void {
         try writer.writeInt(u64, self.hash, .little);
         try writer.writeInt(usize, self.size, .little);
         try writer.writeAll(self.data);
@@ -84,7 +84,7 @@ pub const ComponentInstance = struct {
 
     /// Create a ComponentInstance from any std.io.Reader
     /// The caller is responsible for freeing the returned data
-    pub fn readFrom(reader: anytype, allocator: std.mem.Allocator) !ComponentInstance {
+    pub fn readFrom(reader: std.io.AnyReader, allocator: std.mem.Allocator) !ComponentInstance {
         const comp_hash = try reader.readInt(u64, .little);
         const comp_size = try reader.readInt(usize, .little);
         const comp_data = try allocator.alloc(u8, comp_size);
@@ -441,7 +441,6 @@ pub const World = struct {
             try arr.ensureTotalCapacity(self.allocator, arr.items.len + needed_bytes);
         }
 
-        // UNSAFE: Fast batch insertion with direct memory operations
         // Ensure sparse array capacity for all entities
         const max_entity_id = blk: {
             var max: u32 = 0;
@@ -646,23 +645,13 @@ pub const World = struct {
     }
 };
 
-// Test structures for component serialization tests
-const TestPosition = struct {
-    x: f32,
-    y: f32,
-};
-
-const TestVelocity = struct {
-    dx: f32,
-    dy: f32,
-};
-
-const TestHealth = struct {
-    current: i32,
-    max: i32,
-};
-
 test "ComponentInstance.from creates component correctly" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
     const pos = TestPosition{ .x = 10.0, .y = 20.0 };
     const comp = ComponentInstance.from(TestPosition, &pos);
 
@@ -673,6 +662,17 @@ test "ComponentInstance.from creates component correctly" {
 }
 
 test "ComponentInstance.as returns correct typed pointer" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
+    const TestVelocity = struct {
+        dx: f32,
+        dy: f32,
+    };
+
     const pos = TestPosition{ .x = 15.5, .y = 25.5 };
     const comp = ComponentInstance.from(TestPosition, &pos);
 
@@ -689,6 +689,12 @@ test "ComponentInstance.as returns correct typed pointer" {
 }
 
 test "ComponentInstance.asMut allows mutation" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
     var pos = TestPosition{ .x = 5.0, .y = 10.0 };
     const comp = ComponentInstance.from(TestPosition, &pos);
 
@@ -705,6 +711,12 @@ test "ComponentInstance.asMut allows mutation" {
 }
 
 test "ComponentInstance writeTo and readFrom" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
     const allocator = std.testing.allocator;
 
     // Create original component
@@ -714,11 +726,11 @@ test "ComponentInstance writeTo and readFrom" {
     // Write to buffer
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer buffer.deinit(allocator);
-    try original_comp.writeTo(buffer.writer(allocator));
+    try original_comp.writeTo(buffer.writer(allocator).any());
 
     // Read back from buffer
     var fbs = std.io.fixedBufferStream(buffer.items);
-    const read_comp = try ComponentInstance.readFrom(fbs.reader(), allocator);
+    const read_comp = try ComponentInstance.readFrom(fbs.reader().any(), allocator);
     defer allocator.free(read_comp.data);
 
     // Verify the data matches
@@ -734,6 +746,17 @@ test "ComponentInstance writeTo and readFrom" {
 }
 
 test "ComponentWriter writeComponent and writeTypedComponent" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
+    const TestVelocity = struct {
+        dx: f32,
+        dy: f32,
+    };
+
     const allocator = std.testing.allocator;
 
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
@@ -773,6 +796,16 @@ test "ComponentWriter writeComponent and writeTypedComponent" {
 }
 
 test "ComponentWriter writeComponents with count header" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
+    const TestHealth = struct {
+        current: i32,
+        max: i32,
+    };
     const allocator = std.testing.allocator;
 
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
@@ -828,6 +861,12 @@ test "ComponentWriter writeComponents with count header" {
 }
 
 test "ComponentReader memory management" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
     const allocator = std.testing.allocator;
 
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
@@ -836,7 +875,7 @@ test "ComponentReader memory management" {
     // Write a component
     const pos = TestPosition{ .x = 123.45, .y = 678.90 };
     const comp = ComponentInstance.from(TestPosition, &pos);
-    try comp.writeTo(buffer.writer(allocator));
+    try comp.writeTo(buffer.writer(allocator).any());
 
     // Read it back and ensure proper cleanup
     var fbs = std.io.fixedBufferStream(buffer.items);
@@ -859,6 +898,17 @@ test "ComponentReader memory management" {
 }
 
 test "ComponentInstance type safety" {
+    // Test structures for component serialization tests
+    const TestPosition = struct {
+        x: f32,
+        y: f32,
+    };
+
+    const TestVelocity = struct {
+        dx: f32,
+        dy: f32,
+    };
+
     const pos = TestPosition{ .x = 1.0, .y = 2.0 };
     const pos_comp = ComponentInstance.from(TestPosition, &pos);
 

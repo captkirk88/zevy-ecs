@@ -236,20 +236,18 @@ pub fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: ty
 
 pub fn ToSystemReturnType(comptime system_fn: anytype) type {
     const FnInfo = @typeInfo(@TypeOf(system_fn));
-    const params = FnInfo.@"fn".params;
-    comptime var out_types: []const type = &[_]type{};
-    inline for (params[1..]) |param| {
-        const ParamType = param.type.?;
-        const ActualType = if (@typeInfo(ParamType) == .pointer) @typeInfo(ParamType).pointer.child else ParamType;
-        const actual_type_info = @typeInfo(ActualType);
-        if (actual_type_info == .@"struct" or actual_type_info == .@"enum" or actual_type_info == .@"union" or actual_type_info == .@"opaque") {
-            if (@hasDecl(ActualType, "set") and @hasField(ActualType, "_value")) {
-                const T = @TypeOf(@as(ActualType, undefined)._value);
-                out_types = out_types ++ &[_]type{T};
-            }
-        }
+
+    // Get the function's actual return type
+    const fn_return_type = FnInfo.@"fn".return_type orelse void;
+    const fn_return_info = @typeInfo(fn_return_type);
+
+    // If function returns an error union, unwrap to get the payload type
+    if (fn_return_info == .error_union) {
+        return fn_return_info.error_union.payload;
     }
-    return if (out_types.len > 0) std.meta.Tuple(out_types) else void;
+
+    // Otherwise return the function's return type as-is
+    return fn_return_type;
 }
 
 pub fn Res(comptime T: type) type {
@@ -445,10 +443,10 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, ParamRegistr
     return pipe(
         predicate,
         struct {
-            pub fn run(ecs: *ecs_mod.Manager, cond: bool) void {
+            pub fn run(ecs: *ecs_mod.Manager, cond: bool) !void {
                 if (cond) {
-                    const sys = ecs.createSystem(ecs, system, ParamRegistry);
-                    _ = sys.run(ecs, sys.ctx);
+                    const sys = ecs.createSystem(system, ParamRegistry);
+                    _ = try sys.run(ecs, sys.ctx);
                 }
             }
         }.run,

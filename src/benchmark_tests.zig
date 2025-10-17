@@ -286,14 +286,15 @@ test "ECS Benchmark - Mixed Systems" {
 }
 
 fn setupMixedSystems(e: *Manager) [7]ecs.SystemHandle {
+    const DefaultRegistry = @import("root.zig").DefaultParamRegistry;
     var results: [7]ecs.SystemHandle = undefined;
-    results[0] = e.createSystemCached(systemMovement, ecs.DefaultRegistry);
-    results[1] = e.createSystemCached(systemHealthRegen, ecs.DefaultRegistry);
-    results[2] = e.createSystemCached(systemDamageWithArmor, ecs.DefaultRegistry);
-    results[3] = e.createSystemCached(systemDamageNoArmor, ecs.DefaultRegistry);
-    results[4] = e.createSystemCached(systemTeamCollision, ecs.DefaultRegistry);
-    results[5] = e.createSystemCached(systemTargetTracking, ecs.DefaultRegistry);
-    results[6] = e.createSystemCached(systemVelocityDamping, ecs.DefaultRegistry);
+    results[0] = e.createSystemCached(systemMovement, DefaultRegistry);
+    results[1] = e.createSystemCached(systemHealthRegen, DefaultRegistry);
+    results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry);
+    results[3] = e.createSystemCached(systemDamageNoArmor, DefaultRegistry);
+    results[4] = e.createSystemCached(systemTeamCollision, DefaultRegistry);
+    results[5] = e.createSystemCached(systemTargetTracking, DefaultRegistry);
+    results[6] = e.createSystemCached(systemVelocityDamping, DefaultRegistry);
     return results;
 }
 

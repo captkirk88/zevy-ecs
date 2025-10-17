@@ -4,7 +4,8 @@ const reflect = @import("reflect.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
 
-pub const DefaultRegistry = SystemParamRegistry(&[_]type{
+/// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter
+pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
     params.EventReaderSystemParam,
     params.EventWriterSystemParam,
     params.ResourceSystemParam,
@@ -120,7 +121,7 @@ test "merged SystemParamRegistry" {
             return 1;
         }
     };
-    const merge = MergedSystemParamRegistry(.{ CustomParam, DefaultRegistry });
+    const merge = MergedSystemParamRegistry(.{ CustomParam, DefaultParamRegistry });
     try std.testing.expect(merge.len() == 6);
 
     // Test that we can apply a custom param (returns value)

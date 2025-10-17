@@ -285,6 +285,8 @@ Systems can request various parameters that are automatically injected:
 - **`EventReader(T)`**: Read events of type T
 - **`EventWriter(T)`**: Write events of type T
 
+- More can be added by implementing custom parameter types. (see below)
+
 ### Resources
 
 Resources are global singleton values accessible across systems.
@@ -296,8 +298,8 @@ const GameConfig = struct {
     fps: u32,
 };
 
-// Add resource
-const config = try manager.addResource(GameConfig, .{
+// Add resource, returns pointer to resource
+var config = try manager.addResource(GameConfig, .{
     .width = 1920,
     .height = 1080,
     .fps = 60,
@@ -351,8 +353,7 @@ fn collisionResponseSystem(
     reader: zevy_ecs.EventReader(CollisionEvent),
 ) void {
     _ = manager;
-    var event_reader = reader;
-    while (event_reader.read()) |event| {
+    while (reader.read()) |event| {
         std.debug.print("Collision between {d} and {d}\n",
             .{ event.data.entity_a.id, event.data.entity_b.id });
         event_reader.markHandled();
@@ -372,7 +373,7 @@ pub fn main() !void {
 
     // Run systems...
 
-    // recommended to discard unhandled events each frame or adding a system to do so
+    // recommended to discard unhandled events later on
     collision_events.discardUnhandled();
 }
 ```
@@ -400,7 +401,7 @@ fn damageSystemWithMultiplier(
 const system = zevy_ecs.ToSystemWithArgs(
     damageSystemWithMultiplier,
     .{0.5}, // multiplier = 0.5
-    zevy_ecs.DefaultRegistry,
+    zevy_ecs.DefaultParamRegistry,
 );
 
 try system.run(&manager, system.ctx);
@@ -408,24 +409,34 @@ try system.run(&manager, system.ctx);
 
 ### Custom System Registries
 
-You can create custom system parameter types by implementing the `analyze` and `apply` functions, then merge them with the default registry.
+You can create custom system parameter types by implementing the `analyze` and `apply` functions, then merge them with the default registry. Below is an example of a `Local` parameter type that provides per-system persistent state.
 
 ```zig
-const CustomParam = struct {
+pub const LocalSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        // Analyze if this param can handle type T
-        // Return T or a related type if yes, null otherwise
+        const type_info = @typeInfo(T);
+        if (type_info == .@"struct" and
+            @hasField(T, "_value") and
+            @hasField(T, "_set") and
+            type_info.@"struct".fields.len == 2)
+        {
+            return type_info.@"struct".fields[0].type;
+        } else if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            return analyze(Child);
+        }
+        return null;
     }
 
-    pub fn apply(manager: *zevy_ecs.Manager, comptime T: type) T {
-        // Create and return an instance of T
+    pub fn apply(_: *ecs.Manager, comptime T: type) *systems.Local(T) {
+        // Local params need static storage that persists across system calls
+        // Each unique type T gets its own static storage
+        const static_storage = struct {
+            var local: systems.Local(T) = .{ ._value = undefined, ._set = false };
+        };
+        return &static_storage.local;
     }
 };
-
-const CustomRegistry = zevy_ecs.MergedSystemParamRegistry(.{
-    zevy_ecs.DefaultRegistry,
-    CustomParam,
-});
 ```
 
 ### Component Serialization
@@ -438,15 +449,13 @@ const pos = Position{ .x = 10.0, .y = 20.0 };
 const comp = zevy_ecs.ComponentInstance.from(Position, &pos);
 
 // Serialize to writer
-var buffer = std.ArrayList(u8).initCapacity(allocator, 128);
-defer buffer.deinit();
-const writer = buffer.writer();
-try comp.writeTo(writer);
+var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+defer buffer.deinit(allocator);
+try comp.writeTo(buffer.writer(allocator).any());
 
 // Deserialize from reader
 var fbs = std.io.fixedBufferStream(buffer.items);
-const reader = fbs.reader();
-const read_comp = try zevy_ecs.ComponentInstance.readFrom(reader, allocator);
+const read_comp = try zevy_ecs.ComponentInstance.readFrom(fbs.reader().any(), allocator);
 defer allocator.free(read_comp.data);
 
 // Access typed data
@@ -459,31 +468,31 @@ if (read_comp.as(Position)) |read_pos| {
 
 zevy_ecs includes a simple benchmarking utility to measure the performance of various operations. Below are some example benchmark results for entity creation and system execution.
 
-### Entity Creation Benchmarks
+### Benchmarks (4GHz CPU, single-threaded, -Doptimize=ReleaseFast)
 
 | Benchmark               | Operations | Time/op       | Memory/op     |
 | ----------------------- | ---------- | ------------- | ------------- |
-| Create 100 Entities     | 3          | 14.366 us/op  | 13.474 KB/op  |
-| Create 1000 Entities    | 3          | 115.266 us/op | 116.588 KB/op |
-| Create 10000 Entities   | 3          | 887.766 us/op | 1.661 MB/op   |
-| Create 100000 Entities  | 3          | 6.474 ms/op   | 18.296 MB/op  |
-| Create 1000000 Entities | 3          | 68.861 ms/op  | 232.605 MB/op |
+| Create 100 Entities     | 3          | 13.666 us/op  | 13.474 KB/op  |
+| Create 1000 Entities    | 3          | 98.466 us/op  | 116.588 KB/op |
+| Create 10000 Entities   | 3          | 880.566 us/op | 1.661 MB/op   |
+| Create 100000 Entities  | 3          | 6.600 ms/op   | 18.296 MB/op  |
+| Create 1000000 Entities | 3          | 71.081 ms/op  | 232.605 MB/op |
 
 | Benchmark                     | Operations | Time/op       | Memory/op     |
 | ----------------------------- | ---------- | ------------- | ------------- |
-| Batch Create 100 Entities     | 3          | 13.266 us/op  | 13.474 KB/op  |
-| Batch Create 1000 Entities    | 3          | 61.766 us/op  | 89.682 KB/op  |
-| Batch Create 10000 Entities   | 3          | 364.600 us/op | 1.019 MB/op   |
-| Batch Create 100000 Entities  | 3          | 3.295 ms/op   | 12.529 MB/op  |
-| Batch Create 1000000 Entities | 3          | 32.735 ms/op  | 144.706 MB/op |
+| Batch Create 100 Entities     | 3          | 13.466 us/op  | 13.474 KB/op  |
+| Batch Create 1000 Entities    | 3          | 60.600 us/op  | 89.682 KB/op  |
+| Batch Create 10000 Entities   | 3          | 393.166 us/op | 1.019 MB/op   |
+| Batch Create 100000 Entities  | 3          | 3.599 ms/op   | 12.529 MB/op  |
+| Batch Create 1000000 Entities | 3          | 34.666 ms/op  | 144.706 MB/op |
 
 | Benchmark                         | Operations | Time/op       | Memory/op  |
 | --------------------------------- | ---------- | ------------- | ---------- |
-| Run 7 Systems on 100 Entities     | 1          | 7.100 us/op   | 0.000 B/op |
+| Run 7 Systems on 100 Entities     | 1          | 7.600 us/op   | 0.000 B/op |
 | Run 7 Systems on 1000 Entities    | 1          | 6.600 us/op   | 0.000 B/op |
-| Run 7 Systems on 10000 Entities   | 1          | 52.100 us/op  | 0.000 B/op |
-| Run 7 Systems on 100000 Entities  | 1          | 508.800 us/op | 0.000 B/op |
-| Run 7 Systems on 1000000 Entities | 1          | 5.448 ms/op   | 0.000 B/op |
+| Run 7 Systems on 10000 Entities   | 1          | 55.200 us/op  | 0.000 B/op |
+| Run 7 Systems on 100000 Entities  | 1          | 523.400 us/op | 0.000 B/op |
+| Run 7 Systems on 1000000 Entities | 1          | 5.366 ms/op   | 0.000 B/op |
 
 ## License
 

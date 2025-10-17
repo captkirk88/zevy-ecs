@@ -9,9 +9,6 @@ const registry = @import("systems.registry.zig");
 
 pub const errors = errs.ECSError;
 
-// System parameter registries
-pub const DefaultRegistry = registry.DefaultRegistry;
-
 pub const Entity = struct {
     id: u32,
     generation: u32,
@@ -262,7 +259,7 @@ pub const Manager = struct {
             });
             return ptr;
         } else {
-            std.debug.panic("Resource of type {s} already exists", .{@typeName(T)});
+            return error.ResourceAlreadyExists;
         }
     }
 
