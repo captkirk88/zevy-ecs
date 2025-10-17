@@ -265,11 +265,11 @@ pub fn main() !void {
     _ = try manager.addResource(DeltaTime, .{ .value = 0.016 });
 
     // Create and run system
-    var system = manager.createSystem(movementSystem, zevy_ecs.DefaultRegistry);
+    var system = manager.createSystem(movementSystem, zevy_ecs.DefaultParamRegistry);
     try system.run(&manager, system.ctx);
 
     // Or cache and reuse systems
-    const handle = manager.createSystemCached(damageSystem, zevy_ecs.DefaultRegistry);
+    const handle = manager.createSystemCached(damageSystem, zevy_ecs.DefaultParamRegistry);
     try manager.runSystem(void, handle);
 }
 ```
