@@ -32,7 +32,12 @@ const zevy_ecs = b.dependency("zevy_ecs", .{
     .target = target,
     .optimize = optimize,
 });
+
 exe.root_module.addImport("zevy_ecs", zevy_ecs.module("zevy_ecs"));
+
+// Optional: If you want to use the benchmarking utilities
+exe.root_module.addImport("zevy_ecs_benchmark", zevy_ecs.module("benchmark"));
+
 ```
 
 ### Basic Usage
@@ -470,29 +475,29 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 ### Benchmarks (4GHz CPU, single-threaded, -Doptimize=ReleaseFast)
 
-| Benchmark               | Operations | Time/op       | Memory/op     |
-| ----------------------- | ---------- | ------------- | ------------- |
-| Create 100 Entities     | 3          | 13.666 us/op  | 13.474 KB/op  |
-| Create 1000 Entities    | 3          | 98.466 us/op  | 116.588 KB/op |
-| Create 10000 Entities   | 3          | 880.566 us/op | 1.661 MB/op   |
-| Create 100000 Entities  | 3          | 6.600 ms/op   | 18.296 MB/op  |
-| Create 1000000 Entities | 3          | 71.081 ms/op  | 232.605 MB/op |
+| Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
+| ----------------------- | ---------- | ------------- | ------------- | --------- |
+| Create 100 Entities     | 3          | 13.100 us/op  | 13.474 KB/op  | 3/op      |
+| Create 1000 Entities    | 3          | 91.066 us/op  | 116.588 KB/op | 8/op      |
+| Create 10000 Entities   | 3          | 754.666 us/op | 1.661 MB/op   | 18/op     |
+| Create 100000 Entities  | 3          | 6.593 ms/op   | 18.296 MB/op  | 27/op     |
+| Create 1000000 Entities | 3          | 71.098 ms/op  | 232.605 MB/op | 39/op     |
 
-| Benchmark                     | Operations | Time/op       | Memory/op     |
-| ----------------------------- | ---------- | ------------- | ------------- |
-| Batch Create 100 Entities     | 3          | 13.466 us/op  | 13.474 KB/op  |
-| Batch Create 1000 Entities    | 3          | 60.600 us/op  | 89.682 KB/op  |
-| Batch Create 10000 Entities   | 3          | 393.166 us/op | 1.019 MB/op   |
-| Batch Create 100000 Entities  | 3          | 3.599 ms/op   | 12.529 MB/op  |
-| Batch Create 1000000 Entities | 3          | 34.666 ms/op  | 144.706 MB/op |
+| Benchmark                     | Operations | Time/op       | Memory/op     | Allocs/op |
+| ----------------------------- | ---------- | ------------- | ------------- | --------- |
+| Batch Create 100 Entities     | 3          | 17.333 us/op  | 13.474 KB/op  | 3/op      |
+| Batch Create 1000 Entities    | 3          | 74.166 us/op  | 89.682 KB/op  | 5/op      |
+| Batch Create 10000 Entities   | 3          | 453.033 us/op | 1.019 MB/op   | 7/op      |
+| Batch Create 100000 Entities  | 3          | 3.512 ms/op   | 12.529 MB/op  | 7/op      |
+| Batch Create 1000000 Entities | 3          | 34.607 ms/op  | 144.706 MB/op | 8/op      |
 
-| Benchmark                         | Operations | Time/op       | Memory/op  |
-| --------------------------------- | ---------- | ------------- | ---------- |
-| Run 7 Systems on 100 Entities     | 1          | 7.600 us/op   | 0.000 B/op |
-| Run 7 Systems on 1000 Entities    | 1          | 6.600 us/op   | 0.000 B/op |
-| Run 7 Systems on 10000 Entities   | 1          | 55.200 us/op  | 0.000 B/op |
-| Run 7 Systems on 100000 Entities  | 1          | 523.400 us/op | 0.000 B/op |
-| Run 7 Systems on 1000000 Entities | 1          | 5.366 ms/op   | 0.000 B/op |
+| Benchmark                         | Operations | Time/op       | Memory/op  | Allocs/op |
+| --------------------------------- | ---------- | ------------- | ---------- | --------- |
+| Run 7 Systems on 100 Entities     | 1          | 7.300 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000 Entities    | 1          | 6.700 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 10000 Entities   | 1          | 57.500 us/op  | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100000 Entities  | 1          | 534.200 us/op | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000000 Entities | 1          | 5.399 ms/op   | 0.000 B/op | 0/op      |
 
 ## License
 

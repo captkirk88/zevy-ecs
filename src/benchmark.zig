@@ -4,29 +4,34 @@ const std = @import("std");
 const CountingAllocator = struct {
     /// Returns a duplicate of this allocator, preserving the underlying allocator but resetting stats
     pub fn duplicate(self: *const CountingAllocator) CountingAllocator {
-        return CountingAllocator{
-            .allocator = self.allocator,
-            .bytes_allocated = 0,
-        };
+        return create(self.allocator);
     }
     allocator: std.mem.Allocator,
     bytes_allocated: usize,
+    allocs_count: usize,
 
-    pub fn init(allocator: std.mem.Allocator) CountingAllocator {
+    fn create(allocator: std.mem.Allocator) CountingAllocator {
         return CountingAllocator{
             .allocator = allocator,
             .bytes_allocated = 0,
+            .allocs_count = 0,
         };
+    }
+
+    pub fn init(allocator: std.mem.Allocator) CountingAllocator {
+        return create(allocator);
     }
 
     pub fn reset(self: *CountingAllocator) void {
         self.bytes_allocated = 0;
+        self.allocs_count = 0;
     }
 
     pub fn alloc(self: *CountingAllocator, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const result = self.allocator.rawAlloc(len, ptr_align, ret_addr);
         if (result) |_| {
             self.bytes_allocated += len;
+            self.allocs_count += 1;
         }
         return result;
     }
@@ -36,6 +41,7 @@ const CountingAllocator = struct {
         const ok = self.allocator.rawResize(buf, buf_align, new_len, ret_addr);
         if (ok and new_len > old_len) {
             self.bytes_allocated += (new_len - old_len);
+            self.allocs_count += 1;
         }
         return ok;
     }
@@ -100,6 +106,7 @@ pub const Benchmark = struct {
         total_bytes: usize,
         avg_bytes: usize,
         bytes_per_op: usize,
+        allocs_per_op: usize,
     };
 
     /// Returns a std.mem.Allocator struct mapped to this benchmark's counting allocator methods
@@ -166,6 +173,7 @@ pub const Benchmark = struct {
             .total_bytes = total_bytes,
             .avg_bytes = per_op_bytes,
             .bytes_per_op = per_op_bytes,
+            .allocs_per_op = if (ops > 0) self.counting_allocator.allocs_count / ops else 0,
         };
         try self.results.append(self.allocator, result);
         return result;
@@ -215,32 +223,34 @@ pub const Benchmark = struct {
         const mem = formatMemory(result.avg_bytes);
 
         std.debug.print("{s}\n", .{result.name});
-        std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {d:>9.3} {s}/op\n", .{
+        std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {d:>9.3} {s}/op {d}/op\n", .{
             result.ops_per_iter,
             time.value,
             time.unit,
             mem.value,
             mem.unit,
+            result.allocs_per_op,
         });
     }
 
     /// Print Markdown table header
     pub fn printMarkdownHeader() void {
-        std.debug.print("| Benchmark | Operations | Time/op | Memory/op |\n", .{});
-        std.debug.print("|-----------|------------|---------|----------|\n", .{});
+        std.debug.print("| Benchmark | Operations | Time/op | Memory/op | Allocs/op\n", .{});
+        std.debug.print("|-----------|------------|---------|----------|----------|\n", .{});
     }
 
     fn printResultMarkdown(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
         const mem = formatMemory(result.avg_bytes);
 
-        std.debug.print("| {s} | {d} | {d:.3} {s}/op | {d:.3} {s}/op |\n", .{
+        std.debug.print("| {s} | {d} | {d:.3} {s}/op | {d:.3} {s}/op | {d}/op |\n", .{
             result.name,
             result.ops_per_iter,
             time.value,
             time.unit,
             mem.value,
             mem.unit,
+            result.allocs_per_op,
         });
     }
 
@@ -265,6 +275,7 @@ pub const Benchmark = struct {
         std.debug.print("      <th>Operations</th>\n", .{});
         std.debug.print("      <th>Time/op</th>\n", .{});
         std.debug.print("      <th>Memory/op</th>\n", .{});
+        std.debug.print("      <th>Allocs/op</th>\n", .{});
         std.debug.print("    </tr>\n", .{});
     }
 
@@ -284,6 +295,7 @@ pub const Benchmark = struct {
         std.debug.print("    <td>{d}</td>\n", .{result.ops_per_iter});
         std.debug.print("    <td>{d:.3} {s}/op</td>\n", .{ time.value, time.unit });
         std.debug.print("    <td>{d:.3} {s}/op</td>\n", .{ mem.value, mem.unit });
+        std.debug.print("    <td>{d}/op</td>\n", .{result.allocs_per_op});
         std.debug.print("  </tr>\n", .{});
     }
 

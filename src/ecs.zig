@@ -392,6 +392,7 @@ test "Query with just Entity" {
         _ = q.entity;
         count += 1;
     }
+    std.debug.print("Query with just Entity TEST\n", .{});
     std.debug.print("Counted {d} entities\n", .{count});
     try std.testing.expect(count == amount);
 }
@@ -411,5 +412,6 @@ test "Create entity using create() with null or empty" {
         _ = q.entity;
         count += 1;
     }
+    std.debug.print("Create entity using create() with null or empty TEST\n", .{});
     std.debug.print("Counted {d} entities\n", .{count});
 }
