@@ -1,4 +1,4 @@
-# zevy_ecs ECS
+# zevy_ecs
 
 zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
 
