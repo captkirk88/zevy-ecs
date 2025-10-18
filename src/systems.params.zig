@@ -70,9 +70,7 @@ pub const EventWriterSystemParam = struct {
     pub fn apply(e: *ecs.Manager, comptime T: type) systems.EventWriter(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
-            _ = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
-            // Get the resource again after adding it
-            const stored_event_store = e.getResource(events.EventStore(T)) orelse @panic("Failed to get event store after adding");
+            const stored_event_store = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
             return systems.EventWriter(T){ .event_store = stored_event_store };
         };
         return systems.EventWriter(T){ .event_store = event_store };
@@ -110,9 +108,11 @@ pub const ResourceSystemParam = struct {
         }
     }
 
-    pub fn unalloc(e: *ecs.ECS, ptr: *anyopaque, comptime T: type) void {
-        const res_type = ResourceSystemParam.analyze(T);
-        if (res_type == null) @compileError("Cannot unalloc non-resource type");
+    pub fn unalloc(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        const res_type = comptime ResourceSystemParam.analyze(T);
+        if (res_type == null) {
+            std.debug.panic("Cannot unalloc non-resource type '{s}'", .{@typeName(T)});
+        }
         e.allocator.destroy(@as(*systems.Res(res_type.?), ptr));
     }
 };

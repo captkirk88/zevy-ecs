@@ -342,7 +342,7 @@ const CollisionEvent = struct {
 // System that writes events
 fn collisionDetectionSystem(
     manager: *zevy_ecs.Manager,
-    writer: zevy_ecs.EventWriter(CollisionEvent),
+    writer: zevy_ecs.EventWriter(CollisionEvent), // will add EventStore resource for CollisionEvent if not present
 ) void {
     _ = manager;
     // Emit event
@@ -355,13 +355,14 @@ fn collisionDetectionSystem(
 // System that reads events
 fn collisionResponseSystem(
     manager: *zevy_ecs.Manager,
-    reader: zevy_ecs.EventReader(CollisionEvent),
+    reader: zevy_ecs.EventReader(CollisionEvent), // will add EventStore resource for CollisionEvent if not present
 ) void {
     _ = manager;
     while (reader.read()) |event| {
         std.debug.print("Collision between {d} and {d}\n",
             .{ event.data.entity_a.id, event.data.entity_b.id });
-        event_reader.markHandled();
+            event.handled = true; // Mark handled if this event type won't be processed again in another system
+            // Note: Alternatively, you can call reader.markHandled() after processing all events
     }
 }
 
