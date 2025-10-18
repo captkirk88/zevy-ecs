@@ -443,6 +443,11 @@ pub const LocalSystemParam = struct {
         return &static_storage.local;
     }
 };
+
+const CustomParamRegistry = zevy_ecs.mergeSystemParamRegistries(
+    zevy_ecs.DefaultParamRegistry,
+    .{ LocalSystemParam },
+);
 ```
 
 ### Component Serialization
