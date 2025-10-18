@@ -12,6 +12,7 @@ pub const Manager = ecs.Manager;
 pub const Entity = ecs.Entity;
 pub const World = world.World;
 pub const System = sys.System;
+pub const SystemHandle = sys.SystemHandle;
 pub const ToSystem = sys.ToSystem;
 pub const ToSystemWithArgs = sys.ToSystemWithArgs;
 pub const pipe = sys.pipe;

@@ -5,8 +5,6 @@ const events = @import("events.zig");
 const registry = @import("systems.registry.zig");
 const reflect = @import("reflect.zig");
 
-pub const SystemError = anyerror;
-
 pub const SystemHandle = usize;
 
 /// Represents a cached, type-erased system ready to run on an ECS instance.
