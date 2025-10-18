@@ -74,6 +74,7 @@ pub const Manager = struct {
                 entry.deinit(self.allocator);
             }
         }
+        self.resources.clearAndFree();
         self.resources.deinit();
 
         for (self.systems.items) |item| {
@@ -306,11 +307,11 @@ pub const Manager = struct {
     }
 
     /// List all resource type names currently stored in the ECS.
-    pub fn listResourceTypes(self: *Manager) std.ArrayList([]const u8) {
-        var types = std.ArrayList([]const u8).initCapacity(self.allocator, self.resources.count()) catch |err| @panic(@errorName(err));
+    pub fn listResourceTypes(self: *Manager, allocator: std.mem.Allocator) std.ArrayList([]const u8) {
+        var types = std.ArrayList([]const u8).initCapacity(allocator, self.resources.count()) catch |err| @panic(@errorName(err));
         var it = self.resources.valueIterator();
         while (it.next()) |resource| {
-            types.append(self.allocator, resource.type_name) catch |err| @panic(@errorName(err));
+            types.append(allocator, resource.type_name) catch |err| @panic(@errorName(err));
         }
         return types;
     }

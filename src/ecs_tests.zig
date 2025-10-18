@@ -321,7 +321,7 @@ test "Manager - listResourceTypes" {
     const score: i32 = 1000;
     _ = try manager.addResource(i32, score);
 
-    var types = manager.listResourceTypes();
+    var types = manager.listResourceTypes(std.testing.allocator);
     defer types.deinit(std.testing.allocator);
 
     try std.testing.expect(types.items.len == 2);
