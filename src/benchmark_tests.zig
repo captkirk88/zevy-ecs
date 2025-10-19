@@ -4,7 +4,7 @@ const Benchmark = benchmark.Benchmark;
 const root = @import("root.zig");
 const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
-const Entity = @import("ecs.zig").Entity;
+const Entity = ecs.Entity;
 const Query = root.Query;
 
 // Test components
@@ -277,22 +277,22 @@ test "ECS Benchmark - Mixed Systems" {
     std.debug.print("\n", .{});
 }
 
-fn setupMixedSystems(e: *Manager) [7]ecs.SystemHandle {
+fn setupMixedSystems(e: *Manager) [7]root.UntypedSystemHandle {
     const DefaultRegistry = @import("root.zig").DefaultParamRegistry;
-    var results: [7]ecs.SystemHandle = undefined;
-    results[0] = e.createSystemCached(systemMovement, DefaultRegistry);
-    results[1] = e.createSystemCached(systemHealthRegen, DefaultRegistry);
-    results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry);
-    results[3] = e.createSystemCached(systemDamageNoArmor, DefaultRegistry);
-    results[4] = e.createSystemCached(systemTeamCollision, DefaultRegistry);
-    results[5] = e.createSystemCached(systemTargetTracking, DefaultRegistry);
-    results[6] = e.createSystemCached(systemVelocityDamping, DefaultRegistry);
+    var results: [7]root.UntypedSystemHandle = undefined;
+    results[0] = e.createSystemCached(systemMovement, DefaultRegistry).eraseType();
+    results[1] = e.createSystemCached(systemHealthRegen, DefaultRegistry).eraseType();
+    results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry).eraseType();
+    results[3] = e.createSystemCached(systemDamageNoArmor, DefaultRegistry).eraseType();
+    results[4] = e.createSystemCached(systemTeamCollision, DefaultRegistry).eraseType();
+    results[5] = e.createSystemCached(systemTargetTracking, DefaultRegistry).eraseType();
+    results[6] = e.createSystemCached(systemVelocityDamping, DefaultRegistry).eraseType();
     return results;
 }
 
-fn benchMixedSystems(e: *Manager, systems: *const [7]ecs.SystemHandle) void {
+fn benchMixedSystems(e: *Manager, systems: *const [7]root.UntypedSystemHandle) void {
     for (systems) |sys_id| {
-        _ = e.runSystem(void, sys_id) catch |err| {
+        _ = e.runSystemUntyped(void, sys_id) catch |err| {
             std.debug.print("Error running system {d}: {s}\n", .{ sys_id, @errorName(err) });
             break;
         };

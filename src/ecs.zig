@@ -39,8 +39,6 @@ const ResourceEntry = struct {
     }
 };
 
-pub const SystemHandle = sys.SystemHandle;
-
 pub const Manager = struct {
     allocator: std.mem.Allocator,
     next_entity_id: u32,
@@ -349,21 +347,34 @@ pub const Manager = struct {
     /// Create and cache a system from a function and parameter registry.
     /// The system function should match the expected signature for systems (see `createSystem`).
     /// The returned SystemHandle can be used to run the system later.
-    pub fn createSystemCached(self: *Manager, comptime system_fn: anytype, comptime ParamRegistry: type) SystemHandle {
+    pub fn createSystemCached(self: *Manager, comptime system_fn: anytype, comptime ParamRegistry: type) sys.SystemHandle(sys.ToSystemReturnType(system_fn)) {
+        const ReturnType = sys.ToSystemReturnType(system_fn);
         const s = self.createSystem(system_fn, ParamRegistry);
         const sys_ptr = self.allocator.create(@TypeOf(s)) catch |err| @panic(@errorName(err));
         sys_ptr.* = s;
         const anyopaque_ptr: ?*anyopaque = @ptrCast(sys_ptr);
         self.systems.append(self.allocator, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        const handle: SystemHandle = self.systems.items.len - 1;
-        std.log.debug("Created system handle {} for function: {s}", .{ handle, @typeName(@TypeOf(system_fn)) });
+        const handle = sys.SystemHandle(ReturnType){ .handle = self.systems.items.len - 1 };
+        std.log.debug("Created system handle {} for function: {s}", .{ handle.handle, @typeName(@TypeOf(system_fn)) });
         return handle;
     }
 
     /// Run a cached system by its SystemHandle.
-    pub fn runSystem(self: *Manager, comptime ReturnType: type, sys_handle: SystemHandle) anyerror!ReturnType {
-        if (sys_handle >= self.systems.items.len) return error.InvalidSystemHandle;
-        const sys_ptr = self.systems.items[sys_handle];
+    /// The return type is automatically inferred from the typed handle.
+    pub fn runSystem(self: *Manager, sys_handle: anytype) anyerror!@TypeOf(sys_handle).return_type {
+        const ReturnType = @TypeOf(sys_handle).return_type;
+        if (sys_handle.handle >= self.systems.items.len) return error.InvalidSystemHandle;
+        const sys_ptr = self.systems.items[sys_handle.handle];
+        if (sys_ptr == null) return error.NullSystemPointer;
+        const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr.?));
+        return try s.run(self, s.ctx);
+    }
+
+    /// Run a cached system by its untyped handle.
+    /// Requires explicit ReturnType specification due to type erasure.
+    pub fn runSystemUntyped(self: *Manager, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
+        if (sys_handle.handle >= self.systems.items.len) return error.InvalidSystemHandle;
+        const sys_ptr = self.systems.items[sys_handle.handle];
         if (sys_ptr == null) return error.NullSystemPointer;
         const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr.?));
         return try s.run(self, s.ctx);
@@ -371,11 +382,11 @@ pub const Manager = struct {
 
     /// Cache an existing system pointer.
     /// The returned SystemHandle can be used to run the system later.
-    pub fn cacheSystem(self: *Manager, comptime RT: type, system: *sys.System(RT)) SystemHandle {
+    pub fn cacheSystem(self: *Manager, comptime RT: type, system: *sys.System(RT)) sys.SystemHandle(RT) {
         const sys_ptr = @constCast(system);
         const anyopaque_ptr: ?*anyopaque = @ptrCast(sys_ptr);
         self.systems.append(self.allocator, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        return SystemHandle{ .handle = self.systems.items.len - 1 };
+        return sys.SystemHandle(RT){ .handle = self.systems.items.len - 1 };
     }
 };
 

@@ -51,7 +51,7 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 ### Installation
 
 ```zig
-zig fetch --save git+https://github.com/captkirk88/zevy-ecs.git
+zig fetch --save git+https://github.com/captkirk88/zevy_ecs
 ```
 
 And in your `build.zig`:
@@ -245,9 +245,7 @@ var entity_query = manager.query(
         pos: Position,
     },
     struct {},
-);
-
-while (entity_query.next()) |item| {
+);while (entity_query.next()) |item| {
     std.debug.print("Entity {d} at ({d}, {d})\n",
         .{ item.entity.id, item.pos.x, item.pos.y });
 }
@@ -306,7 +304,7 @@ pub fn main() !void {
 
     // Or cache and reuse systems
     const handle = manager.createSystemCached(damageSystem, zevy_ecs.DefaultParamRegistry);
-    try manager.runSystem(void, handle);
+    try manager.runSystem(handle);
 }
 ```
 
@@ -534,34 +532,34 @@ zevy_ecs comes with the following predefined stages (in execution order):
 
 ```zig
 const std = @import("std");
-const zevy = @import("zevy_ecs");
+const zevy_ecs = @import("zevy_ecs");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var manager = try zevy.Manager.init(allocator);
+    var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    var scheduler = try zevy_ecs.Scheduler.init(allocator, &manager);
     defer scheduler.deinit();
 
     // Add systems to stages using Stage() function
-    const movement_handle = manager.createSystemCached(movementSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(zevy.Stages.Update), movement_handle);
+    const movement_handle = manager.createSystemCached(movementSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Update), movement_handle);
 
-    const render_handle = manager.createSystemCached(renderSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(zevy.Stages.Draw), render_handle);
+    const render_handle = manager.createSystemCached(renderSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Draw), render_handle);
 
     // Run all systems in a specific stage
-    try scheduler.runStage(&manager, zevy.Stage(zevy.Stages.Update));
+    try scheduler.runStage(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update));
 
     // Run all systems in a range of stages
-    try scheduler.runStages(&manager, zevy.Stage(zevy.Stages.First), zevy.Stage(zevy.Stages.Last));
+    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
 }
 
 fn movementSystem(
-    manager: *zevy.Manager,
-    query: zevy.Query(struct { pos: Position, vel: Velocity }, .{}),
+    manager: *zevy_ecs.Manager,
+    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
 ) void {
     _ = manager;
     while (query.next()) |item| {
@@ -571,8 +569,8 @@ fn movementSystem(
 }
 
 fn renderSystem(
-    manager: *zevy.Manager,
-    query: zevy.Query(struct { pos: Position }, .{}),
+    manager: *zevy_ecs.Manager,
+    query: zevy_ecs.Query(struct { pos: Position }, .{}),
 ) void {
     _ = manager;
     while (query.next()) |item| {
@@ -586,27 +584,27 @@ fn renderSystem(
 Stages are fully extensible! You can create custom stage types with explicit priorities for controlled ordering, or without priorities for hash-based IDs.
 
 ```zig
-const zevy = @import("zevy_ecs");
+const zevy_ecs = @import("zevy_ecs");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var manager = try zevy.Manager.init(allocator);
+    var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    var scheduler = try zevy_ecs.Scheduler.init(allocator, &manager);
     defer scheduler.deinit();
 
     // Define custom stages with explicit priorities for controlled ordering
     const CustomStages = struct {
         pub const Physics = struct {
-            pub const priority: zevy.StageId = 350_000; // Between Update (300,000) and PostUpdate (400,000)
+            pub const priority: zevy_ecs.StageId = 350_000; // Between Update (300,000) and PostUpdate (400,000)
         };
         pub const AI = struct {
-            pub const priority: zevy.StageId = 360_000;
+            pub const priority: zevy_ecs.StageId = 360_000;
         };
         pub const Animation = struct {
-            pub const priority: zevy.StageId = 370_000;
+            pub const priority: zevy_ecs.StageId = 370_000;
         };
     };
 
@@ -617,22 +615,22 @@ pub fn main() !void {
     };
 
     // Add systems to custom stages using Stage() function
-    const physics_handle = manager.createSystemCached(physicsSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(CustomStages.Physics), physics_handle);
+    const physics_handle = manager.createSystemCached(physicsSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(CustomStages.Physics), physics_handle);
 
-    const ai_handle = manager.createSystemCached(aiSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(CustomStages.AI), ai_handle);
+    const ai_handle = manager.createSystemCached(aiSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(CustomStages.AI), ai_handle);
 
-    const custom_handle = manager.createSystemCached(customSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(HashStages.CustomLogic), custom_handle);
+    const custom_handle = manager.createSystemCached(customSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(HashStages.CustomLogic), custom_handle);
 
     // Run stages in a range (includes all custom stages in the range)
-    try scheduler.runStages(&manager, zevy.Stage(zevy.Stages.Update), zevy.Stage(zevy.Stages.PostUpdate));
+    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update), zevy_ecs.Stage(zevy_ecs.Stages.PostUpdate));
 }
 
 fn physicsSystem(
-    manager: *zevy.Manager,
-    query: zevy.Query(struct { pos: Position, vel: Velocity }, .{}),
+    manager: *zevy_ecs.Manager,
+    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
 ) void {
     _ = manager;
     while (query.next()) |item| {
@@ -641,8 +639,8 @@ fn physicsSystem(
 }
 
 fn aiSystem(
-    manager: *zevy.Manager,
-    query: zevy.Query(struct { pos: Position }, .{}),
+    manager: *zevy_ecs.Manager,
+    query: zevy_ecs.Query(struct { pos: Position }, .{}),
 ) void {
     _ = manager;
     // AI logic here
@@ -650,7 +648,7 @@ fn aiSystem(
 }
 
 fn customSystem(
-    manager: *zevy.Manager,
+    manager: *zevy_ecs.Manager,
 ) void {
     _ = manager;
     // Custom logic here
@@ -659,10 +657,10 @@ fn customSystem(
 
 #### State Management
 
-zevy_ecs provides powerful enum-based state management with automatic state transitions and lifecycle hooks. See [STAGE_SYSTEM.md](STAGE_SYSTEM.md) for complete documentation.
+zevy_ecs provides powerful enum-based state management with automatic state transitions and lifecycle hooks.
 
 ```zig
-const zevy = @import("zevy_ecs");
+const zevy_ecs = @import("zevy_ecs");
 
 const GameState = enum {
     MainMenu,
@@ -673,10 +671,10 @@ const GameState = enum {
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var manager = try zevy.Manager.init(allocator);
+    var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    var scheduler = try zevy_ecs.Scheduler.init(allocator, &manager);
     defer scheduler.deinit();
 
     // Register state type (automatically adds StateManager resource)
@@ -686,25 +684,25 @@ pub fn main() !void {
     try scheduler.transitionTo(GameState, .MainMenu);
 
     // Add state-specific systems
-    const menu_handle = manager.createSystemCached(menuSystem, zevy.DefaultParamRegistry);
-    const game_handle = manager.createSystemCached(gameplaySystem, zevy.DefaultParamRegistry);
+    const menu_handle = manager.createSystemCached(menuSystem, zevy_ecs.DefaultParamRegistry);
+    const game_handle = manager.createSystemCached(gameplaySystem, zevy_ecs.DefaultParamRegistry);
 
     // Systems run when entering/exiting states
-    scheduler.addSystem(zevy.OnEnter(GameState.Playing), game_handle);
-    scheduler.addSystem(zevy.OnExit(GameState.Playing), cleanup_handle);
+    scheduler.addSystem(zevy_ecs.OnEnter(GameState.Playing), game_handle);
+    scheduler.addSystem(zevy_ecs.OnExit(GameState.Playing), cleanup_handle);
 
     // Systems run while in a specific state (call manually in game loop)
-    scheduler.addSystem(zevy.InState(GameState.MainMenu), menu_handle);
-    scheduler.addSystem(zevy.InState(GameState.Playing), game_handle);
+    scheduler.addSystem(zevy_ecs.InState(GameState.MainMenu), menu_handle);
+    scheduler.addSystem(zevy_ecs.InState(GameState.Playing), game_handle);
 
     // In your game loop, run systems for the active state
     try scheduler.runActiveStateSystems(GameState);
 }
 
 fn menuSystem(
-    manager: *zevy.Manager,
-    state: zevy.State(GameState),
-    next: *zevy.NextState(GameState),
+    manager: *zevy_ecs.Manager,
+    state: zevy_ecs.State(GameState),
+    next: *zevy_ecs.NextState(GameState),
 ) void {
     _ = manager;
     if (state.isActive(.MainMenu)) {
@@ -715,8 +713,8 @@ fn menuSystem(
 }
 
 fn gameplaySystem(
-    manager: *zevy.Manager,
-    query: zevy.Query(struct { pos: Position, vel: Velocity }, .{}),
+    manager: *zevy_ecs.Manager,
+    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
 ) void {
     _ = manager;
     while (query.next()) |item| {
@@ -731,7 +729,7 @@ fn gameplaySystem(
 The Scheduler can automatically set up event handling with cleanup:
 
 ```zig
-const zevy = @import("zevy_ecs");
+const zevy_ecs = @import("zevy_ecs");
 
 const InputEvent = struct {
     key: u32,
@@ -741,38 +739,38 @@ const InputEvent = struct {
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var manager = try zevy.Manager.init(allocator);
+    var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    var scheduler = try zevy_ecs.Scheduler.init(allocator, &manager);
     defer scheduler.deinit();
 
     // Register event type - creates EventStore resource and adds cleanup system
     try scheduler.registerEvent(&manager, InputEvent);
 
     // Add system that writes events
-    const input_handle = manager.createSystemCached(inputSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(zevy.Stages.First), input_handle);
+    const input_handle = manager.createSystemCached(inputSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.First), input_handle);
 
     // Add system that reads events
-    const handler_handle = manager.createSystemCached(inputHandlerSystem, zevy.DefaultParamRegistry);
-    scheduler.addSystem(zevy.Stage(zevy.Stages.Update), handler_handle);
+    const handler_handle = manager.createSystemCached(inputHandlerSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Update), handler_handle);
 
     // Run the stages - cleanup happens automatically in Last stage
-    try scheduler.runStages(&manager, zevy.Stage(zevy.Stages.First), zevy.Stage(zevy.Stages.Last));
+    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
 }
 
 fn inputSystem(
-    manager: *zevy.Manager,
-    writer: zevy.EventWriter(InputEvent),
+    manager: *zevy_ecs.Manager,
+    writer: zevy_ecs.EventWriter(InputEvent),
 ) void {
     _ = manager;
     writer.write(.{ .key = 32, .pressed = true }); // Space key pressed
 }
 
 fn inputHandlerSystem(
-    manager: *zevy.Manager,
-    reader: zevy.EventReader(InputEvent),
+    manager: *zevy_ecs.Manager,
+    reader: zevy_ecs.EventReader(InputEvent),
 ) void {
     _ = manager;
     while (reader.read()) |event| {
@@ -787,15 +785,15 @@ fn inputHandlerSystem(
 You can inspect the scheduler's current configuration:
 
 ```zig
-const zevy = @import("zevy_ecs");
+const zevy_ecs = @import("zevy_ecs");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    var manager = try zevy.Manager.init(allocator);
+    var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    var scheduler = try zevy_ecs.Scheduler.init(allocator, &manager);
     defer scheduler.deinit();
 
     // Get information about all stages

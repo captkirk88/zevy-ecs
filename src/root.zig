@@ -17,12 +17,16 @@ pub const Entity = ecs.Entity;
 pub const World = world.World;
 /// System type
 pub const System = sys.System;
-/// Identifier for a cached system
+/// Identifier for a cached system (generic, preserves return type)
 pub const SystemHandle = sys.SystemHandle;
+/// Type-erased system handle for storage
+pub const UntypedSystemHandle = sys.UntypedSystemHandle;
 /// Function to create a system from a function
 pub const ToSystem = sys.ToSystem;
 /// Function to create a system from a function with arguments
 pub const ToSystemWithArgs = sys.ToSystemWithArgs;
+/// Function to infer the return type of a system function
+pub const ToSystemReturnType = sys.ToSystemReturnType;
 /// Function to create a pipe system from two systems
 pub const pipe = sys.pipe;
 /// Function to run a system only if a condition is met

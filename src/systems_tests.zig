@@ -187,7 +187,7 @@ test "System - createSystemCached" {
     defer manager.deinit();
 
     const handle = manager.createSystemCached(simpleSystem, DefaultRegistry);
-    _ = try manager.runSystem(void, handle);
+    _ = try manager.runSystem(handle);
 }
 
 test "System - ToSystemWithArgs" {
@@ -257,5 +257,5 @@ test "System - multiple cached systems" {
     const h1 = manager.createSystemCached(simpleSystem, DefaultRegistry);
     const h2 = manager.createSystemCached(resourceSystem, DefaultRegistry);
 
-    try std.testing.expect(h1 != h2);
+    try std.testing.expect(h1.handle != h2.handle);
 }

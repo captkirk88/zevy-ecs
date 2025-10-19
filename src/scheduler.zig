@@ -106,7 +106,7 @@ pub const Stages = struct {
 /// Includes integrated state management for application states.
 pub const Scheduler = struct {
     allocator: std.mem.Allocator,
-    systems: std.AutoHashMap(StageId, std.ArrayList(ecs_mod.SystemHandle)),
+    systems: std.AutoHashMap(StageId, std.ArrayList(systems.UntypedSystemHandle)),
     ecs: *ecs_mod.Manager,
     // State management - stores state enum type hash and current value
     states: std.AutoHashMap(u64, StateInfo),
@@ -149,9 +149,9 @@ pub const Scheduler = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator, ecs: *ecs_mod.Manager) !Scheduler {
-        var _systems = std.AutoHashMap(StageId, std.ArrayList(ecs_mod.SystemHandle)).init(allocator);
+        var _systems = std.AutoHashMap(StageId, std.ArrayList(systems.UntypedSystemHandle)).init(allocator);
         for (predefined_stages) |stage| {
-            const new_list = std.ArrayList(ecs_mod.SystemHandle).initCapacity(allocator, 0) catch |err| {
+            const new_list = std.ArrayList(systems.UntypedSystemHandle).initCapacity(allocator, 0) catch |err| {
                 _systems.deinit();
                 return err;
             };
@@ -177,12 +177,16 @@ pub const Scheduler = struct {
         self.states.deinit();
     }
 
-    pub fn addSystem(self: *Scheduler, stage: StageId, system_handle: ecs_mod.SystemHandle) void {
+    pub fn addSystem(self: *Scheduler, stage: StageId, system_handle: anytype) void {
         const gop = self.systems.getOrPut(stage) catch |err| @panic(@errorName(err));
         if (!gop.found_existing) {
-            gop.value_ptr.* = std.ArrayList(ecs_mod.SystemHandle).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
+            gop.value_ptr.* = std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
         }
-        gop.value_ptr.append(self.allocator, system_handle) catch |err| @panic(@errorName(err));
+        const untyped_handle = if (@TypeOf(system_handle) == systems.UntypedSystemHandle)
+            system_handle
+        else
+            system_handle.eraseType();
+        gop.value_ptr.append(self.allocator, untyped_handle) catch |err| @panic(@errorName(err));
     }
 
     pub fn addStage(self: *Scheduler, stage: StageId) error{ InvalidStageBounds, StageExists, OutOfMemory }!void {
@@ -191,7 +195,7 @@ pub const Scheduler = struct {
             if (stage < Stage(Stages.Min) or stage > Stage(Stages.Max)) {
                 return error.InvalidStageBounds;
             }
-            gop.value_ptr.* = try std.ArrayList(ecs_mod.SystemHandle).initCapacity(self.allocator, 4);
+            gop.value_ptr.* = try std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4);
         } else {
             return error.StageExists;
         }
@@ -200,7 +204,7 @@ pub const Scheduler = struct {
     pub fn runStage(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) anyerror!void {
         if (self.systems.get(stage)) |list| {
             for (list.items) |handle| {
-                try ecs.runSystem(void, handle);
+                try ecs.runSystemUntyped(void, handle);
             }
         } else {
             return error.StageNotFound;

@@ -6,7 +6,39 @@ const registry = @import("systems.registry.zig");
 const scheduler_mod = @import("scheduler.zig");
 const reflect = @import("reflect.zig");
 
-pub const SystemHandle = usize;
+/// A handle to a cached system.
+/// Stores the index and optionally the return type at compile time.
+pub fn SystemHandle(comptime ReturnType: type) type {
+    return struct {
+        handle: usize,
+
+        pub const return_type = ReturnType;
+
+        pub fn eraseType(self: @This()) UntypedSystemHandle {
+            return UntypedSystemHandle{ .handle = self.handle };
+        }
+    };
+}
+
+/// Type-erased system handle for storage in containers.
+pub const UntypedSystemHandle = struct {
+    handle: usize,
+
+    pub fn formatNumber(self: UntypedSystemHandle, writer: anytype, _: std.fmt.Number) !void {
+        try writer.print("{d}", .{self.handle});
+    }
+
+    pub fn format(self: UntypedSystemHandle, comptime fmt_str: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = options;
+        if (fmt_str.len > 0 and fmt_str[0] == 'd') {
+            // For {d}, just print the handle number
+            try writer.print("{d}", .{self.handle});
+        } else {
+            // For other formats, print the full struct
+            try writer.print("SystemHandle{{ .handle = {} }}", .{self.handle});
+        }
+    }
+};
 
 /// Represents a cached, type-erased system ready to run on an ECS instance.
 pub fn System(comptime ReturnType: type) type {
