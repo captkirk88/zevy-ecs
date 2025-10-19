@@ -13,6 +13,35 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 - **Component serialization**: Built-in support for serializing/deserializing components
 - **Zero runtime overhead**: All parameter resolution happens at compile time
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Basic Usage](#basic-usage)
+- [Core Concepts](#core-concepts)
+  - [Entities](#entities)
+  - [Components](#components)
+  - [Queries](#queries)
+  - [Systems](#systems)
+  - [System Parameters](#system-parameters)
+  - [Resources](#resources)
+  - [Events](#events)
+- [Advanced Features](#advanced-features)
+  - [System Composition](#system-composition)
+  - [Custom System Registries](#custom-system-registries)
+  - [Component Serialization](#component-serialization)
+  - [Scheduler](#scheduler)
+    - [Predefined Stages](#predefined-stages)
+    - [Basic Usage](#basic-usage-1)
+    - [Creating Custom Stages](#creating-custom-stages)
+    - [State Management](#state-management)
+    - [Event Registration](#event-registration)
+    - [Getting Stage Information](#getting-stage-information)
+- [Performance](#performance)
+- [License](#license)
+- [Contributing](#contributing)
+
 ## Quick Start
 
 ## Requirements
@@ -811,7 +840,7 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Contributing
 
