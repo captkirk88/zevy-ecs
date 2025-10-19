@@ -4,8 +4,10 @@ const reflect = @import("reflect.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
 
-/// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter
+/// Default system parameter registry including Query, Res, Local, EventReader, EventWriter, State, and NextState
 pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
+    params.StateSystemParam,
+    params.NextStateSystemParam,
     params.EventReaderSystemParam,
     params.EventWriterSystemParam,
     params.ResourceSystemParam,
@@ -55,7 +57,7 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
                     return SystemParam.apply(ecs_instance, param);
                 }
             }
-            @compileError(std.fmt.comptimePrint("No registered SystemParam can handle type: ", .{@typeName(ParamType)}));
+            @compileError(std.fmt.comptimePrint("No registered SystemParam can handle type: {s}", .{@typeName(ParamType)}));
         }
     };
 }
@@ -121,8 +123,9 @@ test "merged SystemParamRegistry" {
             return 1;
         }
     };
-    const merge = MergedSystemParamRegistry(.{ CustomParam, DefaultParamRegistry });
-    try std.testing.expect(merge.len() == 6);
+    const CustomRegistry = SystemParamRegistry(&[_]type{CustomParam});
+    const merge = MergedSystemParamRegistry(.{ DefaultParamRegistry, CustomRegistry });
+    try std.testing.expect(merge.len() == 8); // State, NextState, EventReader, EventWriter, Resource, Query, Local, CustomParam
 
     // Test that we can apply a custom param (returns value)
     const custom_val = merge.apply(&ecs_instance, i32);

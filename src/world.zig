@@ -3,21 +3,7 @@ const errors = @import("errors.zig");
 const ArchetypeStorage = @import("archetype_storage.zig").ArchetypeStorage;
 const Entity = @import("ecs.zig").Entity;
 const Query = @import("query.zig").Query;
-const hash = std.hash;
-
-pub const TypeInfo = struct {
-    hash: u64,
-    size: usize,
-    name: []const u8,
-};
-
-pub fn getTypeInfo(comptime T: type) TypeInfo {
-    return TypeInfo{
-        .hash = comptime hash.Wyhash.hash(0, @typeName(T)),
-        .size = @sizeOf(T),
-        .name = @typeName(T),
-    };
-}
+const reflect = @import("reflect.zig");
 
 /// Represents a component instance with its type information and data
 ///
@@ -45,7 +31,7 @@ pub const ComponentInstance = struct {
     data: []const u8,
 
     pub fn from(comptime T: type, value: *const T) ComponentInstance {
-        const info = getTypeInfo(T);
+        const info = comptime reflect.getTypeInfo(T);
         return ComponentInstance{
             .hash = info.hash,
             .size = info.size,
@@ -56,7 +42,7 @@ pub const ComponentInstance = struct {
     /// Get the component data as a specific type T
     /// Returns null if the type hash doesn't match
     pub fn as(self: ComponentInstance, comptime T: type) ?*const T {
-        const expected_info = getTypeInfo(T);
+        const expected_info = reflect.getTypeInfo(T);
         if (self.hash == expected_info.hash and self.size == expected_info.size) {
             return @alignCast(std.mem.bytesAsValue(T, self.data[0..self.size]));
         }
@@ -68,7 +54,7 @@ pub const ComponentInstance = struct {
     /// Returns null if the type hash doesn't match
     /// Note: This is unsafe as it allows mutation of the original data
     pub fn asMut(self: ComponentInstance, comptime T: type) ?*T {
-        const expected_info = getTypeInfo(T);
+        const expected_info = reflect.getTypeInfo(T);
         if (self.hash == expected_info.hash and self.size == expected_info.size) {
             return @alignCast(std.mem.bytesAsValue(T, @constCast(self.data[0..self.size])));
         }
@@ -120,7 +106,7 @@ pub const ComponentWriter = struct {
 
     /// Write a component of type T with value
     pub fn writeTypedComponent(self: *ComponentWriter, comptime T: type, value: *const T) !void {
-        const info = getTypeInfo(T);
+        const info = reflect.getTypeInfo(T);
         const bytes = std.mem.asBytes(value);
         const component = ComponentInstance{
             .hash = info.hash,
@@ -198,10 +184,7 @@ pub const World = struct {
     pub fn add(self: *World, entity: Entity, comptime Components: anytype, values: anytype) !void {
         const components_type = if (@typeInfo(@TypeOf(Components)) == .type) Components else @TypeOf(Components);
         const info = @typeInfo(components_type);
-        comptime {
-            if (info != .@"struct") @compileError("Components must be a tuple of types");
-            if (!info.@"struct".is_tuple) @compileError("Components must be a tuple of types");
-        }
+        comptime if (info != .@"struct" and !info.@"struct".is_tuple) @compileError("Components must be a tuple of types");
         const field_count = info.@"struct".fields.len;
 
         // Check if entity exists (migration path)
@@ -212,7 +195,7 @@ pub const World = struct {
             var heap_data: [field_count][]u8 = undefined;
             inline for (info.@"struct".fields, 0..) |field, i| {
                 const T = field.type;
-                const comp_info = getTypeInfo(T);
+                const comp_info = reflect.getTypeInfo(T);
                 var runtime_value: T = values[i];
                 const bytes = std.mem.asBytes(&runtime_value);
                 heap_data[i] = try self.allocator.alloc(u8, comp_info.size);
@@ -304,7 +287,7 @@ pub const World = struct {
                 var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
-                    const comp_info = getTypeInfo(T);
+                    const comp_info = reflect.getTypeInfo(T);
                     hash_index_pairs[i] = .{ .hash = comp_info.hash, .index = i };
                 }
                 // Sort by hash
@@ -329,7 +312,7 @@ pub const World = struct {
             inline for (sorted_indices, 0..) |orig_idx, sorted_idx| {
                 const field = info.@"struct".fields[orig_idx];
                 const T = field.type;
-                const comp_info = getTypeInfo(T);
+                const comp_info = reflect.getTypeInfo(T);
                 sorted_hashes[sorted_idx] = comp_info.hash;
                 sizes[sorted_idx] = comp_info.size;
 
@@ -344,7 +327,6 @@ pub const World = struct {
             // OPTIMIZATION: Direct archetype insertion (bypasses addEntityToArchetype wrapper)
             const archetype = try self.archetypes.getOrCreateArchetype(stack_signature, &sizes);
 
-            // UNSAFE: Add entity directly with direct memory operations
             const idx = archetype.entities.items.len;
 
             // Ensure capacity first
@@ -397,7 +379,7 @@ pub const World = struct {
                 var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
-                    const comp_info = getTypeInfo(T);
+                    const comp_info = reflect.getTypeInfo(T);
                     hash_index_pairs[i] = .{ .hash = comp_info.hash, .index = i };
                 }
                 const lessThan = struct {
@@ -420,7 +402,7 @@ pub const World = struct {
         inline for (sorted_indices, 0..) |orig_idx, sorted_idx| {
             const field = info.@"struct".fields[orig_idx];
             const T = field.type;
-            const comp_info = getTypeInfo(T);
+            const comp_info = reflect.getTypeInfo(T);
             sorted_hashes[sorted_idx] = comp_info.hash;
             sizes[sorted_idx] = comp_info.size;
             var runtime_value: T = values[orig_idx];
@@ -480,7 +462,7 @@ pub const World = struct {
 
     /// Get a pointer to component T for an entity, or null if not present
     pub fn get(self: *World, entity: Entity, comptime T: type) ?*T {
-        const info = getTypeInfo(T);
+        const info = reflect.getTypeInfo(T);
         if (self.archetypes.getEntityEntry(entity)) |entry| {
             const arch = entry.archetype;
             var idx: ?usize = null;
@@ -575,7 +557,7 @@ pub const World = struct {
             const src_arch = entry.archetype;
             const src_idx = entry.index;
             // Build new signature: remove T's hash from the current signature
-            const t_info = getTypeInfo(T);
+            const t_info = reflect.getTypeInfo(T);
             const src_types = src_arch.signature.types;
             var new_types = try std.ArrayList(u64).initCapacity(self.allocator, src_types.len);
             defer new_types.deinit(self.allocator);
@@ -615,28 +597,26 @@ pub const World = struct {
     pub fn query(self: *World, comptime Components: anytype, comptime Exclude: anytype) Query(Components, Exclude) {
         const components_type = if (@typeInfo(@TypeOf(Components)) == .type) Components else @TypeOf(Components);
         const info = @typeInfo(components_type);
-        comptime {
-            if (info != .@"struct" or info.@"struct".is_tuple) @compileError("Components must be a struct with named fields of component types");
-        }
+        comptime if (info != .@"struct") @compileError("Components must be a struct with named fields or tuple of types");
+
         const field_count = info.@"struct".fields.len;
         var hashes: [field_count]u64 = undefined;
         inline for (info.@"struct".fields, 0..) |field, i| {
             const T = field.type;
-            const comp_info = getTypeInfo(T);
+            const comp_info = reflect.getTypeInfo(T);
             hashes[i] = comp_info.hash;
         }
         std.sort.insertion(u64, &hashes, {}, std.sort.asc(u64));
 
         const exclude_type = if (@typeInfo(@TypeOf(Exclude)) == .type) Exclude else @TypeOf(Exclude);
         const exclude_info = @typeInfo(exclude_type);
-        comptime {
-            if (exclude_info != .@"struct" or exclude_info.@"struct".is_tuple) @compileError("Exclude must be a struct with named fields of component types");
-        }
+        comptime if (exclude_info != .@"struct") @compileError("Exclude must be a struct with named fields or tuple of types");
+
         const exclude_count = exclude_info.@"struct".fields.len;
         var exclude_hashes: [exclude_count]u64 = undefined;
         inline for (exclude_info.@"struct".fields, 0..) |field, i| {
             const T = field.type;
-            const comp_info = getTypeInfo(T);
+            const comp_info = reflect.getTypeInfo(T);
             exclude_hashes[i] = comp_info.hash;
         }
         std.sort.insertion(u64, &exclude_hashes, {}, std.sort.asc(u64));
@@ -655,7 +635,7 @@ test "ComponentInstance.from creates component correctly" {
     const pos = TestPosition{ .x = 10.0, .y = 20.0 };
     const comp = ComponentInstance.from(TestPosition, &pos);
 
-    const expected_info = getTypeInfo(TestPosition);
+    const expected_info = reflect.getTypeInfo(TestPosition);
     try std.testing.expect(comp.hash == expected_info.hash);
     try std.testing.expect(comp.size == expected_info.size);
     try std.testing.expect(comp.data.len == @sizeOf(TestPosition));

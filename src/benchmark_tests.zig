@@ -43,19 +43,11 @@ const Target = struct {
 
 // Query types
 const MovementQueryInclude = struct { pos: Position, vel: Velocity };
-const MovementQueryExclude = struct {};
-const HealthRegenQueryInclude = struct { health: Health };
-const HealthRegenQueryExclude = struct {};
-const DamageWithArmorQueryInclude = struct { health: Health, armor: Armor, damage: Damage };
-const DamageWithArmorQueryExclude = struct {};
 const DamageNoArmorQueryInclude = struct { health: Health, damage: Damage };
 const DamageNoArmorQueryExclude = struct { armor: Armor };
 const TeamCollisionQueryInclude = struct { pos: Position, team: Team };
-const TeamCollisionQueryExclude = struct {};
 const TargetTrackingQueryInclude = struct { pos: Position, target: Target };
-const TargetTrackingQueryExclude = struct {};
 const VelocityDampingQueryInclude = struct { vel: Velocity };
-const VelocityDampingQueryExclude = struct {};
 
 // Benchmark 1: Entity Creation Performance
 fn benchCreateEntities(manager: *Manager, count: usize) void {
@@ -84,7 +76,7 @@ fn batchCreateEntities(manager: *Manager, count: usize, allocator: std.mem.Alloc
 
 // Benchmark 2: Mixed System Operations
 // System 1: Movement - Update positions based on velocity
-fn systemMovement(e: *Manager, query: Query(MovementQueryInclude, MovementQueryExclude)) void {
+fn systemMovement(e: *Manager, query: Query(MovementQueryInclude, .{})) void {
     _ = e;
     while (query.next()) |item| {
         const pos: *Position = item.pos;
@@ -96,10 +88,10 @@ fn systemMovement(e: *Manager, query: Query(MovementQueryInclude, MovementQueryE
 }
 
 // System 2: Health Regeneration - Regenerate health over time
-fn systemHealthRegen(e: *Manager, query: Query(HealthRegenQueryInclude, HealthRegenQueryExclude)) void {
+fn systemHealthRegen(e: *Manager, query: Query(.{Health}, .{})) void {
     _ = e;
     while (query.next()) |item| {
-        const health: *Health = item.health;
+        const health: *Health = item[0];
         if (health.current < health.max) {
             health.current = @min(health.current + 1, health.max);
         }
@@ -107,12 +99,12 @@ fn systemHealthRegen(e: *Manager, query: Query(HealthRegenQueryInclude, HealthRe
 }
 
 // System 3: Damage Application - Apply damage to entities with armor
-fn systemDamageWithArmor(e: *Manager, query: Query(DamageWithArmorQueryInclude, DamageWithArmorQueryExclude)) void {
+fn systemDamageWithArmor(e: *Manager, query: Query(.{ Health, Damage, Armor }, struct {})) void {
     _ = e;
     while (query.next()) |item| {
-        const health: *Health = item.health;
-        const armor: *Armor = item.armor;
-        const damage: *Damage = item.damage;
+        const health: *Health = item[0];
+        const armor: *Armor = item[2];
+        const damage: *Damage = item[1];
         const actual_damage = if (damage.value > armor.value) damage.value - armor.value else 0;
         if (health.current > actual_damage) {
             health.current -= actual_damage;
@@ -138,7 +130,7 @@ fn systemDamageNoArmor(_: *Manager, query: Query(DamageNoArmorQueryInclude, Dama
 // System 5: Team Collision - Check collisions within same team
 
 // System 5: Team Collision - Check collisions within same team
-fn systemTeamCollision(_: *Manager, query: Query(TeamCollisionQueryInclude, TeamCollisionQueryExclude)) void {
+fn systemTeamCollision(_: *Manager, query: Query(TeamCollisionQueryInclude, .{})) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const team: *Team = item.team;
@@ -150,7 +142,7 @@ fn systemTeamCollision(_: *Manager, query: Query(TeamCollisionQueryInclude, Team
 }
 
 // System 6: Target Tracking - Update target positions
-fn systemTargetTracking(_: *Manager, query: Query(TargetTrackingQueryInclude, TargetTrackingQueryExclude)) void {
+fn systemTargetTracking(_: *Manager, query: Query(TargetTrackingQueryInclude, .{})) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const target: *Target = item.target;
@@ -163,7 +155,7 @@ fn systemTargetTracking(_: *Manager, query: Query(TargetTrackingQueryInclude, Ta
 }
 
 // System 7: Velocity Damping - Apply friction/damping to velocity
-fn systemVelocityDamping(_: *Manager, query: Query(VelocityDampingQueryInclude, VelocityDampingQueryExclude)) void {
+fn systemVelocityDamping(_: *Manager, query: Query(VelocityDampingQueryInclude, .{})) void {
     while (query.next()) |item| {
         const vel: *Velocity = item.vel;
         vel.dx *= 0.99;

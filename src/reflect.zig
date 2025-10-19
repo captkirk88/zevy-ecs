@@ -1,5 +1,21 @@
 const std = @import("std");
 
+pub const TypeInfo = struct {
+    hash: u64,
+    size: usize,
+    name: []const u8,
+    type: type,
+};
+
+pub fn getTypeInfo(comptime T: type) TypeInfo {
+    return TypeInfo{
+        .hash = comptime std.hash.Wyhash.hash(0, @typeName(T)),
+        .size = @sizeOf(T),
+        .name = @typeName(T),
+        .type = T,
+    };
+}
+
 pub fn hasFunc(comptime T: type, comptime func_name: []const u8) bool {
     const type_info = @typeInfo(T);
     if (type_info == .@"struct") {
@@ -146,8 +162,8 @@ test "hasFunc - struct with function" {
         }
     };
 
-    try std.testing.expect(hasFunc(TestStruct, "testMethod"));
-    try std.testing.expect(!hasFunc(TestStruct, "nonExistentMethod"));
+    try std.testing.expect(comptime hasFunc(TestStruct, "testMethod"));
+    try std.testing.expect(comptime !hasFunc(TestStruct, "nonExistentMethod"));
 }
 
 test "hasFunc - pointer to struct" {
@@ -159,8 +175,8 @@ test "hasFunc - pointer to struct" {
         }
     };
 
-    try std.testing.expect(hasFunc(*TestStruct, "testMethod"));
-    try std.testing.expect(!hasFunc(*TestStruct, "nonExistentMethod"));
+    try std.testing.expect(comptime hasFunc(*TestStruct, "testMethod"));
+    try std.testing.expect(comptime !hasFunc(*TestStruct, "nonExistentMethod"));
 }
 
 test "hasField - struct with fields" {
@@ -170,10 +186,10 @@ test "hasField - struct with fields" {
         active: bool,
     };
 
-    try std.testing.expect(hasField(TestStruct, "id"));
-    try std.testing.expect(hasField(TestStruct, "name"));
-    try std.testing.expect(hasField(TestStruct, "active"));
-    try std.testing.expect(!hasField(TestStruct, "nonExistentField"));
+    try std.testing.expect(comptime hasField(TestStruct, "id"));
+    try std.testing.expect(comptime hasField(TestStruct, "name"));
+    try std.testing.expect(comptime hasField(TestStruct, "active"));
+    try std.testing.expect(comptime !hasField(TestStruct, "nonExistentField"));
 }
 
 test "hasField - pointer to struct" {
@@ -183,10 +199,10 @@ test "hasField - pointer to struct" {
         active: bool,
     };
 
-    try std.testing.expect(hasField(*TestStruct, "id"));
-    try std.testing.expect(hasField(*TestStruct, "name"));
-    try std.testing.expect(hasField(*TestStruct, "active"));
-    try std.testing.expect(!hasField(*TestStruct, "nonExistentField"));
+    try std.testing.expect(comptime hasField(*TestStruct, "id"));
+    try std.testing.expect(comptime hasField(*TestStruct, "name"));
+    try std.testing.expect(comptime hasField(*TestStruct, "active"));
+    try std.testing.expect(comptime !hasField(*TestStruct, "nonExistentField"));
 }
 
 test "getFields - returns all field names" {
@@ -196,7 +212,7 @@ test "getFields - returns all field names" {
         active: bool,
     };
 
-    const fields = getFields(TestStruct);
+    const fields = comptime getFields(TestStruct);
     try std.testing.expectEqual(@as(usize, 3), fields.len);
 
     // Check that all expected fields are present (order may vary)

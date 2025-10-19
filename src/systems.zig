@@ -3,6 +3,7 @@ const ecs_mod = @import("ecs.zig");
 const world = @import("world.zig");
 const events = @import("events.zig");
 const registry = @import("systems.registry.zig");
+const scheduler_mod = @import("scheduler.zig");
 const reflect = @import("reflect.zig");
 
 pub const SystemHandle = usize;
@@ -254,6 +255,63 @@ pub fn Res(comptime T: type) type {
     };
 }
 
+/// State provides a query for checking if a specific state enum value is active
+/// Use as a system parameter: state: State(GameState)
+/// Where GameState is an enum type
+pub fn State(comptime StateEnum: type) type {
+    // Verify StateEnum is actually an enum at compile time
+    const type_info = @typeInfo(StateEnum);
+    if (type_info != .@"enum") {
+        @compileError("State requires an enum type, got: " ++ @typeName(StateEnum));
+    }
+
+    return struct {
+        const Self = @This();
+        pub const StateEnum_ = StateEnum;
+        pub const _is_state_param = true;
+
+        // Import state module
+        const state_mod = @import("state.zig");
+        state_mgr: *state_mod.StateManager(StateEnum),
+
+        /// Check if a specific state value is currently active
+        pub fn isActive(self: *const Self, state: StateEnum) bool {
+            return self.state_mgr.isInState(state);
+        }
+
+        /// Get the currently active state value
+        pub fn get(self: *const Self) ?StateEnum {
+            return self.state_mgr.getActiveState();
+        }
+    };
+}
+
+/// NextState allows immediate state transitions for a specific enum type
+pub fn NextState(comptime StateEnum: type) type {
+    // Verify StateEnum is actually an enum at compile time
+    const type_info = @typeInfo(StateEnum);
+    if (type_info != .@"enum") {
+        @compileError("NextState requires an enum type, got: " ++ @typeName(StateEnum));
+    }
+
+    return struct {
+        const Self = @This();
+        pub const StateEnum_ = StateEnum;
+        pub const _is_next_state_param = true;
+
+        // Import state module
+        const state_mod = @import("state.zig");
+        state_mgr: *state_mod.StateManager(StateEnum),
+
+        /// Transition to a specific state value immediately
+        pub fn set(self: *Self, state: StateEnum) void {
+            self.state_mgr.transitionTo(state) catch |err| {
+                std.debug.panic("Failed to transition to state: {}", .{err});
+            };
+        }
+    };
+}
+
 /// EventReader provides read-only access to events of type T from the EventStore
 pub fn EventReader(comptime T: type) type {
     return struct {
@@ -419,12 +477,12 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 ///
 /// Example:
 /// ```zig
-/// fn shouldRunSystem(ecs: *ecs_mod.Manager, query: Query(.{pos: Position, vel: Velocity},.{})) bool {
+/// fn shouldRunSystem(ecs: *zevy_ecs.Manager, query: Query(.{pos: Position, vel: Velocity},.{})) bool {
 ///     // Check some condition, e.g., if there are entities with a specific component
 ///     return query.count() > 0;
 /// }
 ///
-/// fn updatePositions(ecs: *ecs_mod.Manager) void {
+/// fn updatePositions(ecs: *zevy_ecs.Manager) void {
 ///     // System logic to update positions
 ///     var query = ecs.query(.{pos: Position, vel: Velocity}, .{});
 ///     while (query.next()) |q| {

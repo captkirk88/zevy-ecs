@@ -78,8 +78,10 @@ pub fn main() !void {
     // Query and iterate over entities
     var query = manager.query(
         struct { pos: Position, vel: Velocity },
-        struct {},
+        .{},
     );
+
+    // var query = manager.query(.{Position, Velocity}, struct {}); // Alternative syntax
 
     while (query.next()) |item| {
         // item.pos is *Position, item.vel is *Velocity
@@ -92,7 +94,7 @@ fn movementSystem(
     manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(
         struct { pos: Position, vel: Velocity }, // Include components
-        struct {}, // No exclusions
+        .{}, // No exclusions
     ),
 ) void {
     _ = manager;
@@ -472,6 +474,308 @@ defer allocator.free(read_comp.data);
 // Access typed data
 if (read_comp.as(Position)) |read_pos| {
     std.debug.print("Position: ({d}, {d})\n", .{ read_pos.x, read_pos.y });
+}
+```
+
+### Scheduler
+
+The Scheduler manages system execution order through stages. Systems are organized into predefined or custom stages that run in a specific order, allowing you to control the flow of your game loop or application.
+
+#### Predefined Stages
+
+zevy_ecs comes with the following predefined stages (in execution order):
+
+- `Stages.PreStartup` - Runs before startup initialization
+- `Stages.Startup` - Initial setup and initialization
+- `Stages.First` - First stage of the main loop
+- `Stages.PreUpdate` - Before main update logic
+- `Stages.Update` - Main game/app logic
+- `Stages.PostUpdate` - After main update logic
+- `Stages.PreDraw` - Before rendering
+- `Stages.Draw` - Rendering stage
+- `Stages.PostDraw` - After rendering
+- `Stages.StateTransition` - Process state transitions
+- `Stages.StateOnExit` - Systems that run when exiting states
+- `Stages.StateOnEnter` - Systems that run when entering states
+- `Stages.StateUpdate` - Systems that run while in states
+- `Stages.Last` - Final stage of the loop
+- `Stages.Exit` - Cleanup and shutdown
+
+#### Basic Usage
+
+```zig
+const std = @import("std");
+const zevy = @import("zevy_ecs");
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy.Manager.init(allocator);
+    defer manager.deinit();
+
+    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    defer scheduler.deinit();
+
+    // Add systems to stages using Stage() function
+    const movement_handle = manager.createSystemCached(movementSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(zevy.Stages.Update), movement_handle);
+
+    const render_handle = manager.createSystemCached(renderSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(zevy.Stages.Draw), render_handle);
+
+    // Run all systems in a specific stage
+    try scheduler.runStage(&manager, zevy.Stage(zevy.Stages.Update));
+
+    // Run all systems in a range of stages
+    try scheduler.runStages(&manager, zevy.Stage(zevy.Stages.First), zevy.Stage(zevy.Stages.Last));
+}
+
+fn movementSystem(
+    manager: *zevy.Manager,
+    query: zevy.Query(struct { pos: Position, vel: Velocity }, .{}),
+) void {
+    _ = manager;
+    while (query.next()) |item| {
+        item.pos.x += item.vel.dx;
+        item.pos.y += item.vel.dy;
+    }
+}
+
+fn renderSystem(
+    manager: *zevy.Manager,
+    query: zevy.Query(struct { pos: Position }, .{}),
+) void {
+    _ = manager;
+    while (query.next()) |item| {
+        std.debug.print("Render at ({d}, {d})\n", .{ item.pos.x, item.pos.y });
+    }
+}
+```
+
+#### Creating Custom Stages
+
+Stages are fully extensible! You can create custom stage types with explicit priorities for controlled ordering, or without priorities for hash-based IDs.
+
+```zig
+const zevy = @import("zevy_ecs");
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy.Manager.init(allocator);
+    defer manager.deinit();
+
+    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    defer scheduler.deinit();
+
+    // Define custom stages with explicit priorities for controlled ordering
+    const CustomStages = struct {
+        pub const Physics = struct {
+            pub const priority: zevy.StageId = 350_000; // Between Update (300,000) and PostUpdate (400,000)
+        };
+        pub const AI = struct {
+            pub const priority: zevy.StageId = 360_000;
+        };
+        pub const Animation = struct {
+            pub const priority: zevy.StageId = 370_000;
+        };
+    };
+
+    // Or define custom stages without priorities (get hash-based IDs in 2M+ range)
+    const HashStages = struct {
+        pub const CustomLogic = struct {}; // Gets unique hash-based ID
+        pub const SpecialEffects = struct {}; // Different hash-based ID
+    };
+
+    // Add systems to custom stages using Stage() function
+    const physics_handle = manager.createSystemCached(physicsSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(CustomStages.Physics), physics_handle);
+
+    const ai_handle = manager.createSystemCached(aiSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(CustomStages.AI), ai_handle);
+
+    const custom_handle = manager.createSystemCached(customSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(HashStages.CustomLogic), custom_handle);
+
+    // Run stages in a range (includes all custom stages in the range)
+    try scheduler.runStages(&manager, zevy.Stage(zevy.Stages.Update), zevy.Stage(zevy.Stages.PostUpdate));
+}
+
+fn physicsSystem(
+    manager: *zevy.Manager,
+    query: zevy.Query(struct { pos: Position, vel: Velocity }, .{}),
+) void {
+    _ = manager;
+    while (query.next()) |item| {
+        item.vel.dy += 9.8; // gravity
+    }
+}
+
+fn aiSystem(
+    manager: *zevy.Manager,
+    query: zevy.Query(struct { pos: Position }, .{}),
+) void {
+    _ = manager;
+    // AI logic here
+    _ = query;
+}
+
+fn customSystem(
+    manager: *zevy.Manager,
+) void {
+    _ = manager;
+    // Custom logic here
+}
+```
+
+#### State Management
+
+zevy_ecs provides powerful enum-based state management with automatic state transitions and lifecycle hooks. See [STAGE_SYSTEM.md](STAGE_SYSTEM.md) for complete documentation.
+
+```zig
+const zevy = @import("zevy_ecs");
+
+const GameState = enum {
+    MainMenu,
+    Playing,
+    Paused,
+};
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy.Manager.init(allocator);
+    defer manager.deinit();
+
+    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    defer scheduler.deinit();
+
+    // Register state type (automatically adds StateManager resource)
+    try scheduler.registerState(GameState);
+
+    // Set initial state (or use NextState in a startup system)
+    try scheduler.transitionTo(GameState, .MainMenu);
+
+    // Add state-specific systems
+    const menu_handle = manager.createSystemCached(menuSystem, zevy.DefaultParamRegistry);
+    const game_handle = manager.createSystemCached(gameplaySystem, zevy.DefaultParamRegistry);
+
+    // Systems run when entering/exiting states
+    scheduler.addSystem(zevy.OnEnter(GameState.Playing), game_handle);
+    scheduler.addSystem(zevy.OnExit(GameState.Playing), cleanup_handle);
+
+    // Systems run while in a specific state (call manually in game loop)
+    scheduler.addSystem(zevy.InState(GameState.MainMenu), menu_handle);
+    scheduler.addSystem(zevy.InState(GameState.Playing), game_handle);
+
+    // In your game loop, run systems for the active state
+    try scheduler.runActiveStateSystems(GameState);
+}
+
+fn menuSystem(
+    manager: *zevy.Manager,
+    state: zevy.State(GameState),
+    next: *zevy.NextState(GameState),
+) void {
+    _ = manager;
+    if (state.isActive(.MainMenu)) {
+        // Handle menu input
+        // Transition to playing when user presses start
+        next.set(.Playing); // Immediate transition - triggers OnExit/OnEnter
+    }
+}
+
+fn gameplaySystem(
+    manager: *zevy.Manager,
+    query: zevy.Query(struct { pos: Position, vel: Velocity }, .{}),
+) void {
+    _ = manager;
+    while (query.next()) |item| {
+        item.pos.x += item.vel.dx;
+        item.pos.y += item.vel.dy;
+    }
+}
+```
+
+#### Event Registration
+
+The Scheduler can automatically set up event handling with cleanup:
+
+```zig
+const zevy = @import("zevy_ecs");
+
+const InputEvent = struct {
+    key: u32,
+    pressed: bool,
+};
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy.Manager.init(allocator);
+    defer manager.deinit();
+
+    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    defer scheduler.deinit();
+
+    // Register event type - creates EventStore resource and adds cleanup system
+    try scheduler.registerEvent(&manager, InputEvent);
+
+    // Add system that writes events
+    const input_handle = manager.createSystemCached(inputSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(zevy.Stages.First), input_handle);
+
+    // Add system that reads events
+    const handler_handle = manager.createSystemCached(inputHandlerSystem, zevy.DefaultParamRegistry);
+    scheduler.addSystem(zevy.Stage(zevy.Stages.Update), handler_handle);
+
+    // Run the stages - cleanup happens automatically in Last stage
+    try scheduler.runStages(&manager, zevy.Stage(zevy.Stages.First), zevy.Stage(zevy.Stages.Last));
+}
+
+fn inputSystem(
+    manager: *zevy.Manager,
+    writer: zevy.EventWriter(InputEvent),
+) void {
+    _ = manager;
+    writer.write(.{ .key = 32, .pressed = true }); // Space key pressed
+}
+
+fn inputHandlerSystem(
+    manager: *zevy.Manager,
+    reader: zevy.EventReader(InputEvent),
+) void {
+    _ = manager;
+    while (reader.read()) |event| {
+        std.debug.print("Key {d} pressed: {}\n", .{ event.data.key, event.data.pressed });
+        event.handled = true;
+    }
+}
+```
+
+#### Getting Stage Information
+
+You can inspect the scheduler's current configuration:
+
+```zig
+const zevy = @import("zevy_ecs");
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy.Manager.init(allocator);
+    defer manager.deinit();
+
+    var scheduler = try zevy.Scheduler.init(allocator, &manager);
+    defer scheduler.deinit();
+
+    // Get information about all stages
+    var stage_info = scheduler.getStageInfo(allocator);
+    defer stage_info.deinit(allocator);
+
+    for (stage_info.items) |info| {
+        std.debug.print("Stage {d}: {d} systems\n", .{ info.stage, info.system_count });
+    }
 }
 ```
 

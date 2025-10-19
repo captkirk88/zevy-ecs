@@ -438,3 +438,159 @@ test "Query - query result consistency across multiple iterations" {
     try std.testing.expect(count1 == count2);
     try std.testing.expect(count1 == 5);
 }
+
+test "Query - component with pointer field" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Component that holds a pointer
+    const ComponentWithPointer = struct {
+        data: *i32,
+        value: f32,
+    };
+
+    // Allocate some data on the heap
+    var heap_value1: i32 = 42;
+    var heap_value2: i32 = 100;
+    var heap_value3: i32 = 256;
+
+    // Create entities with components that hold pointers
+    const comp1 = ComponentWithPointer{ .data = &heap_value1, .value = 1.0 };
+    const comp2 = ComponentWithPointer{ .data = &heap_value2, .value = 2.0 };
+    const comp3 = ComponentWithPointer{ .data = &heap_value3, .value = 3.0 };
+
+    const e1 = manager.create(.{comp1});
+    const e2 = manager.create(.{comp2});
+    const e3 = manager.create(.{comp3});
+
+    // Verify entities were created
+    try std.testing.expect(manager.isAlive(e1));
+    try std.testing.expect(manager.isAlive(e2));
+    try std.testing.expect(manager.isAlive(e3));
+
+    // Query for components with pointers
+    var q = manager.query(struct { comp: ComponentWithPointer }, struct {});
+    var count: usize = 0;
+    var sum: i32 = 0;
+    var value_sum: f32 = 0.0;
+
+    while (q.next()) |item| {
+        // Dereference the pointer in the component
+        const pointed_value = item.comp.data.*;
+        sum += pointed_value;
+        value_sum += item.comp.value;
+        count += 1;
+
+        // Verify the pointer is valid and points to expected values
+        try std.testing.expect(pointed_value == 42 or pointed_value == 100 or pointed_value == 256);
+    }
+
+    try std.testing.expect(count == 3);
+    try std.testing.expect(sum == 42 + 100 + 256);
+    try std.testing.expect(value_sum == 1.0 + 2.0 + 3.0);
+
+    // Test mutation through the pointer
+    var q2 = manager.query(struct { comp: ComponentWithPointer }, struct {});
+    while (q2.next()) |item| {
+        item.comp.data.* += 1000;
+    }
+
+    // Verify the heap values were mutated
+    try std.testing.expect(heap_value1 == 1042);
+    try std.testing.expect(heap_value2 == 1100);
+    try std.testing.expect(heap_value3 == 1256);
+}
+
+test "Query - component with slice field" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Component that holds a slice
+    const ComponentWithSlice = struct {
+        items: []const u8,
+        count: usize,
+    };
+
+    // Create some string slices
+    const str1 = "Hello";
+    const str2 = "World";
+    const str3 = "ECS";
+
+    const comp1 = ComponentWithSlice{ .items = str1, .count = str1.len };
+    const comp2 = ComponentWithSlice{ .items = str2, .count = str2.len };
+    const comp3 = ComponentWithSlice{ .items = str3, .count = str3.len };
+
+    _ = manager.create(.{comp1});
+    _ = manager.create(.{comp2});
+    _ = manager.create(.{comp3});
+
+    // Query and verify slices are intact
+    var q = manager.query(struct { comp: ComponentWithSlice }, struct {});
+    var count: usize = 0;
+    var total_len: usize = 0;
+
+    while (q.next()) |item| {
+        try std.testing.expect(item.comp.items.len == item.comp.count);
+        total_len += item.comp.items.len;
+        count += 1;
+
+        // Verify slice contents
+        const valid = std.mem.eql(u8, item.comp.items, "Hello") or
+            std.mem.eql(u8, item.comp.items, "World") or
+            std.mem.eql(u8, item.comp.items, "ECS");
+        try std.testing.expect(valid);
+    }
+
+    try std.testing.expect(count == 3);
+    try std.testing.expect(total_len == str1.len + str2.len + str3.len);
+}
+
+test "Query - component with multiple pointer types" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Component with different pointer types
+    const ComplexComponent = struct {
+        int_ptr: *i32,
+        float_ptr: *f32,
+        bool_ptr: *bool,
+        slice: []const u8,
+    };
+
+    var int_val: i32 = 123;
+    var float_val: f32 = 45.67;
+    var bool_val: bool = true;
+    const str_val = "test";
+
+    const comp = ComplexComponent{
+        .int_ptr = &int_val,
+        .float_ptr = &float_val,
+        .bool_ptr = &bool_val,
+        .slice = str_val,
+    };
+
+    _ = manager.create(.{comp});
+
+    // Query and verify all pointer types work correctly
+    var q = manager.query(struct { comp: ComplexComponent }, struct {});
+    var found = false;
+
+    while (q.next()) |item| {
+        try std.testing.expect(item.comp.int_ptr.* == 123);
+        try std.testing.expect(item.comp.float_ptr.* == 45.67);
+        try std.testing.expect(item.comp.bool_ptr.* == true);
+        try std.testing.expect(std.mem.eql(u8, item.comp.slice, "test"));
+
+        // Mutate through pointers
+        item.comp.int_ptr.* = 999;
+        item.comp.float_ptr.* = 12.34;
+        item.comp.bool_ptr.* = false;
+
+        found = true;
+    }
+
+    try std.testing.expect(found);
+    try std.testing.expect(int_val == 999);
+    try std.testing.expect(float_val == 12.34);
+    try std.testing.expect(bool_val == false);
+}

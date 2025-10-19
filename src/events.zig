@@ -409,7 +409,7 @@ test "EventReader and EventWriter usage" {
     const TestEventWriter = struct {
         event_store: *EventStore(u32),
 
-        pub fn send(self: *@This(), event: u32) !void {
+        pub fn write(self: *@This(), event: u32) !void {
             self.event_store.push(event);
         }
 
@@ -429,9 +429,9 @@ test "EventReader and EventWriter usage" {
 
     // Add events via EventWriter
     var writer = TestEventWriter{ .event_store = &event_store };
-    try writer.send(100);
-    try writer.send(200);
-    try writer.send(300);
+    try writer.write(100);
+    try writer.write(200);
+    try writer.write(300);
 
     try std.testing.expect(!reader.isEmpty());
     try std.testing.expectEqual(@as(usize, 3), reader.len());

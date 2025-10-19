@@ -2,7 +2,7 @@ const std = @import("std");
 const archetype_storage = @import("archetype_storage.zig");
 const archetype_mod = @import("archetype.zig");
 const Entity = @import("ecs.zig").Entity;
-const getTypeInfo = @import("world.zig").getTypeInfo;
+const reflect = @import("reflect.zig");
 
 /// Check if a type is optional (?T) and return the child type if so
 fn isOptionalType(comptime T: type) bool {
@@ -24,11 +24,6 @@ pub fn getComponentType(comptime T: type) type {
     return optionalChildType(T);
 }
 
-/// Get ECS component type info (hash, size, name) for a type, unwrapping optionals
-fn getComponentTypeInfo(comptime T: type) @TypeOf(getTypeInfo(T)) {
-    return getTypeInfo(optionalChildType(T));
-}
-
 /// Check if a component type is required (not optional)
 fn isRequiredComponent(comptime T: type) bool {
     return !isOptionalType(T);
@@ -43,10 +38,10 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
     const exclude_type = if (@typeInfo(@TypeOf(ExcludeTypes)) == .type) ExcludeTypes else @TypeOf(ExcludeTypes);
     const exclude_info = @typeInfo(exclude_type);
     comptime {
-        if (include_info != .@"struct" or include_info.@"struct".is_tuple)
-            @compileError("IncludeTypes must be a struct with named fields of component types");
-        if (exclude_info != .@"struct" or exclude_info.@"struct".is_tuple)
-            @compileError("ExcludeTypes must be a struct with named fields of component types");
+        if (include_info != .@"struct")
+            @compileError("IncludeTypes must be a struct or tuple");
+        if (exclude_info != .@"struct")
+            @compileError("ExcludeTypes must be a struct or tuple");
     }
 
     return struct {
@@ -58,13 +53,24 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
         pub const IncludeTypesParam = IncludeTypes;
         pub const ExcludeTypesParam = ExcludeTypes;
         pub const IncludeTypesTupleType = blk: {
+            const is_tuple = include_info.@"struct".is_tuple;
             const fields = blk2: {
                 var f: [include_info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
                 for (include_info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
-                    const component_type = getComponentType(T);
+                    // Handle case where T is 'type' itself (when passing tuples like .{Position})
+                    // In this case, we need to extract the actual type from IncludeTypes
+                    const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
                     var field_type: type = undefined;
-                    if (isOptionalType(T)) {
+                    // if (T == type) {
+                    //     // Bare type in tuple/struct - return pointer to component
+                    //     if (component_type == Entity) {
+                    //         field_type = Entity;
+                    //     } else {
+                    //         field_type = *component_type;
+                    //     }
+                    // }
+                    if (isOptionalType(T) and T != type) {
                         if (component_type == Entity) {
                             field_type = ?Entity;
                         } else {
@@ -91,7 +97,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                 .layout = .auto,
                 .fields = &fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
-                .is_tuple = false,
+                .is_tuple = is_tuple,
             } });
         };
         const IncludesEntity = includesEntity(IncludeTypes);
@@ -112,11 +118,13 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             // Check all required include types are present
             inline for (include_info.@"struct".fields) |field| {
                 const T = field.type;
-                if (isRequiredComponent(T)) {
-                    const component_type = getComponentType(T);
+                // When T == type, we need to get the actual type from IncludeTypes
+                const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
+                const is_required = if (T == type) true else isRequiredComponent(T);
+                if (is_required) {
                     // Skip Entity since it's not stored as a component in archetypes
                     if (component_type != Entity) {
-                        const type_info = getTypeInfo(component_type);
+                        const type_info = reflect.getTypeInfo(component_type);
                         var found = false;
                         for (signature.types) |h| {
                             if (h == type_info.hash) {
@@ -133,7 +141,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             // Check none of the exclude types are present
             inline for (exclude_info.@"struct".fields) |field| {
                 const T = field.type;
-                const type_info = comptime getTypeInfo(getComponentType(T));
+                const type_info = reflect.getTypeInfo(getComponentType(T));
                 for (signature.types) |h| {
                     if (h == type_info.hash) {
                         return false;
@@ -147,12 +155,12 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             if (self.current_archetype) |arch| {
                 inline for (include_info.@"struct".fields, 0..) |field, original_i| {
                     const T = field.type;
-                    const component_type = getComponentType(T);
+                    const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
                     if (component_type == Entity) {
                         self.component_indices[original_i] = ENTITY_SENTINEL;
                         continue;
                     }
-                    const type_hash = getTypeInfo(component_type).hash;
+                    const type_hash = reflect.getTypeInfo(component_type).hash;
                     var found = false;
                     for (arch.signature.types, 0..) |h, j| {
                         if (h == type_hash) {
@@ -190,7 +198,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                     inline for (include_info.@"struct".fields, 0..) |field, original_i| {
                         const j = mutable_self.component_indices[original_i];
                         const T = field.type;
-                        const component_type = comptime getComponentType(T);
+                        const component_type = comptime if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
 
                         // Branch on component type at comptime to avoid type mismatches
                         if (comptime component_type == Entity) {
@@ -202,7 +210,8 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                         } else {
                             // This field is for a component
                             if (j == MISSING_COMPONENT_SENTINEL) {
-                                if (comptime isOptionalType(T)) {
+                                const is_optional = comptime if (T == type) false else isOptionalType(T);
+                                if (comptime is_optional) {
                                     @field(result, field.name) = null;
                                 } else {
                                     @panic("Required component not found in archetype: " ++ @typeName(T));
@@ -258,7 +267,8 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
 fn includesEntity(comptime IncludeTypes: anytype) bool {
     const include_info = @typeInfo(@TypeOf(IncludeTypes));
     inline for (include_info.@"struct".fields) |field| {
-        const component_type = getComponentType(field.type);
+        const T = field.type;
+        const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
         if (component_type == Entity) {
             return true;
         }

@@ -2,6 +2,7 @@ const std = @import("std");
 const ecs = @import("ecs.zig");
 const events = @import("events.zig");
 const systems = @import("systems.zig");
+const state = @import("state.zig");
 
 pub const LocalSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
@@ -74,6 +75,90 @@ pub const EventWriterSystemParam = struct {
             return systems.EventWriter(T){ .event_store = stored_event_store };
         };
         return systems.EventWriter(T){ .event_store = event_store };
+    }
+};
+
+/// States(StateType) SystemParam analyzer and applier
+/// Provides access to state management for checking and transitioning states
+/// System parameter handler for State(StateEnum) - checks if a specific state is active
+pub const StateSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        if (type_info == .@"struct" and
+            @hasDecl(T, "StateEnum_") and
+            @hasDecl(T, "_is_state_param") and
+            @hasField(T, "state_mgr"))
+        {
+            return T.StateEnum_;
+        }
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            return analyze(Child);
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) systems.State(StateEnum) {
+        const StateManagerType = state.StateManager(StateEnum);
+
+        // Get or create the StateManager resource for this specific enum type
+        if (e.getResource(StateManagerType)) |state_mgr| {
+            return systems.State(StateEnum){ .state_mgr = state_mgr };
+        }
+
+        std.debug.panic("StateManager({s}) resource not found. Register the state type with scheduler.registerState before using State parameter", .{@typeName(StateEnum)});
+    }
+};
+
+/// System parameter handler for NextState(StateEnum) - allows immediate state transitions
+pub const NextStateSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        // Check for pointer to NextState
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            const child_info = @typeInfo(Child);
+            if (child_info == .@"struct" and
+                @hasDecl(Child, "StateEnum_") and
+                @hasDecl(Child, "_is_next_state_param") and
+                @hasField(Child, "state_mgr"))
+            {
+                return Child.StateEnum_;
+            }
+        }
+        // Also check for non-pointer (though we'll return a pointer)
+        if (type_info == .@"struct" and
+            @hasDecl(T, "StateEnum_") and
+            @hasDecl(T, "_is_next_state_param") and
+            @hasField(T, "state_mgr"))
+        {
+            return T.StateEnum_;
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) *systems.NextState(StateEnum) {
+        const StateManagerType = state.StateManager(StateEnum);
+
+        // Get or create the StateManager resource for this specific enum type
+        const state_mgr = e.getResource(StateManagerType) orelse {
+            std.debug.panic("StateManager({s}) resource not found. Register the state type with scheduler and add StateManager to ECS resources before using NextState parameter", .{@typeName(StateEnum)});
+        };
+
+        // Get or create NextState instance for this enum type
+        const NextStateType = systems.NextState(StateEnum);
+        if (e.getResource(NextStateType)) |next_state| {
+            return next_state;
+        }
+
+        const next_state_value = NextStateType{
+            .state_mgr = state_mgr,
+        };
+        const next_state_ptr = e.addResource(NextStateType, next_state_value) catch |err| {
+            std.debug.panic("Failed to create NextState({s}) resource: {}", .{ @typeName(StateEnum), err });
+        };
+
+        return next_state_ptr;
     }
 };
 
