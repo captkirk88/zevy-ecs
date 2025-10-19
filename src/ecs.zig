@@ -371,7 +371,6 @@ pub const Manager = struct {
     }
 
     /// Run a cached system by its untyped handle.
-    /// Requires explicit ReturnType specification due to type erasure.
     pub fn runSystemUntyped(self: *Manager, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
         if (sys_handle.handle >= self.systems.items.len) return error.InvalidSystemHandle;
         const sys_ptr = self.systems.items[sys_handle.handle];
@@ -382,7 +381,6 @@ pub const Manager = struct {
 
     /// Cache an existing system pointer.
     /// The returned SystemHandle can be used to run the system later.
-    /// The return type is automatically inferred from the system pointer.
     pub fn cacheSystem(self: *Manager, system: anytype) sys.SystemHandle(@TypeOf(system.*).return_type) {
         const RT = @TypeOf(system.*).return_type;
 

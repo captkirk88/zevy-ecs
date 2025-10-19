@@ -301,9 +301,14 @@ pub fn main() !void {
     // Add a resource
     _ = try manager.addResource(DeltaTime, .{ .value = 0.016 });
 
-    // Create and run system
+    // Create uncached system
     var system = manager.createSystem(movementSystem, zevy_ecs.DefaultParamRegistry);
-    try system.run(&manager, system.ctx);
+    // Cache later for reuse
+    const system_handle = manager.cacheSystem(movementSystem);
+    try manager.runSystem(system_handle);
+
+    // or run raw
+    _ = system.run(&manager, system.ctx);
 
     // Or cache and reuse systems
     const handle = manager.createSystemCached(damageSystem, zevy_ecs.DefaultParamRegistry);
@@ -319,10 +324,12 @@ Systems can request various parameters that are automatically injected:
 - **`Query(Include, Exclude)`**: Query entities with specific components
 - **`Res(T)`**: Access to a global resource of type T
 - **`Local(T)`**: Per-system persistent local state
+- **`State(T)`**: Read-only access to check the current state (where T is an enum)
+- **`NextState(T)`**: Trigger state transitions (where T is an enum)
 - **`EventReader(T)`**: Read events of type T
 - **`EventWriter(T)`**: Write events of type T
 
-- More can be added by implementing custom parameter types. (see below)
+- More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
 
 ### Resources
 
