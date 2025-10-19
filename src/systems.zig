@@ -47,6 +47,8 @@ pub fn System(comptime ReturnType: type) type {
         run: *const fn (*ecs_mod.Manager, ?*anyopaque) anyerror!ReturnType,
         /// Opaque pointer to static metadata/context for argument construction
         ctx: ?*anyopaque,
+
+        pub const return_type = ReturnType;
     };
 }
 

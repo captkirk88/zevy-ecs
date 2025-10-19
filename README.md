@@ -117,6 +117,9 @@ pub fn main() !void {
         item.pos.x += item.vel.dx;
         item.pos.y += item.vel.dy;
     }
+
+    const move_system = manager.createSystemCached(movementSystem, zevy_ecs.DefaultParamRegistry);
+    try manager.runSystem(move_system);
 }
 
 fn movementSystem(

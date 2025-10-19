@@ -190,6 +190,20 @@ test "System - createSystemCached" {
     _ = try manager.runSystem(handle);
 }
 
+test "System - cacheSystem" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Create a system manually
+    var system = manager.createSystem(simpleSystem, DefaultRegistry);
+
+    // Cache it (should infer return type automatically)
+    const handle = manager.cacheSystem(&system);
+
+    // Run the cached system
+    _ = try manager.runSystem(handle);
+}
+
 test "System - ToSystemWithArgs" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
