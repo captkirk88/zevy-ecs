@@ -820,7 +820,9 @@ pub fn main() !void {
 
 zevy_ecs includes a simple benchmarking utility to measure the performance of various operations. Below are some example benchmark results for entity creation and system execution.
 
-### Benchmarks (4GHz CPU, single-threaded, -Doptimize=ReleaseFast)
+### Benchmarks
+
+#### 4GHz CPU, single-threaded, ReleaseFast
 
 | Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------- | ---------- | ------------- | ------------- | --------- |
@@ -845,6 +847,32 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 | Run 7 Systems on 10000 Entities   | 1          | 57.500 us/op  | 0.000 B/op | 0/op      |
 | Run 7 Systems on 100000 Entities  | 1          | 534.200 us/op | 0.000 B/op | 0/op      |
 | Run 7 Systems on 1000000 Entities | 1          | 5.399 ms/op   | 0.000 B/op | 0/op      |
+
+#### 3 GHz, single threaded, ReleaseFast
+
+| Benchmark | Operations | Time/op | Memory/op | Allocs/op
+|-----------|------------|---------|----------|----------|
+| Create 100 Entities | 3 | 23.933 us/op | 13.474 KB/op | 3/op |
+| Create 1000 Entities | 3 | 131.766 us/op | 116.588 KB/op | 8/op |
+| Create 10000 Entities | 3 | 1.226 ms/op | 1.661 MB/op | 18/op |
+| Create 100000 Entities | 3 | 11.391 ms/op | 18.296 MB/op | 27/op |
+| Create 1000000 Entities | 3 | 140.525 ms/op | 232.605 MB/op | 39/op |
+
+| Benchmark | Operations | Time/op | Memory/op | Allocs/op
+|-----------|------------|---------|----------|----------|
+| Batch Create 100 Entities | 3 | 18.200 us/op | 13.474 KB/op | 3/op |
+| Batch Create 1000 Entities | 3 | 88.733 us/op | 89.682 KB/op | 5/op |
+| Batch Create 10000 Entities | 3 | 652.633 us/op | 1.019 MB/op | 7/op |
+| Batch Create 100000 Entities | 3 | 6.792 ms/op | 12.529 MB/op | 7/op |
+| Batch Create 1000000 Entities | 3 | 66.127 ms/op | 144.706 MB/op | 8/op |
+
+| Benchmark | Operations | Time/op | Memory/op | Allocs/op
+|-----------|------------|---------|----------|----------|
+| Run 7 Systems on 100 Entities | 1 | 8.900 us/op | 0.000 B/op | 0/op |
+| Run 7 Systems on 1000 Entities | 1 | 8.800 us/op | 0.000 B/op | 0/op |
+| Run 7 Systems on 10000 Entities | 1 | 68.100 us/op | 0.000 B/op | 0/op |
+| Run 7 Systems on 100000 Entities | 1 | 790.000 us/op | 0.000 B/op | 0/op |
+| Run 7 Systems on 1000000 Entities | 1 | 8.072 ms/op | 0.000 B/op | 0/op |
 
 ## License
 
