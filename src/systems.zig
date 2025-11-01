@@ -492,8 +492,8 @@ pub fn Local(comptime T: type) type {
 /// // Create a piped system that runs produceData and passes its output to processData
 /// const pipedSystem = ToSystem(pipe(produceData, processData, DefaultRegistry), DefaultRegistry);
 /// ```
-pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamRegistry: type) fn (*ecs_mod.Manager) anyerror!void {
-    return struct {
+pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamRegistry: type) System(void) {
+    const f = struct {
         pub fn combined(ecs: *ecs_mod.Manager) !void {
             // Run first system and get its output
             const first_system = ToSystem(first, ParamRegistry);
@@ -504,6 +504,7 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
             _ = try second_system.run(ecs, second_system.ctx);
         }
     }.combined;
+    return ToSystem(f, ParamRegistry);
 }
 
 /// Returns a system that runs `system` only if `predicate` returns true.
@@ -529,7 +530,7 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 /// // Create a conditional system that only runs updatePositions if shouldRunSystem returns true
 /// const conditionalSystem = run_if(shouldRunSystem, updatePositions, DefaultRegistry);
 /// ```
-pub fn runIf(comptime predicate: anytype, comptime system: anytype, ParamRegistry: type) fn (*ecs_mod.Manager) anyerror!void {
+pub fn runIf(comptime predicate: anytype, comptime system: anytype, ParamRegistry: type) System(void) {
     return pipe(
         predicate,
         struct {

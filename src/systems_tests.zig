@@ -217,8 +217,7 @@ test "System - pipe functionality" {
     defer manager.deinit();
 
     const piped = systems.pipe(producer, consumer, DefaultRegistry);
-    const system = ToSystem(piped, DefaultRegistry);
-    _ = try system.run(&manager, system.ctx);
+    _ = try piped.run(&manager, piped.ctx);
 }
 
 test "System - runIf conditional" {
@@ -226,8 +225,7 @@ test "System - runIf conditional" {
     defer manager.deinit();
 
     const conditional = systems.runIf(predicateTrue, conditionalSystem, DefaultRegistry);
-    const system = ToSystem(conditional, DefaultRegistry);
-    _ = try system.run(&manager, system.ctx);
+    _ = try conditional.run(&manager, conditional.ctx);
 }
 
 test "System - resource mutation" {
