@@ -106,8 +106,8 @@ fn errorSys(_: *Manager) !void {
     return error.TestError;
 }
 
-fn returnSys(_: *Manager) void {
-    _ = 123; // Would return 123 if systems supported it
+fn returnSys(_: *Manager) i32 {
+    return 123; // Would return 123 if systems supported it
 }
 
 test "System - basic execution" {
@@ -259,10 +259,9 @@ test "System - return value" {
     defer manager.deinit();
 
     const system = ToSystem(returnSys, DefaultRegistry);
-    _ = try system.run(&manager, system.ctx);
+    const ret = try system.run(&manager, system.ctx);
 
-    // Note: This ECS doesn't support regular return values from systems
-    // Only Local<T> parameters can be used to persist values
+    try std.testing.expect(ret == 123);
 }
 test "System - multiple cached systems" {
     var manager = try Manager.init(std.testing.allocator);
