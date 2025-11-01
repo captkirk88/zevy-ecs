@@ -30,7 +30,12 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 - [Advanced Features](#advanced-features)
   - [System Composition](#system-composition)
   - [Custom System Registries](#custom-system-registries)
-  - [Component Serialization](#component-serialization)
+  - [Serialization](#component-serialization)
+    - [Basic Component Serialization](#basic-component-serialization)
+    - [Using ComponentWriter](#using-componentwriter)
+    - [Using ComponentReader](#using-componentreader)
+    - [Entity Serialization](#entity-serialization)
+    - [Batch Entity Serialization](#batch-entity-serialization)
   - [Scheduler](#scheduler)
     - [Predefined Stages](#predefined-stages)
     - [Basic Usage](#basic-usage-1)
@@ -489,14 +494,18 @@ const CustomParamRegistry = zevy_ecs.mergeSystemParamRegistries(
 );
 ```
 
-### Component Serialization
+### Serialization
+
+zevy_ecs provides flexible component and entity serialization through `ComponentInstance`, `EntityInstance`, `ComponentWriter`, and `ComponentReader`.
+
+#### Basic Component Serialization
 
 ```zig
 const Position = struct { x: f32, y: f32 };
 
 // Create component instance
 const pos = Position{ .x = 10.0, .y = 20.0 };
-const comp = zevy_ecs.ComponentInstance.from(Position, &pos);
+const comp = zevy_ecs.serialize.ComponentInstance.from(Position, &pos);
 
 // Serialize to writer
 var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
@@ -505,12 +514,120 @@ try comp.writeTo(buffer.writer(allocator).any());
 
 // Deserialize from reader
 var fbs = std.io.fixedBufferStream(buffer.items);
-const read_comp = try zevy_ecs.ComponentInstance.readFrom(fbs.reader().any(), allocator);
+const read_comp = try zevy_ecs.serialize.ComponentInstance.readFrom(fbs.reader().any(), allocator);
 defer allocator.free(read_comp.data);
 
 // Access typed data
 if (read_comp.as(Position)) |read_pos| {
     std.debug.print("Position: ({d}, {d})\n", .{ read_pos.x, read_pos.y });
+}
+```
+
+#### Using ComponentWriter
+
+`ComponentWriter` provides a convenient interface for writing multiple components to a stream.
+
+```zig
+const Position = struct { x: f32, y: f32 };
+const Velocity = struct { dx: f32, dy: f32 };
+
+// Create an entity with components
+const entity = manager.create(.{
+    Position{ .x = 10.0, .y = 20.0 },
+    Velocity{ .dx = 0.5, .dy = -0.3 },
+});
+
+// Get all components from the entity
+const components = try manager.getAllComponents(allocator, entity);
+defer allocator.free(components);
+
+// Serialize all components to a buffer
+var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+defer buffer.deinit(allocator);
+
+var writer = zevy_ecs.serialize.ComponentWriter.init(buffer.writer(allocator).any());
+try writer.writeComponents(components);
+```
+
+#### Using ComponentReader
+
+`ComponentReader` provides methods for reading components from a stream with automatic memory management helpers.
+
+```zig
+// Deserialize components from buffer
+var fbs = std.io.fixedBufferStream(buffer.items);
+var reader = zevy_ecs.serialize.ComponentReader.init(fbs.reader().any());
+
+const components = try reader.readComponents(allocator);
+defer reader.freeComponents(allocator, components);
+
+// Access the typed data
+for (components) |comp| {
+    if (comp.as(Position)) |pos| {
+        std.debug.print("Position: ({d}, {d})\n", .{ pos.x, pos.y });
+    } else if (comp.as(Velocity)) |vel| {
+        std.debug.print("Velocity: ({d}, {d})\n", .{ vel.dx, vel.dy });
+    }
+}
+```
+
+#### Entity Serialization
+
+`EntityInstance` provides complete entity serialization including all components.
+
+```zig
+// Create an entity with multiple components
+const entity = manager.create(.{
+    Position{ .x = 5.0, .y = 10.0 },
+    Velocity{ .dx = 1.0, .dy = 2.0 },
+    Health{ .value = 100 },
+});
+
+// Convert entity to EntityInstance (owns component data copies)
+const entity_instance = try zevy_ecs.serialize.EntityInstance.fromEntity(allocator, &manager, entity);
+defer entity_instance.deinit(allocator);
+
+// Serialize to buffer
+var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+defer buffer.deinit(allocator);
+try entity_instance.writeTo(buffer.writer(allocator).any());
+
+// Deserialize from buffer
+var fbs = std.io.fixedBufferStream(buffer.items);
+const restored_instance = try zevy_ecs.serialize.EntityInstance.readFrom(fbs.reader().any(), allocator);
+defer restored_instance.deinit(allocator);
+
+// Create a new entity from the restored data
+const new_entity = try restored_instance.toEntity(&manager);
+```
+
+#### Batch Entity Serialization
+
+```zig
+// Serialize multiple entities
+var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+defer buffer.deinit(allocator);
+const writer = buffer.writer(allocator).any();
+
+const entities = [_]zevy_ecs.Entity{ entity1, entity2, entity3 };
+try writer.writeInt(usize, entities.len, .little);
+
+for (entities) |entity| {
+    const instance = try zevy_ecs.serialize.EntityInstance.fromEntity(allocator, &manager, entity);
+    defer instance.deinit(allocator);
+    try instance.writeTo(writer);
+}
+
+// Deserialize multiple entities
+var fbs = std.io.fixedBufferStream(buffer.items);
+const reader = fbs.reader().any();
+
+const count = try reader.readInt(usize, .little);
+var i: usize = 0;
+while (i < count) : (i += 1) {
+    const restored = try zevy_ecs.serialize.EntityInstance.readFrom(reader, allocator);
+    defer restored.deinit(allocator);
+    _ = try restored.toEntity(&manager);
 }
 ```
 
@@ -850,29 +967,29 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 #### 3 GHz, single threaded, ReleaseFast
 
-| Benchmark | Operations | Time/op | Memory/op | Allocs/op
-|-----------|------------|---------|----------|----------|
-| Create 100 Entities | 3 | 23.933 us/op | 13.474 KB/op | 3/op |
-| Create 1000 Entities | 3 | 131.766 us/op | 116.588 KB/op | 8/op |
-| Create 10000 Entities | 3 | 1.226 ms/op | 1.661 MB/op | 18/op |
-| Create 100000 Entities | 3 | 11.391 ms/op | 18.296 MB/op | 27/op |
-| Create 1000000 Entities | 3 | 140.525 ms/op | 232.605 MB/op | 39/op |
+| Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
+| ----------------------- | ---------- | ------------- | ------------- | --------- |
+| Create 100 Entities     | 3          | 23.933 us/op  | 13.474 KB/op  | 3/op      |
+| Create 1000 Entities    | 3          | 131.766 us/op | 116.588 KB/op | 8/op      |
+| Create 10000 Entities   | 3          | 1.226 ms/op   | 1.661 MB/op   | 18/op     |
+| Create 100000 Entities  | 3          | 11.391 ms/op  | 18.296 MB/op  | 27/op     |
+| Create 1000000 Entities | 3          | 140.525 ms/op | 232.605 MB/op | 39/op     |
 
-| Benchmark | Operations | Time/op | Memory/op | Allocs/op
-|-----------|------------|---------|----------|----------|
-| Batch Create 100 Entities | 3 | 18.200 us/op | 13.474 KB/op | 3/op |
-| Batch Create 1000 Entities | 3 | 88.733 us/op | 89.682 KB/op | 5/op |
-| Batch Create 10000 Entities | 3 | 652.633 us/op | 1.019 MB/op | 7/op |
-| Batch Create 100000 Entities | 3 | 6.792 ms/op | 12.529 MB/op | 7/op |
-| Batch Create 1000000 Entities | 3 | 66.127 ms/op | 144.706 MB/op | 8/op |
+| Benchmark                     | Operations | Time/op       | Memory/op     | Allocs/op |
+| ----------------------------- | ---------- | ------------- | ------------- | --------- |
+| Batch Create 100 Entities     | 3          | 18.200 us/op  | 13.474 KB/op  | 3/op      |
+| Batch Create 1000 Entities    | 3          | 88.733 us/op  | 89.682 KB/op  | 5/op      |
+| Batch Create 10000 Entities   | 3          | 652.633 us/op | 1.019 MB/op   | 7/op      |
+| Batch Create 100000 Entities  | 3          | 6.792 ms/op   | 12.529 MB/op  | 7/op      |
+| Batch Create 1000000 Entities | 3          | 66.127 ms/op  | 144.706 MB/op | 8/op      |
 
-| Benchmark | Operations | Time/op | Memory/op | Allocs/op
-|-----------|------------|---------|----------|----------|
-| Run 7 Systems on 100 Entities | 1 | 8.900 us/op | 0.000 B/op | 0/op |
-| Run 7 Systems on 1000 Entities | 1 | 8.800 us/op | 0.000 B/op | 0/op |
-| Run 7 Systems on 10000 Entities | 1 | 68.100 us/op | 0.000 B/op | 0/op |
-| Run 7 Systems on 100000 Entities | 1 | 790.000 us/op | 0.000 B/op | 0/op |
-| Run 7 Systems on 1000000 Entities | 1 | 8.072 ms/op | 0.000 B/op | 0/op |
+| Benchmark                         | Operations | Time/op       | Memory/op  | Allocs/op |
+| --------------------------------- | ---------- | ------------- | ---------- | --------- |
+| Run 7 Systems on 100 Entities     | 1          | 8.900 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000 Entities    | 1          | 8.800 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 10000 Entities   | 1          | 68.100 us/op  | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100000 Entities  | 1          | 790.000 us/op | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000000 Entities | 1          | 8.072 ms/op   | 0.000 B/op | 0/op      |
 
 ## License
 

@@ -4,158 +4,10 @@ const ArchetypeStorage = @import("archetype_storage.zig").ArchetypeStorage;
 const Entity = @import("ecs.zig").Entity;
 const Query = @import("query.zig").Query;
 const reflect = @import("reflect.zig");
-
-/// Represents a component instance with its type information and data
-///
-/// Example:
-/// ```zig
-/// const pos = Position{ .x = 10.0, .y = 20.0 };
-/// const comp_instance = ComponentInstance.from(Position, &pos);
-/// ```
-///
-/// Write Example:
-/// ```zig
-/// var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-/// defer buffer.deinit(allocator);
-/// var writer = std.io.fixedBufferWriter(&buffer);
-/// try comp_instance.writeTo(&writer);
-/// ```
-/// Read Example:
-/// ```zig
-/// var reader = std.io.fixedBufferReader(buffer.items);
-/// const read_comp = try ComponentInstance.readFrom(&reader, allocator);
-/// ```
-pub const ComponentInstance = struct {
-    hash: u64,
-    size: usize,
-    data: []const u8,
-
-    pub fn from(comptime T: type, value: *const T) ComponentInstance {
-        const info = comptime reflect.getTypeInfo(T);
-        return ComponentInstance{
-            .hash = info.hash,
-            .size = info.size,
-            .data = std.mem.asBytes(value),
-        };
-    }
-
-    /// Get the component data as a specific type T
-    /// Returns null if the type hash doesn't match
-    pub fn as(self: ComponentInstance, comptime T: type) ?*const T {
-        const expected_info = reflect.getTypeInfo(T);
-        if (self.hash == expected_info.hash and self.size == expected_info.size) {
-            return @alignCast(std.mem.bytesAsValue(T, self.data[0..self.size]));
-        }
-
-        return null;
-    }
-
-    /// Get the component data as a mutable specific type T
-    /// Returns null if the type hash doesn't match
-    /// Note: This is unsafe as it allows mutation of the original data
-    pub fn asMut(self: ComponentInstance, comptime T: type) ?*T {
-        const expected_info = reflect.getTypeInfo(T);
-        if (self.hash == expected_info.hash and self.size == expected_info.size) {
-            return @alignCast(std.mem.bytesAsValue(T, @constCast(self.data[0..self.size])));
-        }
-        return null;
-    }
-
-    /// Write this component to any std.io.Writer
-    pub fn writeTo(self: ComponentInstance, writer: std.io.AnyWriter) !void {
-        try writer.writeInt(u64, self.hash, .little);
-        try writer.writeInt(usize, self.size, .little);
-        try writer.writeAll(self.data);
-    }
-
-    /// Create a ComponentInstance from any std.io.Reader
-    /// The caller is responsible for freeing the returned data
-    pub fn readFrom(reader: std.io.AnyReader, allocator: std.mem.Allocator) !ComponentInstance {
-        const comp_hash = try reader.readInt(u64, .little);
-        const comp_size = try reader.readInt(usize, .little);
-        const comp_data = try allocator.alloc(u8, comp_size);
-        _ = try reader.readAll(comp_data);
-        return ComponentInstance{
-            .hash = comp_hash,
-            .size = comp_size,
-            .data = comp_data,
-        };
-    }
-};
-
-/// ComponentWriter for writing multiple components to a stream
-pub const ComponentWriter = struct {
-    writer: std.io.AnyWriter,
-
-    pub fn init(writer: std.io.AnyWriter) ComponentWriter {
-        return ComponentWriter{ .writer = writer };
-    }
-
-    /// Write a single component to the stream
-    pub fn writeComponent(self: *ComponentWriter, component: ComponentInstance) !void {
-        try component.writeTo(self.writer);
-    }
-
-    /// Write multiple components to the stream with a count header
-    pub fn writeComponents(self: *ComponentWriter, components: []const ComponentInstance) !void {
-        try self.writer.writeInt(usize, components.len, .little);
-        for (components) |component| {
-            try self.writeComponent(component);
-        }
-    }
-
-    /// Write a component of type T with value
-    pub fn writeTypedComponent(self: *ComponentWriter, comptime T: type, value: *const T) !void {
-        const info = reflect.getTypeInfo(T);
-        const bytes = std.mem.asBytes(value);
-        const component = ComponentInstance{
-            .hash = info.hash,
-            .size = info.size,
-            .data = bytes,
-        };
-        try self.writeComponent(component);
-    }
-};
-
-/// ComponentReader for reading components from a stream
-pub const ComponentReader = struct {
-    reader: std.io.AnyReader,
-    allocator: std.mem.Allocator,
-
-    pub fn init(reader: std.io.AnyReader, allocator: std.mem.Allocator) ComponentReader {
-        return ComponentReader{ .reader = reader, .allocator = allocator };
-    }
-
-    /// Read a single component from the stream
-    /// The caller is responsible for freeing the component data
-    pub fn readComponent(self: *ComponentReader) !ComponentInstance {
-        return ComponentInstance.readFrom(self.reader, self.allocator);
-    }
-
-    /// Read multiple components from the stream, expecting a count header
-    /// The caller is responsible for freeing the returned array and component data
-    pub fn readComponents(self: *ComponentReader) ![]ComponentInstance {
-        const count = try self.reader.readInt(usize, .little);
-        const components = try self.allocator.alloc(ComponentInstance, count);
-        for (components, 0..) |_, i| {
-            components[i] = try self.readComponent();
-        }
-        return components;
-    }
-
-    /// Free component data allocated by readComponent or readComponents
-    pub fn freeComponent(self: *ComponentReader, component: ComponentInstance) void {
-        self.allocator.free(component.data);
-    }
-
-    /// Free components array and all component data allocated by readComponents
-    pub fn freeComponents(self: *ComponentReader, components: []ComponentInstance) void {
-        for (components) |component| {
-            self.freeComponent(component);
-        }
-        self.allocator.free(components);
-    }
-};
+const serialize = @import("serialize.zig");
+pub const ComponentInstance = serialize.ComponentInstance;
+const ComponentReader = serialize.ComponentReader;
+const ComponentWriter = serialize.ComponentWriter;
 
 /// The World is the main interface for managing entities and components
 pub const World = struct {
@@ -360,6 +212,59 @@ pub const World = struct {
         }
     }
 
+    /// Add an entity from an array of ComponentInstance
+    /// This is used for deserializing entities
+    pub fn addFromComponentInstances(self: *World, entity: Entity, components: []const ComponentInstance) !void {
+        if (components.len == 0) {
+            const empty_components = .{};
+            try self.add(entity, @TypeOf(empty_components), empty_components);
+            return;
+        }
+
+        // Build sorted arrays of hashes, sizes, and data
+        var hashes = try self.allocator.alloc(u64, components.len);
+        defer self.allocator.free(hashes);
+        var sizes = try self.allocator.alloc(usize, components.len);
+        defer self.allocator.free(sizes);
+        var data = try self.allocator.alloc([]const u8, components.len);
+        defer self.allocator.free(data);
+
+        for (components, 0..) |comp, i| {
+            hashes[i] = comp.hash;
+            sizes[i] = comp.size;
+            data[i] = comp.data;
+        }
+
+        // Sort all arrays by hash to match archetype signature format
+        const SortContext = struct {
+            hashes: []u64,
+            sizes: []usize,
+            data: [][]const u8,
+
+            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                return ctx.hashes[a_index] < ctx.hashes[b_index];
+            }
+
+            pub fn swap(ctx: @This(), a_index: usize, b_index: usize) void {
+                std.mem.swap(u64, &ctx.hashes[a_index], &ctx.hashes[b_index]);
+                std.mem.swap(usize, &ctx.sizes[a_index], &ctx.sizes[b_index]);
+                std.mem.swap([]const u8, &ctx.data[a_index], &ctx.data[b_index]);
+            }
+        };
+
+        const sort_ctx = SortContext{ .hashes = hashes, .sizes = sizes, .data = data };
+        std.sort.pdqContext(0, components.len, sort_ctx);
+
+        // Create signature
+        const signature_hashes = try self.allocator.alloc(u64, hashes.len);
+        defer self.allocator.free(signature_hashes);
+        std.mem.copyForwards(u64, signature_hashes, hashes);
+        const signature = @import("archetype.zig").ArchetypeSignature{ .types = signature_hashes };
+
+        // Add entity to archetype
+        try self.archetypes.addEntityToArchetype(entity, signature, sizes, data);
+    }
+
     /// Add multiple entities with the same component set and values (much faster than calling add() in a loop)
     pub fn addBatch(self: *World, entities: []const Entity, comptime Components: anytype, values: anytype) !void {
         if (entities.len == 0) return;
@@ -488,6 +393,7 @@ pub const World = struct {
     }
 
     /// Get all components for an entity as an array of ComponentInstance
+    ///
     /// Caller is responsible for freeing the returned array
     pub fn getAllComponents(self: *World, allocator: std.mem.Allocator, entity: Entity) ![]ComponentInstance {
         if (self.archetypes.getEntityEntry(entity)) |entry| {
@@ -624,309 +530,3 @@ pub const World = struct {
         return @import("query.zig").Query(Components, Exclude).init(&self.archetypes);
     }
 };
-
-test "ComponentInstance.from creates component correctly" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const pos = TestPosition{ .x = 10.0, .y = 20.0 };
-    const comp = ComponentInstance.from(TestPosition, &pos);
-
-    const expected_info = reflect.getTypeInfo(TestPosition);
-    try std.testing.expect(comp.hash == expected_info.hash);
-    try std.testing.expect(comp.size == expected_info.size);
-    try std.testing.expect(comp.data.len == @sizeOf(TestPosition));
-}
-
-test "ComponentInstance.as returns correct typed pointer" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const TestVelocity = struct {
-        dx: f32,
-        dy: f32,
-    };
-
-    const pos = TestPosition{ .x = 15.5, .y = 25.5 };
-    const comp = ComponentInstance.from(TestPosition, &pos);
-
-    if (comp.as(TestPosition)) |retrieved_pos| {
-        try std.testing.expect(retrieved_pos.x == 15.5);
-        try std.testing.expect(retrieved_pos.y == 25.5);
-    } else {
-        try std.testing.expect(false); // Should not be null
-    }
-
-    // Test with wrong type returns null
-    const wrong_type = comp.as(TestVelocity);
-    try std.testing.expect(wrong_type == null);
-}
-
-test "ComponentInstance.asMut allows mutation" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    var pos = TestPosition{ .x = 5.0, .y = 10.0 };
-    const comp = ComponentInstance.from(TestPosition, &pos);
-
-    if (comp.asMut(TestPosition)) |mut_pos| {
-        mut_pos.x = 100.0;
-        mut_pos.y = 200.0;
-
-        // Verify mutation worked
-        try std.testing.expect(mut_pos.x == 100.0);
-        try std.testing.expect(mut_pos.y == 200.0);
-    } else {
-        try std.testing.expect(false); // Should not be null
-    }
-}
-
-test "ComponentInstance writeTo and readFrom" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const allocator = std.testing.allocator;
-
-    // Create original component
-    const original_pos = TestPosition{ .x = 42.0, .y = 84.0 };
-    const original_comp = ComponentInstance.from(TestPosition, &original_pos);
-
-    // Write to buffer
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-    try original_comp.writeTo(buffer.writer(allocator).any());
-
-    // Read back from buffer
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const read_comp = try ComponentInstance.readFrom(fbs.reader().any(), allocator);
-    defer allocator.free(read_comp.data);
-
-    // Verify the data matches
-    try std.testing.expect(read_comp.hash == original_comp.hash);
-    try std.testing.expect(read_comp.size == original_comp.size);
-
-    if (read_comp.as(TestPosition)) |read_pos| {
-        try std.testing.expect(read_pos.x == 42.0);
-        try std.testing.expect(read_pos.y == 84.0);
-    } else {
-        try std.testing.expect(false); // Should not be null
-    }
-}
-
-test "ComponentWriter writeComponent and writeTypedComponent" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const TestVelocity = struct {
-        dx: f32,
-        dy: f32,
-    };
-
-    const allocator = std.testing.allocator;
-
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-
-    var writer = ComponentWriter.init(buffer.writer(allocator).any());
-
-    // Test writeTypedComponent
-    const pos = TestPosition{ .x = 1.0, .y = 2.0 };
-    try writer.writeTypedComponent(TestPosition, &pos);
-
-    const vel = TestVelocity{ .dx = 3.0, .dy = 4.0 };
-    try writer.writeTypedComponent(TestVelocity, &vel);
-
-    // Verify we can read them back
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var reader = ComponentReader.init(fbs.reader().any(), allocator);
-
-    const read_pos_comp = try reader.readComponent();
-    defer reader.freeComponent(read_pos_comp);
-    const read_vel_comp = try reader.readComponent();
-    defer reader.freeComponent(read_vel_comp);
-
-    if (read_pos_comp.as(TestPosition)) |read_pos| {
-        try std.testing.expect(read_pos.x == 1.0);
-        try std.testing.expect(read_pos.y == 2.0);
-    } else {
-        try std.testing.expect(false);
-    }
-
-    if (read_vel_comp.as(TestVelocity)) |read_vel| {
-        try std.testing.expect(read_vel.dx == 3.0);
-        try std.testing.expect(read_vel.dy == 4.0);
-    } else {
-        try std.testing.expect(false);
-    }
-}
-
-test "ComponentWriter writeComponents with count header" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const TestHealth = struct {
-        current: i32,
-        max: i32,
-    };
-    const allocator = std.testing.allocator;
-
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-
-    var writer = ComponentWriter.init(buffer.writer(allocator).any());
-
-    // Create multiple components
-    const pos1 = TestPosition{ .x = 1.0, .y = 2.0 };
-    const pos2 = TestPosition{ .x = 3.0, .y = 4.0 };
-    const health = TestHealth{ .current = 100, .max = 100 };
-
-    const components = [_]ComponentInstance{
-        ComponentInstance.from(TestPosition, &pos1),
-        ComponentInstance.from(TestPosition, &pos2),
-        ComponentInstance.from(TestHealth, &health),
-    };
-
-    try writer.writeComponents(&components);
-
-    // Read them back
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var reader = ComponentReader.init(fbs.reader().any(), allocator);
-
-    const read_components = try reader.readComponents();
-    defer reader.freeComponents(read_components);
-
-    try std.testing.expect(read_components.len == 3);
-
-    // Verify first position
-    if (read_components[0].as(TestPosition)) |read_pos| {
-        try std.testing.expect(read_pos.x == 1.0);
-        try std.testing.expect(read_pos.y == 2.0);
-    } else {
-        try std.testing.expect(false);
-    }
-
-    // Verify second position
-    if (read_components[1].as(TestPosition)) |read_pos| {
-        try std.testing.expect(read_pos.x == 3.0);
-        try std.testing.expect(read_pos.y == 4.0);
-    } else {
-        try std.testing.expect(false);
-    }
-
-    // Verify health
-    if (read_components[2].as(TestHealth)) |read_health| {
-        try std.testing.expect(read_health.current == 100);
-        try std.testing.expect(read_health.max == 100);
-    } else {
-        try std.testing.expect(false);
-    }
-}
-
-test "ComponentReader memory management" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const allocator = std.testing.allocator;
-
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-
-    // Write a component
-    const pos = TestPosition{ .x = 123.45, .y = 678.90 };
-    const comp = ComponentInstance.from(TestPosition, &pos);
-    try comp.writeTo(buffer.writer(allocator).any());
-
-    // Read it back and ensure proper cleanup
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var reader = ComponentReader.init(fbs.reader().any(), allocator);
-
-    const read_comp = try reader.readComponent();
-
-    // Verify data is correct
-    if (read_comp.as(TestPosition)) |read_pos| {
-        try std.testing.expect(read_pos.x == 123.45);
-        try std.testing.expect(read_pos.y == 678.90);
-    } else {
-        try std.testing.expect(false);
-    }
-
-    // Clean up memory
-    reader.freeComponent(read_comp);
-
-    // Test should complete without memory leaks when run with testing allocator
-}
-
-test "ComponentInstance type safety" {
-    // Test structures for component serialization tests
-    const TestPosition = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const TestVelocity = struct {
-        dx: f32,
-        dy: f32,
-    };
-
-    const pos = TestPosition{ .x = 1.0, .y = 2.0 };
-    const pos_comp = ComponentInstance.from(TestPosition, &pos);
-
-    const vel = TestVelocity{ .dx = 3.0, .dy = 4.0 };
-    const vel_comp = ComponentInstance.from(TestVelocity, &vel);
-
-    // Verify components have different hashes
-    try std.testing.expect(pos_comp.hash != vel_comp.hash);
-
-    // Verify cross-type access returns null
-    try std.testing.expect(pos_comp.as(TestVelocity) == null);
-    try std.testing.expect(vel_comp.as(TestPosition) == null);
-    try std.testing.expect(pos_comp.asMut(TestVelocity) == null);
-    try std.testing.expect(vel_comp.asMut(TestPosition) == null);
-
-    // Verify correct type access works
-    try std.testing.expect(pos_comp.as(TestPosition) != null);
-    try std.testing.expect(vel_comp.as(TestVelocity) != null);
-}
-
-test "empty component array serialization" {
-    const allocator = std.testing.allocator;
-
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-
-    var writer = ComponentWriter.init(buffer.writer(allocator).any());
-
-    // Write empty array
-    const empty_components: []const ComponentInstance = &[_]ComponentInstance{};
-    try writer.writeComponents(empty_components);
-
-    // Read back empty array
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var reader = ComponentReader.init(fbs.reader().any(), allocator);
-
-    const read_components = try reader.readComponents();
-    defer reader.freeComponents(read_components);
-
-    try std.testing.expect(read_components.len == 0);
-}

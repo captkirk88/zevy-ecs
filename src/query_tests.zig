@@ -572,7 +572,7 @@ test "Query - component with multiple pointer types" {
     _ = manager.create(.{comp});
 
     // Query and verify all pointer types work correctly
-    var q = manager.query(struct { comp: ComplexComponent }, struct {});
+    var q = manager.query(struct { comp: ComplexComponent }, .{});
     var found = false;
 
     while (q.next()) |item| {

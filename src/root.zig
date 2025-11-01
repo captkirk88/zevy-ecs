@@ -74,6 +74,7 @@ const state = @import("state.zig");
 /// StateManager provides state management functionality for a specific enum type
 pub const StateManager = state.StateManager;
 
+pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");
 
 // Tests
@@ -86,6 +87,7 @@ test {
     std.testing.refAllDeclsRecursive(@import("archetype_tests.zig"));
     std.testing.refAllDeclsRecursive(@import("archetype_storage_tests.zig"));
     std.testing.refAllDeclsRecursive(@import("systems_tests.zig"));
+    std.testing.refAllDeclsRecursive(@import("serialize_tests.zig"));
     std.testing.refAllDecls(world);
     std.testing.refAllDecls(scheduler);
     std.testing.refAllDecls(state);

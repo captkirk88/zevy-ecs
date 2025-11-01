@@ -1,6 +1,7 @@
 const std = @import("std");
 const world = @import("world.zig");
 const World = world.World;
+const serialize = @import("serialize.zig");
 const qry = @import("query.zig");
 const errs = @import("errors.zig");
 const hash = std.hash;
@@ -138,6 +139,32 @@ pub const Manager = struct {
         return entity;
     }
 
+    /// Create an entity from an array of ComponentInstance
+    pub fn createFromComponents(self: *Manager, components: []const world.ComponentInstance) !Entity {
+        // Allocate entity ID
+        const entity = if (self.free_ids.pop()) |id| blk: {
+            break :blk Entity{ .id = id, .generation = self.generations.items[id] };
+        } else blk: {
+            const id = self.next_entity_id;
+            self.next_entity_id += 1;
+            self.generations.append(self.allocator, 0) catch {
+                @panic("Failed to allocate memory for new entity generation");
+            };
+            break :blk Entity{ .id = id, .generation = 0 };
+        };
+
+        if (components.len == 0) {
+            // Empty entity
+            const empty_components = .{};
+            self.world.add(entity, @TypeOf(empty_components), empty_components) catch @panic("Failed to add empty entity to archetype storage");
+            return entity;
+        }
+
+        // Add entity to world with the component instances
+        try self.world.addFromComponentInstances(entity, components);
+        return entity;
+    }
+
     /// Batch create multiple entities with the same components (much faster than calling create() in a loop)
     /// Returns a slice that must be freed by the caller using allocator.free()
     pub fn createBatch(self: *Manager, allocator: std.mem.Allocator, entity_count: usize, components: anytype) ![]Entity {
@@ -199,7 +226,7 @@ pub const Manager = struct {
     /// Get all components for an entity as an array of ComponentInstance
     /// Caller is responsible for freeing the returned array
     /// Returns an error if the entity is not alive
-    pub fn getAllComponents(self: *Manager, allocator: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]world.ComponentInstance {
+    pub fn getAllComponents(self: *Manager, allocator: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         return self.world.getAllComponents(allocator, entity);
     }
@@ -207,7 +234,7 @@ pub const Manager = struct {
     /// Add or update a resource.
     /// Resources must be value types (no pointers allowed).
     ///
-    /// *Recommended to use Plain Old Data (POD) types only or manage memory manually.*
+    /// *Recommended to use Plain Old Data (POD) types only.*
     ///
     /// Example:
     /// ```zig
@@ -273,10 +300,6 @@ pub const Manager = struct {
     ///     // Resource not found
     /// }
     pub fn getResource(self: *Manager, comptime T: type) ?*T {
-        return self.getResourcePtr(T);
-    }
-
-    fn getResourcePtr(self: *Manager, comptime T: type) ?*T {
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         if (self.resources.get(type_hash)) |entry| {
             return @ptrCast(@alignCast(entry.ptr));

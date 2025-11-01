@@ -221,7 +221,7 @@ test "ECS Benchmark - Entity Creation" {
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, 3, benchCreateEntities, .{ &manager, count });
+        const result = try bench.run(label, 5, benchCreateEntities, .{ &manager, count });
         Benchmark.printResultFormatted(result, .markdown);
     }
 
@@ -243,7 +243,7 @@ test "ECS Benchmark - Batch Entity Creation" {
         const label = try std.fmt.allocPrint(allocator, "Batch Create {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, 3, batchCreateEntities, .{ &manager, count, allocator });
+        const result = try bench.run(label, 5, batchCreateEntities, .{ &manager, count, allocator });
         Benchmark.printResultFormatted(result, .markdown);
     }
 
@@ -269,7 +269,7 @@ test "ECS Benchmark - Mixed Systems" {
         const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, 1, benchMixedSystems, .{ &manager, &systems });
+        const result = try bench.run(label, 5, benchMixedSystems, .{ &manager, &systems });
 
         Benchmark.printResultFormatted(result, .markdown);
     }
