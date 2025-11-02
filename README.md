@@ -56,8 +56,9 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 ### Requirements
 
 - Zig 0.15.1
-  > [!NOTE]
-  > Zig 0.15.2 compatible but not required.
+
+> [!NOTE]
+> Zig 0.15.2 compatible but not required.
 
 ### Installation
 
