@@ -6,11 +6,12 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 
 - **Archetype-based storage**: Efficiently groups entities with the same component combinations for cache-friendly iteration
 - **Type-safe queries**: Compile-time validated component queries with include/exclude filters and optional components
-- **Flexible system parameters**: Systems can request resources, queries, local state, and event readers/writers
+- **Flexible system parameters**: Built-in support for Query, Res (resources), Local (per-system state), State/NextState, EventReader/EventWriter
 - **Resource management**: Global state accessible across systems with automatic cleanup
-- **Event system**: Built-in event queue with filtering and handling capabilities
+- **Event system**: Built-in event queue with filtering and handling capabilities in a circular buffer
 - **Batch operations**: High-performance batch entity creation
-- **Component serialization**: Built-in support for serializing/deserializing components
+- **Component serialization**: Built-in support for serializing/deserializing components and entities
+- **Extensible parameter system**: Create custom system parameters by implementing `analyze` and `apply` functions
 - **Zero runtime overhead**: All parameter resolution happens at compile time
 
 ## Table of Contents
@@ -49,7 +50,7 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 
 ## Quick Start
 
-## Requirements
+### Requirements
 
 - Zig 0.15.1
 
@@ -72,6 +73,8 @@ exe.root_module.addImport("zevy_ecs", zevy_ecs.module("zevy_ecs"));
 // Optional: If you want to use the benchmarking utilities
 exe.root_module.addImport("zevy_ecs_benchmark", zevy_ecs.module("benchmark"));
 
+// Optional: If you want to use the plugin system
+exe.root_module.addImport("zevy_ecs_plugin", zevy_ecs.module("plugins"));
 ```
 
 ### Basic Usage

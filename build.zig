@@ -9,6 +9,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    _ = b.addModule("plugins", .{
+        .root_source_file = b.path("src/plugin.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const mod = b.addModule("zevy_ecs", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
