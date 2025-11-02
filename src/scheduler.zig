@@ -11,7 +11,7 @@ pub const StageId = u32;
 /// Convert a stage type to its unique stage ID.
 /// Each unique type gets a consistent i32 value based on its type name hash.
 /// Predefined stages map to specific ranges for ordering, custom stages use hash-based IDs.
-pub fn Stage(comptime T: type) StageId {
+pub inline fn Stage(comptime T: type) StageId {
     // Check if T has a priority field for explicit ordering
     if (@hasDecl(T, "priority")) {
         return T.priority;
@@ -247,6 +247,16 @@ pub const Scheduler = struct {
     /// Register an event with the scheduler
     /// This creates an EventStore resource and adds a cleanup system at the Last stage
     pub fn registerEvent(self: *Scheduler, ecs: *ecs_mod.Manager, comptime T: type) ecs_mod.errors!void {
+        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.PostUpdate) + 1);
+    }
+
+    /// Register an event with cleanup at a specific stage
+    pub fn registerEventWithCleanupAtStage(
+        self: *Scheduler,
+        ecs: *ecs_mod.Manager,
+        comptime T: type,
+        cleanup_stage: StageId,
+    ) ecs_mod.errors!void {
         // Create EventStore for this event type
         const event_store = events.EventStore(T).init(self.allocator, 10);
 
@@ -265,8 +275,8 @@ pub const Scheduler = struct {
         // Create and cache the cleanup system
         const system_handle = ecs.createSystemCached(cleanup_system, registry.DefaultParamRegistry);
 
-        // Add cleanup system to Last stage
-        self.addSystem(Stage(Stages.Last), system_handle);
+        // Add cleanup system
+        self.addSystem(cleanup_stage, system_handle);
     }
 
     // ============================================================================
@@ -516,7 +526,7 @@ test "Scheduler registerEventType" {
     // Find the Last stage
     var found_last_stage = false;
     for (stage_info.items) |info| {
-        if (info.stage == Stage(Stages.Last)) {
+        if (info.stage == Stage(Stages.PostUpdate) + 1) {
             std.testing.expect(info.system_count >= 1) catch {
                 std.debug.print("Expected at least one system in Last stage, found {d}\n", .{info.system_count});
                 return error.UnexpectedSystemCount;

@@ -37,6 +37,9 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
     - [Using ComponentReader](#using-componentreader)
     - [Entity Serialization](#entity-serialization)
     - [Batch Entity Serialization](#batch-entity-serialization)
+  - [Plugin System](#plugin-system)
+    - [Basic Plugin Usage](#basic-plugin-usage)
+    - [Creating Reusable Plugins](#creating-reusable-plugins)
   - [Scheduler](#scheduler)
     - [Predefined Stages](#predefined-stages)
     - [Basic Usage](#basic-usage-1)
@@ -53,8 +56,8 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 ### Requirements
 
 - Zig 0.15.1
-> [!NOTE]
-> Zig 0.15.2 compatible but not required.
+  > [!NOTE]
+  > Zig 0.15.2 compatible but not required.
 
 ### Installation
 
@@ -634,6 +637,98 @@ while (i < count) : (i += 1) {
     defer restored.deinit(allocator);
     _ = try restored.toEntity(&manager);
 }
+```
+
+### Plugin System
+
+The plugin system provides a modular way to organize and initialize features in your application. Plugins can register systems, resources, and perform setup tasks in a reusable manner.
+
+#### Basic Plugin Usage
+
+```zig
+const std = @import("std");
+const zevy_ecs = @import("zevy_ecs");
+const zevy_plugin = @import("zevy_ecs_plugin");
+
+// Define a plugin with state
+const PhysicsPlugin = struct {
+    gravity: f32,
+
+    pub fn build(self: *@This(), manager: *zevy_ecs.Manager) !void {
+        // Add resources
+        _ = try manager.addResource(f32, self.gravity);
+
+        // Register systems, setup state, etc.
+    }
+};
+
+// Or use FnPlugin for simple stateless plugins
+const InputPlugin = zevy_plugin.FnPlugin("Input", struct {
+    fn build(manager: *zevy_ecs.Manager) !void {
+        // Setup input event handling using Scheduler
+        const InputEvent = struct { key: u32 };
+        const scheduler = manager.getResource(zevy_ecs.Scheduler) orelse return error.SchedulerNotFound;
+        try scheduler.registerEvent(manager, InputEvent);
+    }
+}.build);
+
+// maybe one day Zig will support lambda funcs 🤞
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy_ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Create scheduler and add as resource so plugins can access it
+    const scheduler = try zevy_ecs.Scheduler.init(allocator, &manager);
+    defer scheduler.deinit();
+    const sch_res = try manager.addResource(zevy_ecs.Scheduler, scheduler);
+
+    // Create plugin manager
+    var plugin_manager = zevy_plugin.PluginManager.init(allocator);
+    defer plugin_manager.deinit();
+
+    // Add plugins
+    try plugin_manager.add(PhysicsPlugin, .{ .gravity = 9.8 });
+    try plugin_manager.add(InputPlugin, .{});
+
+    // Build all plugins (calls build on each)
+    try plugin_manager.build(&manager);
+
+    // Now use the ECS with initialized plugins
+    const gravity = manager.getResource(f32).?;
+    std.debug.print("Gravity: {d}\n", .{gravity.*});
+}
+```
+
+#### Creating Reusable Plugins
+
+```zig
+const zevy_ecs = @import("zevy_ecs");
+
+pub const RenderPlugin = struct {
+    width: u32,
+    height: u32,
+
+    pub fn build(self: *@This(), manager: *zevy_ecs.Manager) !void {
+        // Add window config resource
+        const WindowConfig = struct { width: u32, height: u32 };
+        _ = try manager.addResource(WindowConfig, .{
+            .width = self.width,
+            .height = self.height,
+        });
+
+        // Register render systems in a scheduler if available
+        // Cache systems, setup render resources, etc.
+    }
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        // Optional: cleanup plugin-specific resources
+        _ = self;
+        _ = allocator;
+    }
+};
 ```
 
 ### Scheduler
