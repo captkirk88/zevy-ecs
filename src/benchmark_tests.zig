@@ -317,7 +317,7 @@ const Transform = struct {
 };
 
 // Setup hierarchical scene graph (game objects with parent-child relationships)
-fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usize) !std.ArrayList(Entity) {
+fn setupSceneGraph(manager: *Manager, rel: *root.Relations, count: usize) !std.ArrayList(Entity) {
     const allocator = manager.allocator;
     var all_entities = try std.ArrayList(Entity).initCapacity(allocator, count);
 
@@ -341,7 +341,7 @@ fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usiz
     // Create level objects under root
     for (0..level_count) |i| {
         const level_obj = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(i)) * 10, .local_y = 0, .local_z = 0 }});
-        try rel_manager.add(manager, level_obj, root_entity, Child);
+        try rel.add(manager, level_obj, root_entity, Child);
         level_objects.append(allocator, level_obj) catch {};
         all_entities.append(allocator, level_obj) catch {};
 
@@ -349,7 +349,7 @@ fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usiz
         for (0..3) |j| {
             if (all_entities.items.len >= count) break;
             const prop = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(j)), .local_y = 1, .local_z = 0 }});
-            try rel_manager.add(manager, prop, level_obj, Child);
+            try rel.add(manager, prop, level_obj, Child);
             all_entities.append(allocator, prop) catch {};
         }
     }
@@ -358,7 +358,7 @@ fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usiz
     for (0..character_count) |i| {
         if (all_entities.items.len >= count) break;
         const character = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(i)), .local_y = 0, .local_z = @as(f32, @floatFromInt(i)) * 2 }});
-        try rel_manager.add(manager, character, root_entity, Child);
+        try rel.add(manager, character, root_entity, Child);
         all_entities.append(allocator, character) catch {};
 
         // Add body parts (head, left_arm, right_arm, weapon)
@@ -366,7 +366,7 @@ fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usiz
         for (body_parts, 0..) |_, j| {
             if (all_entities.items.len >= count) break;
             const part = manager.create(.{Transform{ .local_x = 0, .local_y = @as(f32, @floatFromInt(j)), .local_z = 0 }});
-            try rel_manager.add(manager, part, character, Child);
+            try rel.add(manager, part, character, Child);
             all_entities.append(allocator, part) catch {};
         }
     }
@@ -377,6 +377,7 @@ fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usiz
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
     manager: *Manager,
+    rel: *root.Relations,
     query: Query(.{ Transform, relations.Relation(Child) }, .{}),
 ) void {
     // Query all entities that have Transform and a Child relation (children with parents)
@@ -401,6 +402,8 @@ fn systemUpdateTransforms(
         transform.world_y = parent_world_y + transform.local_y;
         transform.world_z = parent_world_z + transform.local_z;
     }
+
+    std.log.info("Relations index count: {d}", .{rel.indexCount()});
 }
 
 // Wrapper for benchmarking system execution
@@ -422,10 +425,10 @@ test "ECS Benchmark - Scene Graph Relations" {
         var manager = try Manager.init(bench.getCountingAllocator());
         defer manager.deinit();
 
-        var rel_manager = RelationManager.init(bench.getCountingAllocator());
-        defer rel_manager.deinit();
+        // Get Relations system parameter (creates RelationManager resource automatically)
+        const rel = root.DefaultParamRegistry.apply(&manager, *root.Relations);
 
-        var entities = try setupSceneGraph(&manager, &rel_manager, count);
+        var entities = try setupSceneGraph(&manager, rel, count);
         defer entities.deinit(bench.getCountingAllocator());
 
         // Create system that uses Query with Relation component

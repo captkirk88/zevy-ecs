@@ -3,6 +3,7 @@ const ecs = @import("ecs.zig");
 const events = @import("events.zig");
 const systems = @import("systems.zig");
 const state = @import("state.zig");
+const relations = @import("relations.zig");
 
 pub const LocalSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
@@ -217,6 +218,32 @@ pub const QuerySystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) T {
         return e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+    }
+};
+
+/// Relations SystemParam analyzer and applier
+/// Provides access to the RelationManager resource
+pub const RelationsSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            if (Child == relations.RelationManager) {
+                return Child;
+            }
+            return analyze(Child);
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime _: type) *relations.RelationManager {
+        if (e.hasResource(relations.RelationManager) == false) {
+            const rel_mgr = relations.RelationManager.init(e.allocator);
+            return e.addResource(relations.RelationManager, rel_mgr) catch |err| {
+                std.debug.panic("Failed to create RelationManager resource: {s}", .{@errorName(err)});
+            };
+        }
+        return e.getResource(relations.RelationManager) orelse unreachable;
     }
 };
 

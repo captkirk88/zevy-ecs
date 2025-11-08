@@ -6,7 +6,8 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 
 - **Archetype-based storage**: Efficiently groups entities with the same component combinations for cache-friendly iteration
 - **Type-safe queries**: Compile-time validated component queries with include/exclude filters and optional components
-- **Flexible system parameters**: Built-in support for Query, Res (resources), Local (per-system state), State/NextState, EventReader/EventWriter
+- **Flexible system parameters**: Built-in support for Query, Res (resources), Local (per-system state), State/NextState, EventReader/EventWriter, Relations
+- **Relationship Support** : Manage entity relationships with minimal overhead using the Relations system parameter
 - **Resource management**: Global state accessible across systems with automatic cleanup
 - **Event system**: Built-in event queue with filtering and handling capabilities in a circular buffer
 - **Batch operations**: High-performance batch entity creation
@@ -343,6 +344,7 @@ Systems can request various parameters that are automatically injected:
 - **`NextState(T)`**: Trigger state transitions (where T is an enum)
 - **`EventReader(T)`**: Read events of type T
 - **`EventWriter(T)`**: Write events of type T
+- **`*Relations`**: Access to the RelationManager for entity relationships
 
 - More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
 
@@ -440,7 +442,7 @@ pub fn main() !void {
 
 ### Relations
 
-Relations allow you to create connections between entities with minimal memory overhead. The system uses an adaptive hybrid approach where relations can be either component-based (zero overhead for sparse relations) or indexed (for efficient traversal of many relations).
+Relations allow you to create connections between entities with minimal memory overhead. The system uses an adaptive hybrid approach where relations can be either component-based (minimal overhead for sparse relations) or indexed (for efficient traversal of many relations).
 
 #### Relation Types
 
@@ -475,83 +477,102 @@ const SocketData = struct {
 #### Basic Usage
 
 ```zig
+// Use Relations system parameter for hierarchy management
+fn setupHierarchy(
+    ecs: *zevy_ecs.Manager,
+    relations: *zevy_ecs.Relations,
+) !void {
+    // Create entities
+    const parent = try ecs.create(.{Transform{}});
+    const child1 = try ecs.create(.{Transform{}});
+    const child2 = try ecs.create(.{Transform{}});
+
+    // Add parent-child relations
+    try relations.add(Child, child1, parent);
+    try relations.add(Child, child2, parent);
+
+    // Query children of parent
+    if (relations.getChildren(Child, parent)) |children| {
+        for (children) |child| {
+            std.debug.print("Child: {d}\n", .{child.id});
+        }
+    }
+
+    // Get parent of child
+    if (relations.getParent(Child, child1)) |p| {
+        std.debug.print("Parent: {d}\n", .{p.id});
+    }
+
+    // Check if relation exists
+    if (relations.has(Child, child1, parent)) {
+        std.debug.print("Child1 has parent relation\n", .{});
+    }
+
+    // Remove relation
+    try relations.remove(Child, child1, parent);
+}
+
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
     var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var rel_manager = zevy_ecs.relations.RelationManager.init(allocator);
-    defer rel_manager.deinit();
-
-    // Create entities
-    const parent = manager.create(.{Transform{}});
-    const child1 = manager.create(.{Transform{}});
-    const child2 = manager.create(.{Transform{}});
-
-    // Add parent-child relations
-    try rel_manager.add(&manager, child1, parent, Child);
-    try rel_manager.add(&manager, child2, parent, Child);
-
-    // Query children of parent
-    const children = try rel_manager.getChildren(parent, Child);
-    for (children) |child| {
-        std.debug.print("Child: {d}\n", .{child.id});
-    }
-
-    // Get parent of child
-    if (try rel_manager.getParent(&manager, child1, Child)) |p| {
-        std.debug.print("Parent: {d}\n", .{p.id});
-    }
-
-    // Check if relation exists
-    if (try rel_manager.has(&manager, child1, parent, Child)) {
-        std.debug.print("Child1 has parent relation\n", .{});
-    }
-
-    // Remove relation
-    try rel_manager.remove(&manager, child1, parent, Child);
+    // RelationManager is automatically created as a resource when using Relations parameter
+    const system = manager.createSystemCached(setupHierarchy, zevy_ecs.DefaultParamRegistry);
+    try manager.runSystem(system);
 }
 ```
 
 #### Relations with Data
 
 ```zig
-// Add relation with custom data
-const attachment = manager.create(.{Transform{}});
-const weapon = manager.create(.{Transform{}});
+// Use Relations system parameter with custom data
+fn attachWeapon(
+    ecs: *zevy_ecs.Manager,
+    relations: *zevy_ecs.Relations,
+) !void {
+    const attachment = try ecs.create(.{Transform{}});
+    const weapon = try ecs.create(.{Transform{}});
 
-try rel_manager.addWithData(
-    &manager,
-    attachment,
-    weapon,
-    SocketData,
-    .{ .socket_name = "hand_socket" },
-);
+    // Add relation with custom data
+    try relations.addWithData(
+        SocketData,
+        attachment,
+        weapon,
+        .{ .socket_name = "hand_socket" },
+    );
 
-// Access relation data via component
-if (try manager.getComponent(attachment, zevy_ecs.relations.Relation(SocketData))) |rel| {
-    std.debug.print("Socket: {s}\n", .{rel.data.socket_name});
-    std.debug.print("Attached to: {d}\n", .{rel.target.id});
+    // Access relation data via component
+    if (ecs.getComponent(attachment, zevy_ecs.relations.Relation(SocketData))) |rel| {
+        std.debug.print("Socket: {s}\n", .{rel.data.socket_name});
+        std.debug.print("Attached to: {d}\n", .{rel.target.id});
+    }
 }
 ```
 
 #### Non-Exclusive Relations
 
 ```zig
-// Entity can own multiple items
-const player = manager.create(.{Transform{}});
-const sword = manager.create(.{Transform{}});
-const shield = manager.create(.{Transform{}});
-const potion = manager.create(.{Transform{}});
+// Entity can own multiple items using Relations system parameter
+fn setupInventory(
+    ecs: *zevy_ecs.Manager,
+    relations: *zevy_ecs.Relations,
+) !void {
+    const player = try ecs.create(.{Transform{}});
+    const sword = try ecs.create(.{Transform{}});
+    const shield = try ecs.create(.{Transform{}});
+    const potion = try ecs.create(.{Transform{}});
 
-try rel_manager.add(&manager, player, sword, Owns);
-try rel_manager.add(&manager, player, shield, Owns);
-try rel_manager.add(&manager, player, potion, Owns);
+    try relations.add(Owns, player, sword);
+    try relations.add(Owns, player, shield);
+    try relations.add(Owns, player, potion);
 
-// Get all owned items
-const items = try rel_manager.getParents(player, Owns);
-std.debug.print("Player owns {d} items\n", .{items.len});
+    // Get all owned items
+    if (relations.getParents(Owns, player)) |items| {
+        std.debug.print("Player owns {d} items\n", .{items.len});
+    }
+}
 ```
 
 ## Advanced Features

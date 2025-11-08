@@ -51,6 +51,8 @@ pub const EventWriter = sys.EventWriter;
 pub const State = sys.State;
 /// NextState parameter type for immediate state transitions
 pub const NextState = sys.NextState;
+/// Relations parameter type for managing entity relationships
+pub const Relations = sys.Relations;
 
 // Event types and functions
 const events = @import("events.zig");

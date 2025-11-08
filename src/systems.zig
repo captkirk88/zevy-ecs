@@ -473,6 +473,8 @@ pub fn Local(comptime T: type) type {
     };
 }
 
+pub const Relations = @import("relations.zig").RelationManager;
+
 /// Pipes the output of the first system function into the second system function.
 /// The first function should return a value, the second should accept it as the first parameter after *ECS.
 /// Returns a combined function that can be used with ToSystem.

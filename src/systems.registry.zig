@@ -13,6 +13,7 @@ pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
     params.ResourceSystemParam,
     params.QuerySystemParam,
     params.LocalSystemParam,
+    params.RelationsSystemParam,
 });
 
 /// SystemParam registry for runtime-extensible parameter type analysis and instantiation
@@ -125,7 +126,7 @@ test "merged SystemParamRegistry" {
     };
     const CustomRegistry = SystemParamRegistry(&[_]type{CustomParam});
     const merge = MergedSystemParamRegistry(.{ DefaultParamRegistry, CustomRegistry });
-    try std.testing.expect(merge.len() == 8); // State, NextState, EventReader, EventWriter, Resource, Query, Local, CustomParam
+    try std.testing.expect(merge.len() == 9); // State, NextState, EventReader, EventWriter, Resource, Query, Local, Relations, CustomParam
 
     // Test that we can apply a custom param (returns value)
     const custom_val = merge.apply(&ecs_instance, i32);
