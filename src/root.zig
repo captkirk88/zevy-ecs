@@ -102,5 +102,4 @@ test {
     std.testing.refAllDecls(scheduler);
     std.testing.refAllDecls(state);
     std.testing.refAllDecls(events);
-    std.testing.refAllDecls(@import("plugin.zig"));
 }
