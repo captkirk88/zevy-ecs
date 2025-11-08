@@ -1,5 +1,5 @@
 const std = @import("std");
-const zevy_ecs = @import("ecs.zig");
+const zevy_ecs = @import("zevy_ecs");
 
 /// Check if a type implements the plugin interface at compile time.
 /// A plugin must have a `build` method with signature:

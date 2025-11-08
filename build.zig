@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const mod = b.addModule("zevy_ecs", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     _ = b.addModule("benchmark", .{
         .root_source_file = b.path("src/benchmark.zig"),
         .target = target,
@@ -14,12 +20,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/plugin.zig"),
         .target = target,
         .optimize = optimize,
-    });
-
-    const mod = b.addModule("zevy_ecs", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zevy_ecs", .module = mod },
+        },
     });
 
     const tests = b.addTest(.{
