@@ -6,6 +6,10 @@ const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
 const Entity = ecs.Entity;
 const Query = root.Query;
+const relations = @import("relations.zig");
+const RelationManager = relations.RelationManager;
+const Child = relations.Child;
+const Owns = relations.Owns;
 
 // Test components
 const Position = struct {
@@ -297,4 +301,143 @@ fn benchMixedSystems(e: *Manager, systems: *const [7]root.UntypedSystemHandle) v
             break;
         };
     }
+}
+
+// Relation Benchmarks
+
+// Realistic scenario: Scene graph with transform hierarchy
+// Each entity has a transform that's relative to its parent
+const Transform = struct {
+    local_x: f32,
+    local_y: f32,
+    local_z: f32,
+    world_x: f32 = 0,
+    world_y: f32 = 0,
+    world_z: f32 = 0,
+};
+
+// Setup hierarchical scene graph (game objects with parent-child relationships)
+fn setupSceneGraph(manager: *Manager, rel_manager: *RelationManager, count: usize) !std.ArrayList(Entity) {
+    const allocator = manager.allocator;
+    var all_entities = try std.ArrayList(Entity).initCapacity(allocator, count);
+
+    // Create root scene node
+    const root_entity = manager.create(.{Transform{ .local_x = 0, .local_y = 0, .local_z = 0 }});
+    all_entities.append(allocator, root_entity) catch {};
+
+    // Create a realistic scene hierarchy:
+    // - Root (world)
+    //   - Level objects (~10% of entities)
+    //     - Props and decorations (~30% of entities)
+    //   - Characters (~20% of entities)
+    //     - Body parts/attachments (~40% of entities)
+
+    const level_count = count / 10;
+    const character_count = count / 5;
+
+    var level_objects = try std.ArrayList(Entity).initCapacity(allocator, level_count);
+    defer level_objects.deinit(allocator);
+
+    // Create level objects under root
+    for (0..level_count) |i| {
+        const level_obj = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(i)) * 10, .local_y = 0, .local_z = 0 }});
+        try rel_manager.add(manager, level_obj, root_entity, Child);
+        level_objects.append(allocator, level_obj) catch {};
+        all_entities.append(allocator, level_obj) catch {};
+
+        // Add 3 props per level object
+        for (0..3) |j| {
+            if (all_entities.items.len >= count) break;
+            const prop = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(j)), .local_y = 1, .local_z = 0 }});
+            try rel_manager.add(manager, prop, level_obj, Child);
+            all_entities.append(allocator, prop) catch {};
+        }
+    }
+
+    // Create characters under root
+    for (0..character_count) |i| {
+        if (all_entities.items.len >= count) break;
+        const character = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(i)), .local_y = 0, .local_z = @as(f32, @floatFromInt(i)) * 2 }});
+        try rel_manager.add(manager, character, root_entity, Child);
+        all_entities.append(allocator, character) catch {};
+
+        // Add body parts (head, left_arm, right_arm, weapon)
+        const body_parts = [_][]const u8{ "head", "left_arm", "right_arm", "weapon" };
+        for (body_parts, 0..) |_, j| {
+            if (all_entities.items.len >= count) break;
+            const part = manager.create(.{Transform{ .local_x = 0, .local_y = @as(f32, @floatFromInt(j)), .local_z = 0 }});
+            try rel_manager.add(manager, part, character, Child);
+            all_entities.append(allocator, part) catch {};
+        }
+    }
+
+    return all_entities;
+}
+
+// System: Update world transforms based on parent hierarchy using ECS Query
+fn systemUpdateTransforms(
+    manager: *Manager,
+    query: Query(.{ Transform, relations.Relation(Child) }, .{}),
+) void {
+    // Query all entities that have Transform and a Child relation (children with parents)
+    while (query.next()) |item| {
+        const transform: *Transform = item[0];
+        const child_relation: *relations.Relation(Child) = item[1];
+
+        // Get parent's transform
+        var parent_world_x: f32 = 0;
+        var parent_world_y: f32 = 0;
+        var parent_world_z: f32 = 0;
+
+        const parent_entity = child_relation.target;
+        if (manager.getComponent(parent_entity, Transform) catch null) |parent_transform| {
+            parent_world_x = parent_transform.world_x;
+            parent_world_y = parent_transform.world_y;
+            parent_world_z = parent_transform.world_z;
+        }
+
+        // Update world transform by combining parent's world transform with local transform
+        transform.world_x = parent_world_x + transform.local_x;
+        transform.world_y = parent_world_y + transform.local_y;
+        transform.world_z = parent_world_z + transform.local_z;
+    }
+}
+
+// Wrapper for benchmarking system execution
+fn benchRunTransformSystem(manager: *Manager, system_handle: anytype) void {
+    manager.runSystem(system_handle) catch |err| {
+        std.debug.print("Error running transform system: {s}\n", .{@errorName(err)});
+    };
+}
+
+test "ECS Benchmark - Scene Graph Relations" {
+    const allocator = std.testing.allocator;
+    var bench = Benchmark.init(allocator);
+    defer bench.deinit();
+
+    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
+
+    Benchmark.printMarkdownHeader();
+    for (counts) |count| {
+        var manager = try Manager.init(bench.getCountingAllocator());
+        defer manager.deinit();
+
+        var rel_manager = RelationManager.init(bench.getCountingAllocator());
+        defer rel_manager.deinit();
+
+        var entities = try setupSceneGraph(&manager, &rel_manager, count);
+        defer entities.deinit(bench.getCountingAllocator());
+
+        // Create system that uses Query with Relation component
+        const system_handle = manager.createSystemCached(systemUpdateTransforms, root.DefaultParamRegistry);
+
+        const label = try std.fmt.allocPrint(allocator, "Scene Graph Transforms {d} Entities", .{count});
+        defer allocator.free(label);
+
+        // Benchmark running the system
+        const result = try bench.run(label, 5, benchRunTransformSystem, .{ &manager, system_handle });
+        Benchmark.printResultFormatted(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
 }

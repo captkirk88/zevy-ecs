@@ -28,6 +28,7 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
   - [System Parameters](#system-parameters)
   - [Resources](#resources)
   - [Events](#events)
+  - [Relations](#relations)
 - [Advanced Features](#advanced-features)
   - [System Composition](#system-composition)
   - [Custom System Registries](#custom-system-registries)
@@ -435,6 +436,122 @@ pub fn main() !void {
     // recommended to discard unhandled events later on
     collision_events.discardUnhandled();
 }
+```
+
+### Relations
+
+Relations allow you to create connections between entities with minimal memory overhead. The system uses an adaptive hybrid approach where relations can be either component-based (zero overhead for sparse relations) or indexed (for efficient traversal of many relations).
+
+#### Relation Types
+
+```zig
+const zevy_ecs = @import("zevy_ecs");
+
+// Non-indexed relation
+const AttachedTo = struct {};
+
+// Indexed exclusive relation (parent-child hierarchy)
+const Child = struct {
+    pub const relation_config = zevy_ecs.relations.RelationConfig{
+        .indexed = true,    // Creates bidirectional indices
+        .exclusive = true,  // Entity can only have one parent
+    };
+};
+
+// Indexed non-exclusive relation (entity can own multiple items)
+const Owns = struct {
+    pub const relation_config = zevy_ecs.relations.RelationConfig{
+        .indexed = true,
+        .exclusive = false,
+    };
+};
+
+// Relation with custom data
+const SocketData = struct {
+    socket_name: []const u8,
+};
+```
+
+#### Basic Usage
+
+```zig
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    var manager = try zevy_ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    var rel_manager = zevy_ecs.relations.RelationManager.init(allocator);
+    defer rel_manager.deinit();
+
+    // Create entities
+    const parent = manager.create(.{Transform{}});
+    const child1 = manager.create(.{Transform{}});
+    const child2 = manager.create(.{Transform{}});
+
+    // Add parent-child relations
+    try rel_manager.add(&manager, child1, parent, Child);
+    try rel_manager.add(&manager, child2, parent, Child);
+
+    // Query children of parent
+    const children = try rel_manager.getChildren(parent, Child);
+    for (children) |child| {
+        std.debug.print("Child: {d}\n", .{child.id});
+    }
+
+    // Get parent of child
+    if (try rel_manager.getParent(&manager, child1, Child)) |p| {
+        std.debug.print("Parent: {d}\n", .{p.id});
+    }
+
+    // Check if relation exists
+    if (try rel_manager.has(&manager, child1, parent, Child)) {
+        std.debug.print("Child1 has parent relation\n", .{});
+    }
+
+    // Remove relation
+    try rel_manager.remove(&manager, child1, parent, Child);
+}
+```
+
+#### Relations with Data
+
+```zig
+// Add relation with custom data
+const attachment = manager.create(.{Transform{}});
+const weapon = manager.create(.{Transform{}});
+
+try rel_manager.addWithData(
+    &manager,
+    attachment,
+    weapon,
+    SocketData,
+    .{ .socket_name = "hand_socket" },
+);
+
+// Access relation data via component
+if (try manager.getComponent(attachment, zevy_ecs.relations.Relation(SocketData))) |rel| {
+    std.debug.print("Socket: {s}\n", .{rel.data.socket_name});
+    std.debug.print("Attached to: {d}\n", .{rel.target.id});
+}
+```
+
+#### Non-Exclusive Relations
+
+```zig
+// Entity can own multiple items
+const player = manager.create(.{Transform{}});
+const sword = manager.create(.{Transform{}});
+const shield = manager.create(.{Transform{}});
+const potion = manager.create(.{Transform{}});
+
+try rel_manager.add(&manager, player, sword, Owns);
+try rel_manager.add(&manager, player, shield, Owns);
+try rel_manager.add(&manager, player, potion, Owns);
+
+// Get all owned items
+const items = try rel_manager.getParents(player, Owns);
+std.debug.print("Player owns {d} items\n", .{items.len});
 ```
 
 ## Advanced Features
@@ -1044,53 +1161,35 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 | Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------- | ---------- | ------------- | ------------- | --------- |
-| Create 100 Entities     | 3          | 13.100 us/op  | 13.474 KB/op  | 3/op      |
-| Create 1000 Entities    | 3          | 91.066 us/op  | 116.588 KB/op | 8/op      |
-| Create 10000 Entities   | 3          | 754.666 us/op | 1.661 MB/op   | 18/op     |
-| Create 100000 Entities  | 3          | 6.593 ms/op   | 18.296 MB/op  | 27/op     |
-| Create 1000000 Entities | 3          | 71.098 ms/op  | 232.605 MB/op | 39/op     |
+| Create 100 Entities     | 5          | 10.120 us/op  | 8.084 KB/op   | 1/op      |
+| Create 1000 Entities    | 5          | 85.300 us/op  | 115.519 KB/op | 5/op      |
+| Create 10000 Entities   | 5          | 730.660 us/op | 1.506 MB/op   | 11/op     |
+| Create 100000 Entities  | 5          | 7.247 ms/op   | 22.970 MB/op  | 18/op     |
+| Create 1000000 Entities | 5          | 67.347 ms/op  | 210.044 MB/op | 24/op     |
 
 | Benchmark                     | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------------- | ---------- | ------------- | ------------- | --------- |
-| Batch Create 100 Entities     | 3          | 17.333 us/op  | 13.474 KB/op  | 3/op      |
-| Batch Create 1000 Entities    | 3          | 74.166 us/op  | 89.682 KB/op  | 5/op      |
-| Batch Create 10000 Entities   | 3          | 453.033 us/op | 1.019 MB/op   | 7/op      |
-| Batch Create 100000 Entities  | 3          | 3.512 ms/op   | 12.529 MB/op  | 7/op      |
-| Batch Create 1000000 Entities | 3          | 34.607 ms/op  | 144.706 MB/op | 8/op      |
+| Batch Create 100 Entities     | 5          | 11.160 us/op  | 8.084 KB/op   | 1/op      |
+| Batch Create 1000 Entities    | 5          | 59.960 us/op  | 95.121 KB/op  | 4/op      |
+| Batch Create 10000 Entities   | 5          | 410.920 us/op | 1.073 MB/op   | 5/op      |
+| Batch Create 100000 Entities  | 5          | 4.463 ms/op   | 18.601 MB/op  | 6/op      |
+| Batch Create 1000000 Entities | 5          | 36.984 ms/op  | 153.164 MB/op | 5/op      |
 
 | Benchmark                         | Operations | Time/op       | Memory/op  | Allocs/op |
 | --------------------------------- | ---------- | ------------- | ---------- | --------- |
-| Run 7 Systems on 100 Entities     | 1          | 7.300 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000 Entities    | 1          | 6.700 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 10000 Entities   | 1          | 57.500 us/op  | 0.000 B/op | 0/op      |
-| Run 7 Systems on 100000 Entities  | 1          | 534.200 us/op | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000000 Entities | 1          | 5.399 ms/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100 Entities     | 5          | 2.320 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000 Entities    | 5          | 5.800 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 10000 Entities   | 5          | 52.260 us/op  | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100000 Entities  | 5          | 524.040 us/op | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000000 Entities | 5          | 5.741 ms/op   | 0.000 B/op | 0/op      |
 
-#### 3 GHz, single threaded, ReleaseFast
-
-| Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
-| ----------------------- | ---------- | ------------- | ------------- | --------- |
-| Create 100 Entities     | 3          | 23.933 us/op  | 13.474 KB/op  | 3/op      |
-| Create 1000 Entities    | 3          | 131.766 us/op | 116.588 KB/op | 8/op      |
-| Create 10000 Entities   | 3          | 1.226 ms/op   | 1.661 MB/op   | 18/op     |
-| Create 100000 Entities  | 3          | 11.391 ms/op  | 18.296 MB/op  | 27/op     |
-| Create 1000000 Entities | 3          | 140.525 ms/op | 232.605 MB/op | 39/op     |
-
-| Benchmark                     | Operations | Time/op       | Memory/op     | Allocs/op |
-| ----------------------------- | ---------- | ------------- | ------------- | --------- |
-| Batch Create 100 Entities     | 3          | 18.200 us/op  | 13.474 KB/op  | 3/op      |
-| Batch Create 1000 Entities    | 3          | 88.733 us/op  | 89.682 KB/op  | 5/op      |
-| Batch Create 10000 Entities   | 3          | 652.633 us/op | 1.019 MB/op   | 7/op      |
-| Batch Create 100000 Entities  | 3          | 6.792 ms/op   | 12.529 MB/op  | 7/op      |
-| Batch Create 1000000 Entities | 3          | 66.127 ms/op  | 144.706 MB/op | 8/op      |
-
-| Benchmark                         | Operations | Time/op       | Memory/op  | Allocs/op |
-| --------------------------------- | ---------- | ------------- | ---------- | --------- |
-| Run 7 Systems on 100 Entities     | 1          | 8.900 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000 Entities    | 1          | 8.800 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 10000 Entities   | 1          | 68.100 us/op  | 0.000 B/op | 0/op      |
-| Run 7 Systems on 100000 Entities  | 1          | 790.000 us/op | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000000 Entities | 1          | 8.072 ms/op   | 0.000 B/op | 0/op      |
+| Benchmark                               | Operations | Time/op       | Memory/op  | Allocs/op |
+| --------------------------------------- | ---------- | ------------- | ---------- | --------- |
+| Scene Graph Transforms 100 Entities     | 5          | 720.000 ns/op | 0.000 B/op | 0/op      |
+| Scene Graph Transforms 1000 Entities    | 5          | 5.440 us/op   | 0.000 B/op | 0/op      |
+| Scene Graph Transforms 10000 Entities   | 5          | 54.760 us/op  | 0.000 B/op | 0/op      |
+| Scene Graph Transforms 100000 Entities  | 5          | 560.540 us/op | 0.000 B/op | 0/op      |
+| Scene Graph Transforms 1000000 Entities | 5          | 5.737 ms/op   | 0.000 B/op | 0/op      |
 
 ## License
 
@@ -1099,6 +1198,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## Contributing
 
 Contributions are welcome!
-
-- Issues: Please describe in detail.
-- Pull Requests: Fork the repository, make your changes, and submit a pull request. Please ensure your code adheres to the existing style and includes tests for new functionality.
+Please describe issues in detail. Bug reports, feature requests, etc. Pull requests are also welcome.

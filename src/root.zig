@@ -74,6 +74,13 @@ const state = @import("state.zig");
 /// StateManager provides state management functionality for a specific enum type
 pub const StateManager = state.StateManager;
 
+// Relations
+pub const relations = @import("relations.zig");
+/// RelationManager provides entity relationship management with optional indexing
+pub const RelationManager = relations.RelationManager;
+/// Relation component type for representing relationships between entities
+pub const Relation = relations.Relation;
+
 pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");
 
@@ -88,6 +95,7 @@ test {
     std.testing.refAllDeclsRecursive(@import("archetype_storage_tests.zig"));
     std.testing.refAllDeclsRecursive(@import("systems_tests.zig"));
     std.testing.refAllDeclsRecursive(@import("serialize_tests.zig"));
+    std.testing.refAllDeclsRecursive(@import("relations_tests.zig"));
     std.testing.refAllDecls(world);
     std.testing.refAllDecls(scheduler);
     std.testing.refAllDecls(state);
