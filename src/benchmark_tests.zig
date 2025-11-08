@@ -217,7 +217,7 @@ test "ECS Benchmark - Entity Creation" {
 
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
-    Benchmark.printMarkdownHeader();
+    Benchmark.printMarkdownHeaderWithTitle("Creation");
     for (counts) |count| {
         var manager = try Manager.init(bench.getCountingAllocator());
         defer manager.deinit();
@@ -226,7 +226,7 @@ test "ECS Benchmark - Entity Creation" {
         defer allocator.free(label);
 
         const result = try bench.run(label, 5, benchCreateEntities, .{ &manager, count });
-        Benchmark.printResultFormatted(result, .markdown);
+        Benchmark.printResult(result, .markdown);
     }
 
     std.debug.print("\n", .{});
@@ -239,16 +239,16 @@ test "ECS Benchmark - Batch Entity Creation" {
 
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
-    Benchmark.printMarkdownHeader();
+    Benchmark.printMarkdownHeaderWithTitle("Batch Creation");
     for (counts) |count| {
         var manager = try Manager.init(bench.getCountingAllocator());
         defer manager.deinit();
 
-        const label = try std.fmt.allocPrint(allocator, "Batch Create {d} Entities", .{count});
+        const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
         defer allocator.free(label);
 
         const result = try bench.run(label, 5, batchCreateEntities, .{ &manager, count, allocator });
-        Benchmark.printResultFormatted(result, .markdown);
+        Benchmark.printResult(result, .markdown);
     }
 
     std.debug.print("\n", .{});
@@ -261,7 +261,7 @@ test "ECS Benchmark - Mixed Systems" {
 
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
-    Benchmark.printMarkdownHeader();
+    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
     for (counts) |count| {
         var manager = try Manager.init(bench.getCountingAllocator());
         defer manager.deinit();
@@ -275,7 +275,7 @@ test "ECS Benchmark - Mixed Systems" {
 
         const result = try bench.run(label, 5, benchMixedSystems, .{ &manager, &systems });
 
-        Benchmark.printResultFormatted(result, .markdown);
+        Benchmark.printResult(result, .markdown);
     }
 
     std.debug.print("\n", .{});
@@ -420,7 +420,7 @@ test "ECS Benchmark - Scene Graph Relations" {
 
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
-    Benchmark.printMarkdownHeader();
+    Benchmark.printMarkdownHeaderWithTitle("Relations");
     for (counts) |count| {
         var manager = try Manager.init(bench.getCountingAllocator());
         defer manager.deinit();
@@ -434,12 +434,12 @@ test "ECS Benchmark - Scene Graph Relations" {
         // Create system that uses Query with Relation component
         const system_handle = manager.createSystemCached(systemUpdateTransforms, root.DefaultParamRegistry);
 
-        const label = try std.fmt.allocPrint(allocator, "Scene Graph Transforms {d} Entities", .{count});
+        const label = try std.fmt.allocPrint(allocator, "Scene Graph {d} Entities", .{count});
         defer allocator.free(label);
 
         // Benchmark running the system
         const result = try bench.run(label, 5, benchRunTransformSystem, .{ &manager, system_handle });
-        Benchmark.printResultFormatted(result, .markdown);
+        Benchmark.printResult(result, .markdown);
     }
 
     std.debug.print("\n", .{});

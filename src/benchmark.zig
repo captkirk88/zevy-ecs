@@ -239,6 +239,11 @@ pub const Benchmark = struct {
         std.debug.print("|-----------|------------|---------|----------|----------|\n", .{});
     }
 
+    pub fn printMarkdownHeaderWithTitle(title: []const u8) void {
+        std.debug.print("#### {s}\n\n", .{title});
+        Self.printMarkdownHeader();
+    }
+
     fn printResultMarkdown(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
         const mem = formatMemory(result.avg_bytes);
@@ -256,10 +261,14 @@ pub const Benchmark = struct {
 
     /// Print HTML document header
     pub fn printHtmlHeader() void {
+        Self.printHtmlHeaderWithTitle("Benchmark Results");
+    }
+
+    pub fn printHtmlHeaderWithTitle(title: []const u8) void {
         std.debug.print("<!DOCTYPE html>\n", .{});
         std.debug.print("<html>\n", .{});
         std.debug.print("<head>\n", .{});
-        std.debug.print("  <title>Benchmark Results</title>\n", .{});
+        std.debug.print("  <title>{s}</title>\n", .{title});
         std.debug.print("  <style>\n", .{});
         std.debug.print("    table {{ border-collapse: collapse; width: 100%; }}\n", .{});
         std.debug.print("    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}\n", .{});
@@ -268,7 +277,7 @@ pub const Benchmark = struct {
         std.debug.print("  </style>\n", .{});
         std.debug.print("</head>\n", .{});
         std.debug.print("<body>\n", .{});
-        std.debug.print("  <h1>Benchmark Results</h1>\n", .{});
+        std.debug.print("  <h1>{s}</h1>\n", .{title});
         std.debug.print("  <table>\n", .{});
         std.debug.print("    <tr>\n", .{});
         std.debug.print("      <th>Benchmark</th>\n", .{});
@@ -299,12 +308,7 @@ pub const Benchmark = struct {
         std.debug.print("  </tr>\n", .{});
     }
 
-    /// Print a single benchmark result (legacy, defaults to plain text)
-    pub fn printResult(result: BenchmarkResult) void {
-        printResultPlain(result);
-    }
-
-    pub fn printResultFormatted(result: BenchmarkResult, format: OutputFormat) void {
+    pub fn printResult(result: BenchmarkResult, format: OutputFormat) void {
         switch (format) {
             .plain => printResultPlain(result),
             .markdown => printResultMarkdown(result),
@@ -313,16 +317,14 @@ pub const Benchmark = struct {
     }
 
     /// Print benchmark results with specified format
-    pub fn printResultsFormatted(self: *Self, format: OutputFormat) void {
+    pub fn printResults(self: *Self, format: OutputFormat) void {
         switch (format) {
             .plain => {
-                std.debug.print("Benchmark Results:\n", .{});
                 for (self.results.items) |result| {
                     printResultPlain(result);
                 }
             },
             .markdown => {
-                std.debug.print("# Benchmark Results\n\n", .{});
                 printMarkdownHeader();
                 for (self.results.items) |result| {
                     printResultMarkdown(result);
@@ -337,10 +339,5 @@ pub const Benchmark = struct {
                 printHtmlFooter();
             },
         }
-    }
-
-    /// Print benchmark results (legacy, defaults to plain text)
-    pub fn printResults(self: *Self) void {
-        self.printResultsFormatted(.plain);
     }
 };
