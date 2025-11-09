@@ -53,6 +53,8 @@ const TeamCollisionQueryInclude = struct { pos: Position, team: Team };
 const TargetTrackingQueryInclude = struct { pos: Position, target: Target };
 const VelocityDampingQueryInclude = struct { vel: Velocity };
 
+const BENCH_OPT_COUNT = 3;
+
 // Benchmark 1: Entity Creation Performance
 fn benchCreateEntities(manager: *Manager, count: usize) void {
     for (0..count) |i| {
@@ -225,7 +227,7 @@ test "ECS Benchmark - Entity Creation" {
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, 5, benchCreateEntities, .{ &manager, count });
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchCreateEntities, .{ &manager, count });
         Benchmark.printResult(result, .markdown);
     }
 
@@ -247,7 +249,7 @@ test "ECS Benchmark - Batch Entity Creation" {
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, 5, batchCreateEntities, .{ &manager, count, allocator });
+        const result = try bench.run(label, BENCH_OPT_COUNT, batchCreateEntities, .{ &manager, count, allocator });
         Benchmark.printResult(result, .markdown);
     }
 
@@ -273,7 +275,7 @@ test "ECS Benchmark - Mixed Systems" {
         const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, 5, benchMixedSystems, .{ &manager, &systems });
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystems, .{ &manager, &systems });
 
         Benchmark.printResult(result, .markdown);
     }
@@ -438,7 +440,7 @@ test "ECS Benchmark - Scene Graph Relations" {
         defer allocator.free(label);
 
         // Benchmark running the system
-        const result = try bench.run(label, 5, benchRunTransformSystem, .{ &manager, system_handle });
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
         Benchmark.printResult(result, .markdown);
     }
 

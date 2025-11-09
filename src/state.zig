@@ -290,10 +290,10 @@ test "OnEnter and OnExit systems" {
     const playing_enter_handle = ecs.createSystemCached(playing_enter_system, registry.DefaultParamRegistry);
     const playing_exit_handle = ecs.createSystemCached(playing_exit_system, registry.DefaultParamRegistry);
 
-    scheduler.addSystem(OnEnter(GameState.Menu), menu_enter_handle);
-    scheduler.addSystem(OnExit(GameState.Menu), menu_exit_handle);
-    scheduler.addSystem(OnEnter(GameState.Playing), playing_enter_handle);
-    scheduler.addSystem(OnExit(GameState.Playing), playing_exit_handle);
+    scheduler.addSystem(OnEnter(GameState.Menu), menu_enter_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(OnExit(GameState.Menu), menu_exit_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(OnEnter(GameState.Playing), playing_enter_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(OnExit(GameState.Playing), playing_exit_handle, registry.DefaultParamRegistry);
 
     // Transition to Menu state - should trigger OnEnter(Menu)
     try scheduler.transitionTo(GameState, .Menu);
@@ -383,9 +383,9 @@ test "InState systems" {
     const playing_handle = ecs.createSystemCached(playing_system, registry.DefaultParamRegistry);
     const paused_handle = ecs.createSystemCached(paused_system, registry.DefaultParamRegistry);
 
-    scheduler.addSystem(InState(GameState.Menu), menu_handle);
-    scheduler.addSystem(InState(GameState.Playing), playing_handle);
-    scheduler.addSystem(InState(GameState.Paused), paused_handle);
+    scheduler.addSystem(InState(GameState.Menu), menu_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(InState(GameState.Playing), playing_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(InState(GameState.Paused), paused_handle, registry.DefaultParamRegistry);
 
     // Transition to Menu state
     try scheduler.transitionTo(GameState, .Menu);

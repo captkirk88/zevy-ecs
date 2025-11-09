@@ -47,7 +47,7 @@ pub const Manager = struct {
     free_ids: std.ArrayList(u32), // Reusable entity IDs
     world: World, // Manages archetypes and component storage
     resources: std.AutoHashMap(u64, ResourceEntry), // TypeHash -> ResourceEntry
-    systems: std.ArrayList(?*anyopaque), // Stored systems
+    systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
 
     /// Initialize the ECS with an optional custom allocator.
     /// If no allocator is provided, the default page allocator is used.
@@ -59,7 +59,7 @@ pub const Manager = struct {
             .free_ids = try std.ArrayList(u32).initCapacity(allocator, 256),
             .world = World.init(allocator),
             .resources = std.AutoHashMap(u64, ResourceEntry).init(allocator),
-            .systems = try std.ArrayList(?*anyopaque).initCapacity(allocator, 64),
+            .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
         };
     }
 
@@ -76,13 +76,12 @@ pub const Manager = struct {
         self.resources.clearAndFree();
         self.resources.deinit();
 
-        for (self.systems.items) |item| {
-            if (item) |p| {
-                const system: *sys.System(void) = @ptrCast(@alignCast(p));
-                self.allocator.destroy(system);
-            }
+        var sys_it = self.systems.valueIterator();
+        while (sys_it.next()) |sys_ptr| {
+            const system: *sys.System(void) = @ptrCast(@alignCast(sys_ptr.*));
+            self.allocator.destroy(system);
         }
-        self.systems.deinit(self.allocator);
+        self.systems.deinit();
     }
 
     /// Get the total number of alive entities
@@ -370,46 +369,75 @@ pub const Manager = struct {
     /// Create and cache a system from a function and parameter registry.
     /// The system function should match the expected signature for systems (see `createSystem`).
     /// The returned SystemHandle can be used to run the system later.
+    /// If the system is already cached, returns the existing handle instead of creating a duplicate.
     pub fn createSystemCached(self: *Manager, comptime system_fn: anytype, comptime ParamRegistry: type) sys.SystemHandle(sys.ToSystemReturnType(system_fn)) {
         const ReturnType = sys.ToSystemReturnType(system_fn);
+
+        // Generate a stable hash from the function type name and parameter registry type
+        // Using type names ensures stability across optimization levels
+        const fn_type_name = @typeName(@TypeOf(system_fn));
+        const param_registry_name = @typeName(ParamRegistry);
+        const fn_hash = hash.Wyhash.hash(0, fn_type_name);
+        const system_hash = hash.Wyhash.hash(fn_hash, param_registry_name);
+
+        // Check if system already exists
+        if (self.systems.get(system_hash)) |_| {
+            return sys.SystemHandle(ReturnType){ .handle = system_hash };
+        }
+
+        // Create and cache new system
         const s = self.createSystem(system_fn, ParamRegistry);
         const sys_ptr = self.allocator.create(@TypeOf(s)) catch |err| @panic(@errorName(err));
         sys_ptr.* = s;
-        const anyopaque_ptr: ?*anyopaque = @ptrCast(sys_ptr);
-        self.systems.append(self.allocator, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        const handle = sys.SystemHandle(ReturnType){ .handle = self.systems.items.len - 1 };
-        return handle;
+        const anyopaque_ptr: *anyopaque = @ptrCast(sys_ptr);
+        self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
+        return sys.SystemHandle(ReturnType){ .handle = system_hash };
     }
 
     /// Run a cached system by its SystemHandle.
     pub fn runSystem(self: *Manager, sys_handle: anytype) anyerror!@TypeOf(sys_handle).return_type {
         const ReturnType = @TypeOf(sys_handle).return_type;
-        if (sys_handle.handle >= self.systems.items.len) return error.InvalidSystemHandle;
-        const sys_ptr = self.systems.items[sys_handle.handle];
-        if (sys_ptr == null) return error.NullSystemPointer;
-        const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr.?));
+        const sys_ptr = self.systems.get(sys_handle.handle) orelse return error.InvalidSystemHandle;
+        const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr));
         return try s.run(self, s.ctx);
     }
 
     /// Run a cached system by its untyped handle.
     pub fn runSystemUntyped(self: *Manager, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
-        if (sys_handle.handle >= self.systems.items.len) return error.InvalidSystemHandle;
-        const sys_ptr = self.systems.items[sys_handle.handle];
-        if (sys_ptr == null) return error.NullSystemPointer;
-        const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr.?));
+        const sys_ptr = self.systems.get(sys_handle.handle) orelse return error.InvalidSystemHandle;
+        const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr));
         return try s.run(self, s.ctx);
     }
 
     /// Cache an existing system pointer.
     /// The returned SystemHandle can be used to run the system later.
+    /// If the system is already cached (based on its memory address), returns the existing handle.
     pub fn cacheSystem(self: *Manager, system: anytype) sys.SystemHandle(@TypeOf(system.*).return_type) {
         const ReturnType = @TypeOf(system.*).return_type;
+
+        // Generate hash from the system's run function pointer
+        const run_fn_addr = @intFromPtr(system.run);
+        const ctx_addr = @intFromPtr(system.ctx);
+        const system_hash = hash.Wyhash.hash(run_fn_addr, std.mem.asBytes(&ctx_addr));
+
+        // Check if system already exists
+        if (self.systems.get(system_hash)) |_| {
+            return sys.SystemHandle(ReturnType){ .handle = system_hash };
+        }
+
+        // Create and cache new system
         const sys_ptr = self.allocator.create(@TypeOf(system.*)) catch |err| @panic(@errorName(err));
         sys_ptr.* = system.*;
-        const anyopaque_ptr: ?*anyopaque = @ptrCast(sys_ptr);
-        self.systems.append(self.allocator, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        const handle = sys.SystemHandle(ReturnType){ .handle = self.systems.items.len - 1 };
-        return handle;
+        const anyopaque_ptr: *anyopaque = @ptrCast(sys_ptr);
+        self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
+        return sys.SystemHandle(ReturnType){ .handle = system_hash };
+    }
+
+    pub fn removeSystem(self: *Manager, sys_handle: anytype) void {
+        const sys_ptr = self.systems.fetchRemove(sys_handle.handle) orelse return;
+
+        const system: *sys.System(@TypeOf(sys_handle).return_type) = @ptrCast(@alignCast(sys_ptr.value));
+        self.allocator.destroy(system);
     }
 };
 
@@ -449,4 +477,71 @@ test "Create entity using create() with null or empty" {
     }
     std.debug.print("Create entity using create() with null or empty TEST\n", .{});
     std.debug.print("Counted {d} entities\n", .{count});
+}
+
+test "removeSystem removes cached system" {
+    var ecs = try Manager.init(std.testing.allocator);
+    defer ecs.deinit();
+
+    // Create a test resource to verify system execution
+    const TestCounter = struct { count: u32 };
+    const counter = try ecs.addResource(TestCounter, .{ .count = 0 });
+
+    // Define a test system that increments the counter
+    const test_system = struct {
+        pub fn run(_: *Manager, res: sys.Res(TestCounter)) void {
+            res.ptr.count += 1;
+        }
+    }.run;
+
+    // Cache the system
+    const handle = ecs.createSystemCached(test_system, registry.DefaultParamRegistry);
+
+    // Verify the system is cached and runs
+    try std.testing.expect(ecs.systems.count() == 1);
+    _ = try ecs.runSystem(handle);
+    try std.testing.expect(counter.count == 1);
+
+    // Remove the system
+    ecs.removeSystem(handle);
+
+    // Verify the system is removed from cache
+    try std.testing.expect(ecs.systems.count() == 0);
+
+    // Verify running the removed system returns error
+    const result = ecs.runSystem(handle);
+    try std.testing.expectError(error.InvalidSystemHandle, result);
+}
+
+test "removeSystem with same function cached twice returns same handle" {
+    var ecs = try Manager.init(std.testing.allocator);
+    defer ecs.deinit();
+
+    const TestCounter = struct { count: u32 };
+    _ = try ecs.addResource(TestCounter, .{ .count = 0 });
+
+    const test_system = struct {
+        pub fn run(_: *Manager, res: sys.Res(TestCounter)) void {
+            res.ptr.count += 1;
+        }
+    }.run;
+
+    // Cache the same system twice - should return the same handle
+    const handle1 = ecs.createSystemCached(test_system, registry.DefaultParamRegistry);
+    const handle2 = ecs.createSystemCached(test_system, registry.DefaultParamRegistry);
+
+    // Verify they are the same handle
+    try std.testing.expect(handle1.handle == handle2.handle);
+    // Verify only one system is cached
+    try std.testing.expect(ecs.systems.count() == 1);
+
+    // Remove the system once
+    ecs.removeSystem(handle1);
+
+    // Verify the system is removed
+    try std.testing.expect(ecs.systems.count() == 0);
+
+    // Verify both handles now return error
+    try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle1));
+    try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle2));
 }

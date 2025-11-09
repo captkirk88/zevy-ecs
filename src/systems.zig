@@ -6,11 +6,54 @@ const registry = @import("systems.registry.zig");
 const scheduler_mod = @import("scheduler.zig");
 const reflect = @import("reflect.zig");
 
+pub const SystemType = enum {
+    /// A system represented as a function
+    func,
+    /// A system represented as a typed SystemHandle
+    handle,
+    /// A system represented as an UntypedSystemHandle
+    untyped,
+    /// Not a valid system type
+    invalid,
+};
+
+/// Determines the SystemType from a type.
+pub fn getSystemTypeFromType(comptime T: type) SystemType {
+    const type_info = @typeInfo(T);
+
+    // Check if it's a function
+    if (type_info == .@"fn") {
+        return .func;
+    }
+
+    // Check if it's a pointer to a function
+    if (type_info == .pointer) {
+        const ptr_info = type_info.pointer;
+        if (@typeInfo(ptr_info.child) == .@"fn") {
+            return .func;
+        }
+    }
+
+    // Check if it's an UntypedSystemHandle
+    if (T == UntypedSystemHandle) {
+        return .untyped;
+    }
+
+    // Check if it's a typed SystemHandle by looking for the handle field and return_type decl
+    if (type_info == .@"struct") {
+        if (@hasField(T, "handle") and @hasDecl(T, "return_type")) {
+            return .handle;
+        }
+    }
+
+    return .invalid;
+}
+
 /// A handle to a cached system.
-/// Stores the index and optionally the return type at compile time.
+/// Stores the hash and the return type at compile time.
 pub fn SystemHandle(comptime ReturnType: type) type {
     return struct {
-        handle: usize,
+        handle: u64,
 
         pub const return_type = ReturnType;
 
@@ -22,7 +65,7 @@ pub fn SystemHandle(comptime ReturnType: type) type {
 
 /// Type-erased system handle for storage in containers.
 pub const UntypedSystemHandle = struct {
-    handle: usize,
+    handle: u64,
 
     pub fn formatNumber(self: UntypedSystemHandle, writer: anytype, _: std.fmt.Number) !void {
         try writer.print("{d}", .{self.handle});
@@ -83,7 +126,8 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
     if (!comptime reflect.verifyFuncArgs(ParamRegistry, "apply", &[_]type{ *ecs_mod.Manager, type })) {
         @compileError("ParamRegistry must have an 'apply' function with signature: fn (*ecs_mod.Manager, type) type");
     }
-    std.log.debug("Creating trampoline for system: {s}", .{@typeName(system_type)});
+    const log = std.log.scoped(.zevy_ecs);
+    log.debug("Creating trampoline for system: {s}", .{@typeName(system_type)});
     return &struct {
         pub fn trampoline(ecs: *ecs_mod.Manager, ctx: ?*anyopaque) anyerror!ReturnType {
             if (ctx == null) return error.SystemContextNull;

@@ -134,7 +134,8 @@ pub fn main() !void {
         item.pos.y += item.vel.dy;
     }
 
-    const move_system = manager.createSystemCached(movementSystem, zevy_ecs.DefaultParamRegistry);
+    // Create and run system
+    const move_system = manager.cacheSystem(&zevy_ecs.ToSystem(movementSystem, zevy_ecs.DefaultParamRegistry));
     try manager.runSystem(move_system);
 }
 
@@ -317,17 +318,12 @@ pub fn main() !void {
     // Add a resource
     _ = try manager.addResource(DeltaTime, .{ .value = 0.016 });
 
-    // Create uncached system
-    var system = manager.createSystem(movementSystem, zevy_ecs.DefaultParamRegistry);
-    // Cache later for reuse
-    const system_handle = manager.cacheSystem(movementSystem);
+    // Cache and reuse systems
+    const system_handle = manager.cacheSystem(&zevy_ecs.ToSystem(movementSystem, zevy_ecs.DefaultParamRegistry));
     try manager.runSystem(system_handle);
 
-    // or run raw
-    _ = system.run(&manager, system.ctx);
-
-    // Or cache and reuse systems
-    const handle = manager.createSystemCached(damageSystem, zevy_ecs.DefaultParamRegistry);
+    // Or cache another system
+    const handle = manager.cacheSystem(&zevy_ecs.ToSystem(damageSystem, zevy_ecs.DefaultParamRegistry));
     try manager.runSystem(handle);
 }
 ```
@@ -519,7 +515,7 @@ pub fn main() !void {
     defer manager.deinit();
 
     // RelationManager is automatically created as a resource when using Relations parameter
-    const system = manager.createSystemCached(setupHierarchy, zevy_ecs.DefaultParamRegistry);
+    const system = manager.cacheSystem(&zevy_ecs.ToSystem(setupHierarchy, zevy_ecs.DefaultParamRegistry));
     try manager.runSystem(system);
 }
 ```
@@ -910,11 +906,8 @@ pub fn main() !void {
     defer scheduler.deinit();
 
     // Add systems to stages using Stage() function
-    const movement_handle = manager.createSystemCached(movementSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Update), movement_handle);
-
-    const render_handle = manager.createSystemCached(renderSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Draw), render_handle);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Update), movementSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Draw), renderSystem, zevy_ecs.DefaultParamRegistry);
 
     // Run all systems in a specific stage
     try scheduler.runStage(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update));
@@ -981,14 +974,9 @@ pub fn main() !void {
     };
 
     // Add systems to custom stages using Stage() function
-    const physics_handle = manager.createSystemCached(physicsSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(CustomStages.Physics), physics_handle);
-
-    const ai_handle = manager.createSystemCached(aiSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(CustomStages.AI), ai_handle);
-
-    const custom_handle = manager.createSystemCached(customSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(HashStages.CustomLogic), custom_handle);
+    scheduler.addSystem(zevy_ecs.Stage(CustomStages.Physics), physicsSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(CustomStages.AI), aiSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.Stage(HashStages.CustomLogic), customSystem, zevy_ecs.DefaultParamRegistry);
 
     // Run stages in a range (includes all custom stages in the range)
     try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update), zevy_ecs.Stage(zevy_ecs.Stages.PostUpdate));
@@ -1049,17 +1037,14 @@ pub fn main() !void {
     // Set initial state (or use NextState in a startup system)
     try scheduler.transitionTo(GameState, .MainMenu);
 
-    // Add state-specific systems
-    const menu_handle = manager.createSystemCached(menuSystem, zevy_ecs.DefaultParamRegistry);
-    const game_handle = manager.createSystemCached(gameplaySystem, zevy_ecs.DefaultParamRegistry);
-
+    // Add state-specific systems - pass raw functions and param registry
     // Systems run when entering/exiting states
-    scheduler.addSystem(zevy_ecs.OnEnter(GameState.Playing), game_handle);
-    scheduler.addSystem(zevy_ecs.OnExit(GameState.Playing), cleanup_handle);
+    scheduler.addSystem(zevy_ecs.OnEnter(GameState.Playing), gameplaySystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.OnExit(GameState.Playing), cleanupSystem, zevy_ecs.DefaultParamRegistry);
 
     // Systems run while in a specific state (call manually in game loop)
-    scheduler.addSystem(zevy_ecs.InState(GameState.MainMenu), menu_handle);
-    scheduler.addSystem(zevy_ecs.InState(GameState.Playing), game_handle);
+    scheduler.addSystem(zevy_ecs.InState(GameState.MainMenu), menuSystem, zevy_ecs.DefaultParamRegistry);
+    scheduler.addSystem(zevy_ecs.InState(GameState.Playing), gameplaySystem, zevy_ecs.DefaultParamRegistry);
 
     // In your game loop, run systems for the active state
     try scheduler.runActiveStateSystems(GameState);
@@ -1115,12 +1100,10 @@ pub fn main() !void {
     try scheduler.registerEvent(&manager, InputEvent);
 
     // Add system that writes events
-    const input_handle = manager.createSystemCached(inputSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.First), input_handle);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.First), inputSystem, zevy_ecs.DefaultParamRegistry);
 
     // Add system that reads events
-    const handler_handle = manager.createSystemCached(inputHandlerSystem, zevy_ecs.DefaultParamRegistry);
-    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Update), handler_handle);
+    scheduler.addSystem(zevy_ecs.Stage(zevy_ecs.Stages.Update), inputHandlerSystem, zevy_ecs.DefaultParamRegistry);
 
     // Run the stages - cleanup happens automatically in Last stage
     try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));

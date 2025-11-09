@@ -177,16 +177,19 @@ pub const Scheduler = struct {
         self.states.deinit();
     }
 
-    pub fn addSystem(self: *Scheduler, stage: StageId, system_handle: anytype) void {
+    pub fn addSystem(self: *Scheduler, stage: StageId, system: anytype, comptime param_registry: type) void {
         const gop = self.systems.getOrPut(stage) catch |err| @panic(@errorName(err));
         if (!gop.found_existing) {
             gop.value_ptr.* = std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
         }
-        const untyped_handle = if (@TypeOf(system_handle) == systems.UntypedSystemHandle)
-            system_handle
-        else
-            system_handle.eraseType();
-        gop.value_ptr.append(self.allocator, untyped_handle) catch |err| @panic(@errorName(err));
+        const SystemType = @TypeOf(system);
+        const untyped_system_handle = switch (comptime systems.getSystemTypeFromType(SystemType)) {
+            .func => self.ecs.cacheSystem(&systems.ToSystem(system, param_registry)).eraseType(),
+            .handle => system.eraseType(),
+            .untyped => system,
+            else => std.debug.panic("Invalid system type: {s}. Expected a function or SystemHandle.", .{@typeName(SystemType)}),
+        };
+        gop.value_ptr.append(self.allocator, untyped_system_handle) catch |err| @panic(@errorName(err));
     }
 
     pub fn addStage(self: *Scheduler, stage: StageId) error{ InvalidStageBounds, StageExists, OutOfMemory }!void {
@@ -272,11 +275,8 @@ pub const Scheduler = struct {
             }
         }.cleanup;
 
-        // Create and cache the cleanup system
-        const system_handle = ecs.createSystemCached(cleanup_system, registry.DefaultParamRegistry);
-
         // Add cleanup system
-        self.addSystem(cleanup_stage, system_handle);
+        self.addSystem(cleanup_stage, cleanup_system, registry.DefaultParamRegistry);
     }
 
     // ============================================================================
@@ -622,8 +622,8 @@ test "Scheduler assign outside scope" {
             out.ptr.* = true;
         }
     }.run;
-    const system_handle = ecs.createSystemCached(test_system, registry.DefaultParamRegistry);
-    scheduler.addSystem(custom_stage, system_handle);
+
+    scheduler.addSystem(custom_stage, test_system, registry.DefaultParamRegistry);
 
     // Run stages from First to PostUpdate, which includes the custom stage
     try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
@@ -657,11 +657,9 @@ test "Custom stage types with explicit priorities" {
         pub fn run(_: *ecs_mod.Manager) void {}
     }.run;
 
-    const handle = ecs.createSystemCached(test_sys, registry.DefaultParamRegistry);
-
-    scheduler.addSystem(Stage(CustomStages.EarlyGame), handle);
-    scheduler.addSystem(Stage(CustomStages.LateUpdate), handle);
-    scheduler.addSystem(Stage(CustomStages.PreCleanup), handle);
+    scheduler.addSystem(Stage(CustomStages.EarlyGame), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(Stage(CustomStages.LateUpdate), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(Stage(CustomStages.PreCleanup), test_sys, registry.DefaultParamRegistry);
 
     // Verify stages have correct priority values
     try std.testing.expect(Stage(CustomStages.EarlyGame) == 50_000);
@@ -694,11 +692,9 @@ test "Custom stage types with hash-based IDs" {
         pub fn run(_: *ecs_mod.Manager) void {}
     }.run;
 
-    const handle = ecs.createSystemCached(test_sys, registry.DefaultParamRegistry);
-
-    scheduler.addSystem(Stage(CustomStages.Physics), handle);
-    scheduler.addSystem(Stage(CustomStages.Audio), handle);
-    scheduler.addSystem(Stage(CustomStages.Networking), handle);
+    scheduler.addSystem(Stage(CustomStages.Physics), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(Stage(CustomStages.Audio), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(Stage(CustomStages.Networking), test_sys, registry.DefaultParamRegistry);
 
     // Verify hash-based IDs are in the correct range (2M+)
     try std.testing.expect(Stage(CustomStages.Physics) >= 2_000_000);
