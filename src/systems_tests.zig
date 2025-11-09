@@ -67,9 +67,8 @@ fn eventWriterSystem(_: *Manager, writer: EventWriter(u32)) void {
 
 fn eventReaderSystem(_: *Manager, reader: EventReader(u32)) void {
     var count: usize = 0;
-    var mut_reader = reader;
-    var iter = mut_reader.iter();
-    while (iter.next()) |_| {
+    while (reader.read()) |event| {
+        _ = event;
         count += 1;
     }
     std.testing.expect(count == 2) catch unreachable;

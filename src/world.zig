@@ -85,26 +85,42 @@ pub const World = struct {
             var data_mig = try self.allocator.alloc([]const u8, hashes.len);
             defer self.allocator.free(sizes_mig);
             defer self.allocator.free(data_mig);
+
+            // Temporary storage for copied component data to avoid aliasing
+            var temp_data = try self.allocator.alloc([]u8, hashes.len);
+            defer {
+                for (temp_data) |data| {
+                    if (data.len > 0) self.allocator.free(data);
+                }
+                self.allocator.free(temp_data);
+            }
+
             for (hashes, 0..) |h, i| {
                 // If this is a new component, use new_components
                 var found_new = false;
                 for (new_components) |comp| {
                     if (comp.hash == h) {
                         sizes_mig[i] = comp.size;
-                        data_mig[i] = comp.data;
+                        // Copy new component data to temp storage
+                        temp_data[i] = try self.allocator.alloc(u8, comp.size);
+                        @memcpy(temp_data[i], comp.data[0..comp.size]);
+                        data_mig[i] = temp_data[i];
                         found_new = true;
                         break;
                     }
                 }
                 if (!found_new) {
-                    // Copy from old archetype
+                    // Copy from old archetype to temp storage to avoid aliasing
                     for (src_types, 0..) |src_h, j| {
                         if (src_h == h) {
                             sizes_mig[i] = src_sizes[j];
                             const comp_size = src_sizes[j];
                             const arr = &src_arrays[j];
                             const offset = src_idx * comp_size;
-                            data_mig[i] = arr.items[offset .. offset + comp_size];
+                            // Copy to temporary storage instead of referencing arr.items directly
+                            temp_data[i] = try self.allocator.alloc(u8, comp_size);
+                            @memcpy(temp_data[i], arr.items[offset .. offset + comp_size]);
+                            data_mig[i] = temp_data[i];
                             break;
                         }
                     }

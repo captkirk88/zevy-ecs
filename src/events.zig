@@ -177,10 +177,10 @@ pub fn EventStore(comptime T: type) type {
 
         /// Get a slice of all events in order (oldest first) without consuming
         /// Note: This creates a temporary allocation that must be freed by the caller
-        pub fn getAllEvents(self: *Self) []Event {
+        pub fn getAllEvents(self: *const Self, allocator: std.mem.Allocator) []Event {
             if (self.len == 0) return &[_]Event{};
 
-            var result = self.allocator.alloc(Event, self.len) catch |err| @panic(@errorName(err));
+            var result = allocator.alloc(Event, self.len) catch |err| @panic(@errorName(err));
             for (0..self.len) |i| {
                 result[i] = self.events.items[self.getActualIndex(i)];
             }
@@ -318,7 +318,7 @@ test "EventStore getAllEvents" {
     store.push(200);
     store.push(300);
 
-    const wrappers = store.getAllEvents();
+    const wrappers = store.getAllEvents(allocator);
     defer allocator.free(wrappers);
 
     try std.testing.expectEqual(@as(usize, 3), wrappers.len);

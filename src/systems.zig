@@ -166,7 +166,6 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             const ResolvedArgsTuple = std.meta.Tuple(param_types);
 
             // Build resolved args by calling apply for each param
-            // Use comptime to build the tuple during compilation
             const resolved_args: ResolvedArgsTuple = blk: {
                 var args: ResolvedArgsTuple = undefined;
                 inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
@@ -180,7 +179,7 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             const return_type_info = comptime @typeInfo(return_type);
             const is_error_union = comptime return_type_info == .error_union;
 
-            // Build args tuple
+            // Build args tuple with mutable resolved args
             const all_args_tuple = .{ecs} ++ context.args ++ resolved_args;
             if (is_error_union) {
                 return try @call(.auto, fn_ptr_typed, all_args_tuple);
@@ -395,18 +394,19 @@ pub fn EventReader(comptime T: type) type {
     return struct {
         const Self = @This();
         pub const EventType = T;
+        pub const is_event_reader = true;
         event_store: *events.EventStore(T),
         iterator: ?events.EventStore(T).Iterator = null,
 
         /// Read the next event from the store
-        /// Returns null if no more events are available
-        pub fn read(self: *Self) ?*events.EventStore(T).Event {
+        pub fn read(self: *const Self) ?*events.EventStore(T).Event {
+            var mut_self: *Self = @constCast(self);
             // Initialize iterator if not already done
-            if (self.iterator == null) {
-                self.iterator = self.event_store.iterator();
+            if (mut_self.iterator == null) {
+                mut_self.iterator = mut_self.event_store.iterator();
             }
 
-            if (self.iterator) |*it| {
+            if (mut_self.iterator) |*it| {
                 if (it.next()) |event| {
                     if (!event.handled) {
                         return event;
@@ -422,14 +422,16 @@ pub fn EventReader(comptime T: type) type {
 
         /// Mark the last read event as handled
         pub fn markHandled(self: *Self) void {
-            if (self.iterator) |*it| {
+            var mut_self: *Self = @constCast(self);
+            if (mut_self.iterator) |*it| {
                 it.markHandled();
             }
         }
 
         /// Reset the read position to the beginning
         pub fn reset(self: *Self) void {
-            self.iterator = self.event_store.iterator();
+            var mut_self: *Self = @constCast(self);
+            mut_self.iterator = mut_self.event_store.iterator();
         }
 
         /// Create an iterator for reading events (legacy method)
@@ -438,18 +440,18 @@ pub fn EventReader(comptime T: type) type {
         }
 
         /// Get the number of events currently in the store
-        pub fn len(self: *Self) usize {
+        pub fn len(self: *const Self) usize {
             return self.event_store.count();
         }
 
         /// Check if the store is empty
-        pub fn isEmpty(self: *Self) bool {
+        pub fn isEmpty(self: *const Self) bool {
             return self.event_store.isEmpty();
         }
 
         /// Get all events as a slice (caller must free)
-        pub fn getAll(self: *Self) ![]events.EventStore(T).Event {
-            return self.event_store.getAllEvents();
+        pub fn getAll(self: *Self, allocator: std.mem.Allocator) ![]events.EventStore(T).Event {
+            return self.event_store.getAllEvents(allocator);
         }
     };
 }
@@ -459,21 +461,22 @@ pub fn EventWriter(comptime T: type) type {
     return struct {
         const Self = @This();
         pub const EventType = T;
+        pub const is_event_writer = true;
         event_store: *events.EventStore(T),
 
         /// Add an event to the store
-        pub fn write(self: *Self, event: T) void {
+        pub fn write(self: Self, event: T) void {
             self.event_store.push(event);
         }
 
         /// Get the number of events currently in the store
-        pub fn len(self: *Self) usize {
+        pub fn len(self: Self) usize {
             return self.event_store.count();
         }
 
         /// Check if the store is empty
         /// Returns true if there are no events in the store
-        pub fn isEmpty(self: *Self) bool {
+        pub fn isEmpty(self: Self) bool {
             return self.event_store.isEmpty();
         }
     };

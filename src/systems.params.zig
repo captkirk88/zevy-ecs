@@ -35,7 +35,7 @@ pub const LocalSystemParam = struct {
 pub const EventReaderSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
         const type_info = @typeInfo(T);
-        if (type_info == .@"struct" and @hasDecl(T, "EventType") and @hasField(T, "event_store") and @hasField(T, "iterator")) {
+        if (type_info == .@"struct" and @hasDecl(T, "EventType") and @hasDecl(T, "is_event_reader")) {
             return T.EventType;
         }
         if (type_info == .pointer) {
@@ -59,7 +59,7 @@ pub const EventReaderSystemParam = struct {
 pub const EventWriterSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
         const type_info = @typeInfo(T);
-        if (type_info == .@"struct" and @hasDecl(T, "EventType") and @hasField(T, "event_store") and !@hasField(T, "iterator")) {
+        if (type_info == .@"struct" and @hasDecl(T, "EventType") and @hasDecl(T, "is_event_writer")) {
             return T.EventType;
         }
         if (type_info == .pointer) {

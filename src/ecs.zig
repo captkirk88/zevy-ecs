@@ -197,6 +197,19 @@ pub const Manager = struct {
         return entity.id < self.generations.items.len and entity.generation == self.generations.items[entity.id];
     }
 
+    pub fn destroy(self: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
+        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+
+        // Remove from archetype storage
+        self.world.remove(entity);
+
+        // Invalidate entity by incrementing its generation
+        self.generations.items[entity.id] += 1;
+
+        // Add ID to free list for reuse
+        try self.free_ids.append(self.allocator, entity.id);
+    }
+
     /// Add a component of type T to the given entity, or an error if entity is dead.
     pub fn addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
