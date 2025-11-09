@@ -107,7 +107,6 @@ pub const Stages = struct {
 pub const Scheduler = struct {
     allocator: std.mem.Allocator,
     systems: std.AutoHashMap(StageId, std.ArrayList(systems.UntypedSystemHandle)),
-    ecs: *ecs_mod.Manager,
     // State management - stores state enum type hash and current value
     states: std.AutoHashMap(u64, StateInfo),
     active_state: ?StateValue,
@@ -148,7 +147,7 @@ pub const Scheduler = struct {
         Stage(Stages.Max), // Exit and Max are the same value now
     };
 
-    pub fn init(allocator: std.mem.Allocator, ecs: *ecs_mod.Manager) !Scheduler {
+    pub fn init(allocator: std.mem.Allocator) !Scheduler {
         var _systems = std.AutoHashMap(StageId, std.ArrayList(systems.UntypedSystemHandle)).init(allocator);
         for (predefined_stages) |stage| {
             const new_list = std.ArrayList(systems.UntypedSystemHandle).initCapacity(allocator, 0) catch |err| {
@@ -160,7 +159,6 @@ pub const Scheduler = struct {
         const self: Scheduler = .{
             .allocator = allocator,
             .systems = _systems,
-            .ecs = ecs,
             .states = std.AutoHashMap(u64, StateInfo).init(allocator),
             .active_state = null,
         };
@@ -177,14 +175,14 @@ pub const Scheduler = struct {
         self.states.deinit();
     }
 
-    pub fn addSystem(self: *Scheduler, stage: StageId, system: anytype, comptime param_registry: type) void {
+    pub fn addSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype, comptime param_registry: type) void {
         const gop = self.systems.getOrPut(stage) catch |err| @panic(@errorName(err));
         if (!gop.found_existing) {
             gop.value_ptr.* = std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
         }
         const SystemType = @TypeOf(system);
         const untyped_system_handle = switch (comptime systems.getSystemTypeFromType(SystemType)) {
-            .func => self.ecs.cacheSystem(&systems.ToSystem(system, param_registry)).eraseType(),
+            .func => ecs.createSystemCached(system, param_registry).eraseType(),
             .handle => system.eraseType(),
             .untyped => system,
             else => std.debug.panic("Invalid system type: {s}. Expected a function or SystemHandle.", .{@typeName(SystemType)}),
@@ -276,7 +274,7 @@ pub const Scheduler = struct {
         }.cleanup;
 
         // Add cleanup system
-        self.addSystem(cleanup_stage, cleanup_system, registry.DefaultParamRegistry);
+        self.addSystem(ecs, cleanup_stage, cleanup_system, registry.DefaultParamRegistry);
     }
 
     // ============================================================================
@@ -288,6 +286,7 @@ pub const Scheduler = struct {
     /// Automatically adds the StateManager resource to the ECS
     pub fn registerState(
         self: *Scheduler,
+        ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
     ) !void {
         const type_info = @typeInfo(StateEnum);
@@ -309,8 +308,8 @@ pub const Scheduler = struct {
         });
 
         // Automatically add StateManager resource for this state type
-        const state_mgr = self.getStateManager(StateEnum);
-        _ = try self.ecs.addResource(state_mod.StateManager(StateEnum), state_mgr);
+        const state_mgr = self.getStateManager(ecs, StateEnum);
+        _ = try ecs.addResource(state_mod.StateManager(StateEnum), state_mgr);
     }
 
     /// Check if a specific state value is currently active
@@ -353,6 +352,7 @@ pub const Scheduler = struct {
     /// This will run OnExit systems for the previous state and OnEnter systems for the new state
     pub fn transitionTo(
         self: *Scheduler,
+        ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
         state: StateEnum,
     ) !void {
@@ -379,7 +379,7 @@ pub const Scheduler = struct {
                 const old_stage_offset: u32 = @intCast(@as(u32, @truncate(old_combined_hash)) % 100_000);
                 const exit_stage = Stage(Stages.StateOnExit) + old_stage_offset;
                 // Run the OnExit stage if it exists (don't error if it doesn't)
-                self.runStage(self.ecs, exit_stage) catch {};
+                self.runStage(ecs, exit_stage) catch {};
             }
         }
 
@@ -396,13 +396,14 @@ pub const Scheduler = struct {
         const new_stage_offset: u32 = @intCast(@as(u32, @truncate(new_combined_hash)) % 100_000);
         const enter_stage = Stage(Stages.StateOnEnter) + new_stage_offset;
         // Run the OnEnter stage if it exists (don't error if it doesn't)
-        self.runStage(self.ecs, enter_stage) catch {};
+        self.runStage(ecs, enter_stage) catch {};
     }
 
     /// Run InState systems for a specific state value
     /// This runs systems that were registered with InState(state_value)
     pub fn runInStateSystems(
         self: *Scheduler,
+        ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
         state: StateEnum,
     ) !void {
@@ -413,22 +414,23 @@ pub const Scheduler = struct {
         const state_stage = Stage(Stages.StateUpdate) + stage_offset;
 
         // Run the InState stage if it exists (don't error if it doesn't)
-        self.runStage(self.ecs, state_stage) catch {};
+        self.runStage(ecs, state_stage) catch {};
     }
 
     /// Run InState systems for the currently active state
     /// This is a convenience method that automatically runs the correct InState systems
-    pub fn runActiveStateSystems(self: *Scheduler, comptime StateEnum: type) !void {
+    pub fn runActiveStateSystems(self: *Scheduler, ecs: *ecs_mod.Manager, comptime StateEnum: type) !void {
         if (self.getActiveState(StateEnum)) |active_state| {
-            try self.runInStateSystems(StateEnum, active_state);
+            try self.runInStateSystems(ecs, StateEnum, active_state);
         }
     }
 
     /// Get a StateManager wrapper for use in systems
     /// This provides a convenient interface for systems to access state management via Res(StateManager(StateEnum))
-    pub fn getStateManager(self: *Scheduler, comptime StateEnum: type) state_mod.StateManager(StateEnum) {
+    pub fn getStateManager(self: *Scheduler, ecs: *ecs_mod.Manager, comptime StateEnum: type) state_mod.StateManager(StateEnum) {
         return state_mod.StateManager(StateEnum){
             .scheduler = self,
+            .ecs = ecs,
         };
     }
 };
@@ -506,7 +508,7 @@ test "Scheduler registerEventType" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     // Register the event type
@@ -546,7 +548,7 @@ test "Scheduler addStage" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const custom_stage = 999;
@@ -560,7 +562,7 @@ test "Scheduler getStageInfo" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     var info = scheduler.getStageInfo(allocator);
@@ -598,7 +600,7 @@ test "Scheduler runStage on non-existing stage" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     try std.testing.expectError(error.StageNotFound, scheduler.runStage(&ecs, 9999));
@@ -609,7 +611,7 @@ test "Scheduler assign outside scope" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     // Add a custom stage and a system to it
@@ -623,7 +625,7 @@ test "Scheduler assign outside scope" {
         }
     }.run;
 
-    scheduler.addSystem(custom_stage, test_system, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, custom_stage, test_system, registry.DefaultParamRegistry);
 
     // Run stages from First to PostUpdate, which includes the custom stage
     try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
@@ -636,7 +638,7 @@ test "Custom stage types with explicit priorities" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     // Define custom stages with explicit priorities
@@ -657,9 +659,9 @@ test "Custom stage types with explicit priorities" {
         pub fn run(_: *ecs_mod.Manager) void {}
     }.run;
 
-    scheduler.addSystem(Stage(CustomStages.EarlyGame), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(Stage(CustomStages.LateUpdate), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(Stage(CustomStages.PreCleanup), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(CustomStages.EarlyGame), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(CustomStages.LateUpdate), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(CustomStages.PreCleanup), test_sys, registry.DefaultParamRegistry);
 
     // Verify stages have correct priority values
     try std.testing.expect(Stage(CustomStages.EarlyGame) == 50_000);
@@ -677,7 +679,7 @@ test "Custom stage types with hash-based IDs" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     // Define custom stages without priorities (will get hash-based IDs)
@@ -692,9 +694,9 @@ test "Custom stage types with hash-based IDs" {
         pub fn run(_: *ecs_mod.Manager) void {}
     }.run;
 
-    scheduler.addSystem(Stage(CustomStages.Physics), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(Stage(CustomStages.Audio), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(Stage(CustomStages.Networking), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(CustomStages.Physics), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(CustomStages.Audio), test_sys, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(CustomStages.Networking), test_sys, registry.DefaultParamRegistry);
 
     // Verify hash-based IDs are in the correct range (2M+)
     try std.testing.expect(Stage(CustomStages.Physics) >= 2_000_000);
@@ -717,7 +719,7 @@ test "State management without registration throws errors" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -727,7 +729,7 @@ test "State management without registration throws errors" {
     };
 
     // Test 1: transitionTo without registration should return error.StateNotRegistered
-    const transition_result = scheduler.transitionTo(GameState, .Menu);
+    const transition_result = scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expectError(error.StateNotRegistered, transition_result);
 
     // Test 2: Verify isInState returns false when state not registered

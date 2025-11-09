@@ -409,11 +409,22 @@ pub const Manager = struct {
         return try s.run(self, s.ctx);
     }
 
-    /// Cache an existing system pointer.
+    /// Cache an existing system value.
     /// The returned SystemHandle can be used to run the system later.
-    /// If the system is already cached (based on its memory address), returns the existing handle.
-    pub fn cacheSystem(self: *Manager, system: anytype) sys.SystemHandle(@TypeOf(system.*).return_type) {
-        const ReturnType = @TypeOf(system.*).return_type;
+    /// If the system is already cached (based on its run function address), returns the existing handle.
+    pub fn cacheSystem(self: *Manager, system: anytype) blk: {
+        const SystemType = @TypeOf(system);
+        const type_info = @typeInfo(SystemType);
+        if (type_info != .@"struct") {
+            @compileError("cacheSystem expects a System struct, got: " ++ @typeName(SystemType));
+        }
+        if (!@hasDecl(SystemType, "return_type")) {
+            @compileError("System struct must have a return_type declaration");
+        }
+        break :blk sys.SystemHandle(SystemType.return_type);
+    } {
+        const SystemType = @TypeOf(system);
+        const ReturnType = SystemType.return_type;
 
         // Generate hash from the system's run function pointer
         const run_fn_addr = @intFromPtr(system.run);
@@ -426,8 +437,8 @@ pub const Manager = struct {
         }
 
         // Create and cache new system
-        const sys_ptr = self.allocator.create(@TypeOf(system.*)) catch |err| @panic(@errorName(err));
-        sys_ptr.* = system.*;
+        const sys_ptr = self.allocator.create(SystemType) catch |err| @panic(@errorName(err));
+        sys_ptr.* = system;
         const anyopaque_ptr: *anyopaque = @ptrCast(sys_ptr);
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
         return sys.SystemHandle(ReturnType){ .handle = system_hash };

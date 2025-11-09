@@ -17,6 +17,7 @@ pub fn StateManager(comptime StateEnum: type) type {
         pub const StateType = StateEnum;
 
         scheduler: *Scheduler,
+        ecs: *ecs_mod.Manager,
 
         /// Check if currently in a specific state
         pub fn isInState(self: *const Self, state: StateEnum) bool {
@@ -30,7 +31,7 @@ pub fn StateManager(comptime StateEnum: type) type {
 
         /// Transition to a new state (queues the transition)
         pub fn transitionTo(self: *Self, state: StateEnum) !void {
-            try self.scheduler.transitionTo(StateEnum, state);
+            try self.scheduler.transitionTo(self.ecs, StateEnum, state);
         }
     };
 }
@@ -44,7 +45,7 @@ test "Scheduler register state type" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -53,7 +54,7 @@ test "Scheduler register state type" {
         Paused,
     };
 
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // Verify state type is registered
     const type_hash = std.hash.Wyhash.hash(0, @typeName(GameState));
@@ -65,7 +66,7 @@ test "Scheduler duplicate state registration" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -73,8 +74,8 @@ test "Scheduler duplicate state registration" {
         Playing,
     };
 
-    try scheduler.registerState(GameState);
-    try std.testing.expectError(error.StateAlreadyRegistered, scheduler.registerState(GameState));
+    try scheduler.registerState(&ecs, GameState);
+    try std.testing.expectError(error.StateAlreadyRegistered, scheduler.registerState(&ecs, GameState));
 }
 
 test "Scheduler state transition" {
@@ -82,7 +83,7 @@ test "Scheduler state transition" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -90,14 +91,14 @@ test "Scheduler state transition" {
         Playing,
     };
 
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // Transition to Menu state (immediate)
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(scheduler.isInState(GameState, .Menu));
 
     // Transition to Playing state
-    try scheduler.transitionTo(GameState, .Playing);
+    try scheduler.transitionTo(&ecs, GameState, .Playing);
     try std.testing.expect(scheduler.isInState(GameState, .Playing));
     try std.testing.expect(!scheduler.isInState(GameState, .Menu));
 }
@@ -107,7 +108,7 @@ test "Scheduler get active state name" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -115,13 +116,13 @@ test "Scheduler get active state name" {
         Playing,
     };
 
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // No active state initially
     try std.testing.expect(scheduler.getActiveStateName() == null);
 
     // Set initial state (immediate)
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // Verify we can get the state name
     const state_name = scheduler.getActiveStateName();
@@ -134,7 +135,7 @@ test "Scheduler state transition processing" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -142,14 +143,14 @@ test "Scheduler state transition processing" {
         Playing,
     };
 
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // Transition is immediate
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(scheduler.isInState(GameState, .Menu));
 
     // Transition to another state
-    try scheduler.transitionTo(GameState, .Playing);
+    try scheduler.transitionTo(&ecs, GameState, .Playing);
     try std.testing.expect(scheduler.isInState(GameState, .Playing));
 }
 
@@ -158,7 +159,7 @@ test "Scheduler unregistered state transition" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -167,7 +168,7 @@ test "Scheduler unregistered state transition" {
     };
 
     // Should error when transitioning to unregistered state type
-    try std.testing.expectError(error.StateNotRegistered, scheduler.transitionTo(GameState, .Menu));
+    try std.testing.expectError(error.StateNotRegistered, scheduler.transitionTo(&ecs, GameState, .Menu));
 }
 
 test "States parameter in system" {
@@ -175,7 +176,7 @@ test "States parameter in system" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     // Define game state enum
@@ -186,10 +187,10 @@ test "States parameter in system" {
     };
 
     // Register state type (automatically adds StateManager resource)
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // Set initial state (immediate)
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // System that uses State and NextState parameters
     const systems_mod = @import("systems.zig");
@@ -228,7 +229,7 @@ test "OnEnter and OnExit systems" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -238,7 +239,7 @@ test "OnEnter and OnExit systems" {
     };
 
     // Register state type
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // Create unique resource types to track which systems ran
     const MenuEntered = struct { value: bool };
@@ -290,13 +291,13 @@ test "OnEnter and OnExit systems" {
     const playing_enter_handle = ecs.createSystemCached(playing_enter_system, registry.DefaultParamRegistry);
     const playing_exit_handle = ecs.createSystemCached(playing_exit_system, registry.DefaultParamRegistry);
 
-    scheduler.addSystem(OnEnter(GameState.Menu), menu_enter_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(OnExit(GameState.Menu), menu_exit_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(OnEnter(GameState.Playing), playing_enter_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(OnExit(GameState.Playing), playing_exit_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, OnEnter(GameState.Menu), menu_enter_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, OnExit(GameState.Menu), menu_exit_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, OnEnter(GameState.Playing), playing_enter_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, OnExit(GameState.Playing), playing_exit_handle, registry.DefaultParamRegistry);
 
     // Transition to Menu state - should trigger OnEnter(Menu)
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(menu_entered.value);
     try std.testing.expect(!menu_exited.value);
     try std.testing.expect(!playing_entered.value);
@@ -309,7 +310,7 @@ test "OnEnter and OnExit systems" {
     playing_exited.value = false;
 
     // Transition to Playing state - should trigger OnExit(Menu) and OnEnter(Playing)
-    try scheduler.transitionTo(GameState, .Playing);
+    try scheduler.transitionTo(&ecs, GameState, .Playing);
     try std.testing.expect(!menu_entered.value);
     try std.testing.expect(menu_exited.value);
     try std.testing.expect(playing_entered.value);
@@ -322,7 +323,7 @@ test "OnEnter and OnExit systems" {
     playing_exited.value = false;
 
     // Transition to Menu state again - should trigger OnExit(Playing) and OnEnter(Menu)
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(menu_entered.value);
     try std.testing.expect(!menu_exited.value);
     try std.testing.expect(!playing_entered.value);
@@ -334,7 +335,7 @@ test "InState systems" {
     var ecs = try ecs_mod.Manager.init(allocator);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator, &ecs);
+    var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
     const GameState = enum {
@@ -344,7 +345,7 @@ test "InState systems" {
     };
 
     // Register state type
-    try scheduler.registerState(GameState);
+    try scheduler.registerState(&ecs, GameState);
 
     // Create unique resource types to track which systems ran
     const MenuSystemRan = struct { value: bool };
@@ -383,15 +384,15 @@ test "InState systems" {
     const playing_handle = ecs.createSystemCached(playing_system, registry.DefaultParamRegistry);
     const paused_handle = ecs.createSystemCached(paused_system, registry.DefaultParamRegistry);
 
-    scheduler.addSystem(InState(GameState.Menu), menu_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(InState(GameState.Playing), playing_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(InState(GameState.Paused), paused_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, InState(GameState.Menu), menu_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, InState(GameState.Playing), playing_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, InState(GameState.Paused), paused_handle, registry.DefaultParamRegistry);
 
     // Transition to Menu state
-    try scheduler.transitionTo(GameState, .Menu);
+    try scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // Run InState systems for Menu
-    try scheduler.runInStateSystems(GameState, .Menu);
+    try scheduler.runInStateSystems(&ecs, GameState, .Menu);
     try std.testing.expect(menu_ran.value);
     try std.testing.expect(!playing_ran.value);
     try std.testing.expect(!paused_ran.value);
@@ -402,10 +403,10 @@ test "InState systems" {
     paused_ran.value = false;
 
     // Transition to Playing state
-    try scheduler.transitionTo(GameState, .Playing);
+    try scheduler.transitionTo(&ecs, GameState, .Playing);
 
     // Run InState systems for Playing
-    try scheduler.runInStateSystems(GameState, .Playing);
+    try scheduler.runInStateSystems(&ecs, GameState, .Playing);
     try std.testing.expect(!menu_ran.value);
     try std.testing.expect(playing_ran.value);
     try std.testing.expect(!paused_ran.value);
@@ -416,7 +417,7 @@ test "InState systems" {
     paused_ran.value = false;
 
     // Test runActiveStateSystems convenience method
-    try scheduler.runActiveStateSystems(GameState);
+    try scheduler.runActiveStateSystems(&ecs, GameState);
     try std.testing.expect(!menu_ran.value);
     try std.testing.expect(playing_ran.value);
     try std.testing.expect(!paused_ran.value);
@@ -427,10 +428,10 @@ test "InState systems" {
     paused_ran.value = false;
 
     // Transition to Paused state
-    try scheduler.transitionTo(GameState, .Paused);
+    try scheduler.transitionTo(&ecs, GameState, .Paused);
 
     // Run InState systems using convenience method
-    try scheduler.runActiveStateSystems(GameState);
+    try scheduler.runActiveStateSystems(&ecs, GameState);
     try std.testing.expect(!menu_ran.value);
     try std.testing.expect(!playing_ran.value);
     try std.testing.expect(paused_ran.value);

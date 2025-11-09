@@ -195,10 +195,10 @@ test "System - cacheSystem" {
     defer manager.deinit();
 
     // Create a system manually
-    var system = manager.createSystem(simpleSystem, DefaultRegistry);
+    const system = manager.createSystem(simpleSystem, DefaultRegistry);
 
     // Cache it (should infer return type automatically)
-    const handle = manager.cacheSystem(&system);
+    const handle = manager.cacheSystem(system);
 
     // Run the cached system
     _ = try manager.runSystem(handle);
