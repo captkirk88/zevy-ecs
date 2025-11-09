@@ -569,3 +569,25 @@ test "removeSystem with same function cached twice returns same handle" {
     try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle1));
     try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle2));
 }
+
+test "Entity destruction and reuse" {
+    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs.deinit();
+
+    const entity1 = ecs.createEmpty();
+    const entity2 = ecs.createEmpty();
+
+    try std.testing.expect(ecs.isAlive(entity1));
+    try std.testing.expect(ecs.isAlive(entity2));
+
+    try ecs.destroy(entity1);
+    try std.testing.expect(!ecs.isAlive(entity1));
+    try std.testing.expect(ecs.isAlive(entity2));
+
+    const entity3 = ecs.createEmpty();
+    try std.testing.expect(entity3.id == entity1.id); // ID should be reused
+    try std.testing.expect(entity3.generation != entity1.generation); // Generation should be incremented
+
+    try std.testing.expect(ecs.isAlive(entity3));
+    try std.testing.expect(ecs.isAlive(entity2));
+}
