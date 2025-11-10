@@ -1,3 +1,19 @@
+//! Plugin management system for Zevy ECS.
+//! A plugin is a modular piece of functionality that can be
+//! added to the ECS manager to extend functionality.
+//!
+//! Example:
+//! const MyPlugin = struct {
+//!    pub fn build(self: *@This(), manager: *zevy_ecs.Manager) !void {
+//!       // Setup code here
+//!   }
+//!
+//!   // Optional deinit
+//!   pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+//!       // Cleanup code here
+//!   }
+//! };
+
 const std = @import("std");
 const zevy_ecs = @import("zevy_ecs");
 
