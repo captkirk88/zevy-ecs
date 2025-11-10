@@ -49,14 +49,15 @@ pub const PluginManager = struct {
     }
 
     /// Add a plugin instance to the manager.
-    pub fn add(self: *PluginManager, comptime T: type, instance: T) !void {
+    pub fn add(self: *PluginManager, comptime T: type, instance: T) error{ OutOfMemory, PluginAlreadyExists }!void {
         // Compile-time verification
         if (!comptime isPlugin(T)) {
-            @compileError(@typeName(T) ++ " does not implement plugin interface (must have: pub fn build(self: *T, manager: *zevy_ecs.Manager) !void)");
+            @compileError(std.fmt.comptimePrint("Plugin '{s}' does not implement plugin interface (must have: pub fn build(self: *T, manager: *zevy_ecs.Manager) !void)", .{@typeName(T)}));
         }
 
         // Use the name field if available (for FnPlugin), otherwise use type name
-        const name = if (@hasDecl(T, "name") and @TypeOf(@field(T, "name")) == []const u8)
+        const name = if (@hasDecl(T, "name") and
+            @TypeOf(@field(T, "name")) == []const u8)
             instance.name
         else
             @typeName(T);
@@ -64,7 +65,7 @@ pub const PluginManager = struct {
 
         // Check if plugin already exists
         if (self.plugin_hashes.contains(hash)) {
-            return; // Plugin already added, skip
+            return error.PluginAlreadyExists; // Plugin already added, skip
         }
 
         // Allocate and store the plugin instance
