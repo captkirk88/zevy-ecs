@@ -9,7 +9,7 @@
 //!   }
 //!
 //!   // Optional deinit
-//!   pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+//!   pub fn deinit(self: *@This(), manager: *zevy_ecs.Manager) void {
 //!       // Cleanup code here
 //!   }
 //! };
@@ -44,7 +44,7 @@ pub const PluginManager = struct {
     const PluginEntry = struct {
         ptr: *anyopaque,
         build_fn: *const fn (*anyopaque, *zevy_ecs.Manager) anyerror!void,
-        deinit_fn: *const fn (*anyopaque, allocator: std.mem.Allocator) void,
+        deinit_fn: *const fn (*anyopaque, std.mem.Allocator, *zevy_ecs.Manager) void,
         name: []const u8,
         hash: u64,
     };
@@ -55,10 +55,10 @@ pub const PluginManager = struct {
         };
     }
 
-    pub fn deinit(self: *PluginManager) void {
+    pub fn deinit(self: *PluginManager, ecs: *zevy_ecs.Manager) void {
         // Free all allocated plugin instances using their typed deinit functions
         for (self.plugins.items) |entry| {
-            entry.deinit_fn(entry.ptr, self.allocator);
+            entry.deinit_fn(entry.ptr, self.allocator, ecs);
         }
         self.plugins.deinit(self.allocator);
         self.plugin_hashes.deinit(self.allocator);
@@ -95,10 +95,10 @@ pub const PluginManager = struct {
                 return self_ptr.build(manager);
             }
 
-            fn deinitImpl(ptr: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinitImpl(ptr: *anyopaque, allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) void {
                 const self_ptr: *T = @ptrCast(@alignCast(ptr));
                 if (@hasDecl(T, "deinit")) {
-                    self_ptr.deinit(allocator);
+                    self_ptr.deinit(manager);
                 }
                 allocator.destroy(self_ptr);
             }
