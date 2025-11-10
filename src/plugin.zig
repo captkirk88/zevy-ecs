@@ -102,7 +102,12 @@ pub const PluginManager = struct {
     pub fn build(self: *const PluginManager, manager: *zevy_ecs.Manager) !void {
         // Build all plugins
         for (self.plugins.items) |entry| {
-            try entry.build_fn(entry.ptr, manager);
+            entry.build_fn(entry.ptr, manager) catch |err| {
+                std.debug.panic(
+                    "Failed to build plugin '{s}': {s}",
+                    .{ entry.name, @errorName(err) },
+                );
+            };
         }
     }
 

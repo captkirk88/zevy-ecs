@@ -288,7 +288,7 @@ pub const Manager = struct {
             } else null;
 
             try self.resources.put(type_hash, ResourceEntry{
-                .ptr = @ptrCast(ptr),
+                .ptr = @ptrCast(@alignCast(ptr)),
                 .type_name = @typeName(T),
                 .allocated = true,
                 .size = @sizeOf(T),
@@ -402,7 +402,7 @@ pub const Manager = struct {
         const s = self.createSystem(system_fn, ParamRegistry);
         const sys_ptr = self.allocator.create(@TypeOf(s)) catch |err| @panic(@errorName(err));
         sys_ptr.* = s;
-        const anyopaque_ptr: *anyopaque = @ptrCast(sys_ptr);
+        const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
         return sys.SystemHandle(ReturnType){ .handle = system_hash };
     }
@@ -452,7 +452,7 @@ pub const Manager = struct {
         // Create and cache new system
         const sys_ptr = self.allocator.create(SystemType) catch |err| @panic(@errorName(err));
         sys_ptr.* = system;
-        const anyopaque_ptr: *anyopaque = @ptrCast(sys_ptr);
+        const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
         return sys.SystemHandle(ReturnType){ .handle = system_hash };
     }
