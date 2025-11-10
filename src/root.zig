@@ -88,18 +88,21 @@ pub const reflect = @import("reflect.zig");
 
 // Tests
 test {
+    const builtin = @import("builtin");
+    _ = builtin;
     const benchmarks = @import("benchmark_tests.zig");
-    std.testing.refAllDeclsRecursive(ecs);
-    std.testing.refAllDeclsRecursive(benchmarks);
-    std.testing.refAllDeclsRecursive(@import("ecs_tests.zig"));
-    std.testing.refAllDeclsRecursive(@import("query_tests.zig"));
-    std.testing.refAllDeclsRecursive(@import("archetype_tests.zig"));
-    std.testing.refAllDeclsRecursive(@import("archetype_storage_tests.zig"));
-    std.testing.refAllDeclsRecursive(@import("systems_tests.zig"));
-    std.testing.refAllDeclsRecursive(@import("serialize_tests.zig"));
-    std.testing.refAllDeclsRecursive(@import("relations_tests.zig"));
+    std.testing.refAllDecls(ecs);
+    std.testing.refAllDecls(benchmarks);
+    std.testing.refAllDecls(@import("ecs_tests.zig"));
+    std.testing.refAllDecls(@import("query_tests.zig"));
+    std.testing.refAllDecls(@import("archetype_tests.zig"));
+    std.testing.refAllDecls(@import("archetype_storage_tests.zig"));
+    std.testing.refAllDecls(@import("systems_tests.zig"));
+    std.testing.refAllDecls(@import("serialize_tests.zig"));
+    std.testing.refAllDecls(@import("relations_tests.zig"));
     std.testing.refAllDecls(world);
     std.testing.refAllDecls(scheduler);
     std.testing.refAllDecls(state);
     std.testing.refAllDecls(events);
+    std.testing.refAllDecls(@import("plugin.zig"));
 }
