@@ -98,6 +98,16 @@ pub const PluginManager = struct {
         try self.plugin_hashes.put(self.allocator, hash, {});
     }
 
+    pub fn get(self: *const PluginManager, comptime T: type) ?*T {
+        const hash = comptime std.hash.Wyhash.hash(0, @typeName(T));
+        for (self.plugins.items) |entry| {
+            if (entry.hash == hash) {
+                return @ptrCast(@alignCast(entry.ptr));
+            }
+        }
+        return null;
+    }
+
     /// Build all registered plugins
     pub fn build(self: *const PluginManager, manager: *zevy_ecs.Manager) !void {
         // Build all plugins
