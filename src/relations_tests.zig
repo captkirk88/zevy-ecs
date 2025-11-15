@@ -475,16 +475,29 @@ test "RelationManager - auto index update when Relation component added directly
     var rel_manager = RelationManager.init(allocator);
     defer rel_manager.deinit();
 
+    // Add RelationManager as resource so addComponent auto-syncs to index
+    _ = try manager.addResource(RelationManager, rel_manager);
+
     const parent = manager.create(.{Transform{}});
-    const child = manager.create(.{Transform{}});
+    var children: [10]ecs.Entity = undefined;
 
-    // Manually add Relation(ChildOf) component via ECS, simulating user code
-    try manager.addComponent(child, Relation(ChildOf), Relation(ChildOf).init(parent, .{}));
+    for (&children) |*child| {
+        child.* = manager.create(.{Transform{}});
+        try manager.addComponent(child.*, Relation(ChildOf), Relation(ChildOf).init(parent, .{}));
+    }
 
-    // Use RelationManager.add to ensure index is updated consistently
-    try rel_manager.add(&manager, child, parent, ChildOf);
+    const retrieved_children = rel_manager.getChildren(parent, ChildOf);
+    try std.testing.expect(retrieved_children.len == 10);
 
-    const children = rel_manager.getChildren(parent, ChildOf);
-    try std.testing.expect(children.len == 1);
-    try std.testing.expect(children[0].eql(child));
+    // Verify all children are present
+    var found = [_]bool{false} ** 10;
+    for (retrieved_children) |retrieved_child| {
+        for (children, 0..) |expected_child, i| {
+            if (retrieved_child.eql(expected_child)) {
+                found[i] = true;
+                break;
+            }
+        }
+    }
+    for (found) |f| try std.testing.expect(f);
 }
