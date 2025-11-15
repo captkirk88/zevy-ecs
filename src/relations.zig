@@ -1,5 +1,6 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
+const systems = @import("systems.zig");
 const Entity = ecs.Entity;
 
 /// Configuration for how a relation type should behave
@@ -200,7 +201,7 @@ pub const RelationManager = struct {
     }
 
     /// Get or create index for a relation type (lazy allocation)
-    fn getOrCreateIndex(self: *RelationManager, comptime Kind: type) !*TypedRelationIndex {
+    pub fn getOrCreateIndex(self: *RelationManager, comptime Kind: type) !*TypedRelationIndex {
         const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
 
         const gop = try self.indices.getOrPut(type_hash);
@@ -213,7 +214,7 @@ pub const RelationManager = struct {
     }
 
     /// Check if a relation type has an index
-    fn hasIndex(self: *RelationManager, comptime Kind: type) bool {
+    pub fn hasIndex(self: *RelationManager, comptime Kind: type) bool {
         const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
         return self.indices.contains(type_hash);
     }
@@ -240,7 +241,7 @@ pub const RelationManager = struct {
         // For non-exclusive indexed relations, only use index (no component)
         // For non-indexed or exclusive relations, add component
         if (!config.indexed or config.exclusive) {
-            try manager.addComponent(child, Relation(Kind), .{ .target = parent, .data = .{} });
+            try manager.addComponentRaw(child, Relation(Kind), .{ .target = parent, .data = .{} });
         }
 
         // Add to index if this type is configured as indexed
@@ -271,7 +272,7 @@ pub const RelationManager = struct {
         // For non-exclusive indexed relations, only use index (no component)
         // For non-indexed or exclusive relations, add component
         if (!config.indexed or config.exclusive) {
-            try manager.addComponent(child, Relation(Kind), .{
+            try manager.addComponentRaw(child, Relation(Kind), .{
                 .target = parent,
                 .data = data,
             });
@@ -308,7 +309,7 @@ pub const RelationManager = struct {
         self: *RelationManager,
         parent: Entity,
         comptime Kind: type,
-    ) ![]const Entity {
+    ) []const Entity {
         const config = comptime Relation(Kind).config;
 
         if (!config.indexed) {
@@ -323,13 +324,15 @@ pub const RelationManager = struct {
     }
 
     /// Get all parents of an entity (requires indexed relation type)
+    ///
     /// For a Child relation: getParents(child, Child) returns the parent
+    ///
     /// For an Owns relation: getParents(item, Owns) returns all owners
     pub fn getParents(
         self: *RelationManager,
         child: Entity,
         comptime Kind: type,
-    ) ![]const Entity {
+    ) []const Entity {
         const config = comptime Relation(Kind).config;
 
         if (!config.indexed) {
@@ -344,25 +347,23 @@ pub const RelationManager = struct {
     }
 
     /// Get single parent of an entity (works for both indexed and non-indexed)
-    /// For a Child relation: getParent(child, Child) returns the parent
     pub fn getParent(
         self: *RelationManager,
         manager: *ecs.Manager,
         child: Entity,
         comptime Kind: type,
-    ) !?Entity {
+    ) error{EntityNotAlive}!?Entity {
         const config = comptime Relation(Kind).config;
 
         if (config.indexed) {
-            const parents = try self.getParents(child, Kind);
+            const parents = self.getParents(child, Kind);
             return if (parents.len > 0) parents[0] else null;
-        } else {
-            // Read directly from component (zero overhead!)
-            if (try manager.getComponent(child, Relation(Kind))) |rel| {
-                return rel.target;
-            }
-            return null;
         }
+
+        if (try manager.getComponent(child, Relation(Kind))) |rel| {
+            return rel.target;
+        }
+        return null;
     }
 
     /// Get single child (first child if multiple exist)
@@ -372,11 +373,11 @@ pub const RelationManager = struct {
         _: *ecs.Manager,
         parent: Entity,
         comptime Kind: type,
-    ) !?Entity {
+    ) ?Entity {
         const config = comptime Relation(Kind).config;
 
         if (config.indexed) {
-            const children = try self.getChildren(parent, Kind);
+            const children = self.getChildren(parent, Kind);
             return if (children.len > 0) children[0] else null;
         } else {
             @compileError(@typeName(Kind) ++ " is not indexed. Use getParent for non-indexed relations.");

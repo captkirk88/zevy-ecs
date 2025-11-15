@@ -1,6 +1,8 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
 const relations = @import("relations.zig");
+const systems = @import("systems.zig");
+const registry_mod = @import("systems.registry.zig");
 const AttachedTo = relations.AttachedTo;
 const ChildOf = relations.Child;
 const Owns = relations.Owns;
@@ -113,7 +115,7 @@ test "RelationManager - indexed relation reverse queries" {
     try rel_manager.add(&manager, child3, parent, ChildOf);
 
     // Get all children (reverse query)
-    const children = try rel_manager.getChildren(parent, ChildOf);
+    const children = rel_manager.getChildren(parent, ChildOf);
     try std.testing.expect(children.len == 3);
 
     // Verify all children are present
@@ -156,11 +158,11 @@ test "RelationManager - exclusive relation replaces existing" {
     try std.testing.expect(target2.?.eql(parent2));
 
     // Verify parent1 has no children
-    const children1 = try rel_manager.getChildren(parent1, ChildOf);
+    const children1 = rel_manager.getChildren(parent1, ChildOf);
     try std.testing.expect(children1.len == 0);
 
     // Verify parent2 has child
-    const children2 = try rel_manager.getChildren(parent2, ChildOf);
+    const children2 = rel_manager.getChildren(parent2, ChildOf);
     try std.testing.expect(children2.len == 1);
     try std.testing.expect(children2[0].eql(child));
 }
@@ -185,7 +187,7 @@ test "RelationManager - non-exclusive relations allow multiple" {
     try rel_manager.add(&manager, player, potion, Owns);
 
     // Get all owned items
-    const items = try rel_manager.getParents(player, Owns);
+    const items = rel_manager.getParents(player, Owns);
     try std.testing.expect(items.len == 3);
 
     // Verify all items are present
@@ -251,7 +253,7 @@ test "RelationManager - remove relation" {
     try std.testing.expect(rel == null);
 
     // Verify index is updated
-    const children = try rel_manager.getChildren(parent, ChildOf);
+    const children = rel_manager.getChildren(parent, ChildOf);
     try std.testing.expect(children.len == 0);
 }
 
@@ -273,14 +275,14 @@ test "RelationManager - removeEntity cleans up all relations" {
     try rel_manager.add(&manager, child2, parent, ChildOf);
 
     // Verify children exist
-    var children = try rel_manager.getChildren(parent, ChildOf);
+    var children = rel_manager.getChildren(parent, ChildOf);
     try std.testing.expect(children.len == 2);
 
     // Remove child1 entity
     rel_manager.removeEntity(child1);
 
     // Verify parent now has only one child
-    children = try rel_manager.getChildren(parent, ChildOf);
+    children = rel_manager.getChildren(parent, ChildOf);
     try std.testing.expect(children.len == 1);
     try std.testing.expect(children[0].eql(child2));
 
@@ -288,7 +290,7 @@ test "RelationManager - removeEntity cleans up all relations" {
     rel_manager.removeEntity(parent);
 
     // Verify child2's parent reference is cleaned up
-    children = try rel_manager.getChildren(parent, ChildOf);
+    children = rel_manager.getChildren(parent, ChildOf);
     try std.testing.expect(children.len == 0);
 }
 
@@ -420,7 +422,7 @@ test "RelationManager - hierarchy traversal" {
             entity: ecs.Entity,
         ) !void {
             try v.append(alloc, entity);
-            const children = try rm.getChildren(entity, ChildOf);
+            const children = rm.getChildren(entity, ChildOf);
             for (children) |child| {
                 try traverse(m, rm, alloc, v, child);
             }
@@ -482,7 +484,7 @@ test "RelationManager - auto index update when Relation component added directly
     // Use RelationManager.add to ensure index is updated consistently
     try rel_manager.add(&manager, child, parent, ChildOf);
 
-    const children = try rel_manager.getChildren(parent, ChildOf);
+    const children = rel_manager.getChildren(parent, ChildOf);
     try std.testing.expect(children.len == 1);
     try std.testing.expect(children[0].eql(child));
 }

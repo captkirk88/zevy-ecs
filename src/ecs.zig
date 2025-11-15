@@ -5,6 +5,7 @@ const serialize = @import("serialize.zig");
 const qry = @import("query.zig");
 const errs = @import("errors.zig");
 const events = @import("events.zig");
+const relations = @import("relations.zig");
 const hash = std.hash;
 const sys = @import("systems.zig");
 const registry = @import("systems.registry.zig");
@@ -57,7 +58,7 @@ pub const Manager = struct {
     /// Initialize the ECS with an optional custom allocator.
     /// If no allocator is provided, the default page allocator is used.
     pub fn init(allocator: std.mem.Allocator) !Manager {
-        return Manager{
+        var manager = Manager{
             .allocator = allocator,
             .next_entity_id = 0,
             .generations = try std.ArrayList(u32).initCapacity(allocator, 1024),
@@ -68,6 +69,10 @@ pub const Manager = struct {
             .component_added = events.EventStore(ComponentEvent).init(allocator, 64),
             .component_removed = events.EventStore(ComponentEvent).init(allocator, 64),
         };
+
+        _ = try manager.addResource(relations.RelationManager, relations.RelationManager.init(allocator));
+
+        return manager;
     }
 
     pub fn deinit(self: *Manager) void {
@@ -226,6 +231,18 @@ pub const Manager = struct {
     }
 
     /// Add a component of type T to the given entity, or an error if entity is dead.
+    /// Internal method to add component without auto-syncing relations
+    /// Used by RelationManager to avoid double-syncing
+    pub fn addComponentRaw(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
+        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        const tuple = .{value};
+        try self.world.add(entity, @TypeOf(tuple), tuple);
+
+        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        self.component_removed.discardHandled();
+        self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
+    }
+
     pub fn addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         const tuple = .{value};
@@ -234,6 +251,20 @@ pub const Manager = struct {
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         self.component_removed.discardHandled();
         self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
+
+        // Auto-sync Relation components to RelationManager
+        if (@hasDecl(T, "relation_kind")) {
+            const Kind = T.relation_kind;
+            const config = T.config;
+
+            if (self.getResource(relations.RelationManager)) |rel_mgr| {
+                // Only sync indexed relations to the index
+                if (config.indexed) {
+                    const index = try rel_mgr.getOrCreateIndex(Kind);
+                    try index.add(entity, value.target);
+                }
+            }
+        }
     }
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.

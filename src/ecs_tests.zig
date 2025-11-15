@@ -324,7 +324,7 @@ test "Manager - listResourceTypes" {
     var types = manager.listResourceTypes(std.testing.allocator);
     defer types.deinit(std.testing.allocator);
 
-    try std.testing.expect(types.items.len == 2);
+    try std.testing.expect(types.items.len == 3);
 }
 
 test "Manager - query basic" {

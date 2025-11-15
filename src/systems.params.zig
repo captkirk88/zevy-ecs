@@ -270,12 +270,12 @@ pub const OnAddedSystemParam = struct {
         defer results.deinit(e.allocator);
 
         var iter = e.component_added.iterator();
-        while (iter.next()) |ev_ptr| {
-            const ev = ev_ptr.*;
+        while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
             const comp = e.getComponent(ev.data.entity, Component) catch continue;
             if (comp) |comp_ptr| {
                 results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr }) catch @panic("OutOfMemory");
+                ev.handled = true;
             }
         }
 
@@ -306,10 +306,10 @@ pub const OnRemovedSystemParam = struct {
         defer results.deinit(e.allocator);
 
         var iter = e.component_removed.iterator();
-        while (iter.next()) |ev_ptr| {
-            const ev = ev_ptr.*;
+        while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
             results.append(e.allocator, ev.data.entity) catch @panic("OutOfMemory");
+            ev.handled = true;
         }
 
         const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");

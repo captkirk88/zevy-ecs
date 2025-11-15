@@ -139,12 +139,12 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             const fn_ptr_typed: *const FnType = @ptrCast(@alignCast(context.fn_ptr));
 
             const info = comptime @typeInfo(system_type);
-            if (info != .@"fn") @compileError("System function must have Fn type info: " ++ @typeName(info));
+            if (info != .@"fn") @compileError("System function must have Fn type info: " ++ @typeName(system_type));
 
             const fn_info = info.@"fn";
             const param_count = fn_info.params.len;
             if (param_count == 0 or fn_info.params[0].type != *ecs_mod.Manager) {
-                @compileError("System function must have *Manager as first parameter: " ++ @typeName(info));
+                @compileError("System function must have *Manager as first parameter: " ++ @typeName(system_type));
             }
 
             // Get the number of injected args

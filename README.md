@@ -509,7 +509,9 @@ pub fn main() !void {
 
 ### Relations
 
-Relations allow you to create connections between entities with minimal memory overhead. The system uses an adaptive hybrid approach where relations can be either component-based (minimal overhead for sparse relations) or indexed (for efficient traversal of many relations).
+Relations allow you to create connections between entities with minimal memory overhead. The `RelationManager` is automatically initialized as a built-in resource when the ECS Manager is created, since entities and relations go hand-in-hand. The system uses an adaptive hybrid approach where relations can be either component-based (minimal overhead for sparse relations) or indexed (for efficient traversal of many relations).
+
+Relation components added via `manager.addComponent()` are automatically synced to the RelationManager for indexed relation types.
 
 #### Relation Types
 
@@ -544,39 +546,46 @@ const SocketData = struct {
 #### Basic Usage
 
 ```zig
-// Use Relations system parameter for hierarchy management
+// Relations can be added in two ways:
+// 1. Directly via manager.addComponent() - automatically syncs to RelationManager
+// 2. Via RelationManager API - explicitly manages relations
+
 fn setupHierarchy(
     ecs: *zevy_ecs.Manager,
-    relations: *zevy_ecs.Relations,
 ) !void {
-    // Create entities
-    const parent = try ecs.create(.{Transform{}});
-    const child1 = try ecs.create(.{Transform{}});
-    const child2 = try ecs.create(.{Transform{}});
+    // RelationManager is automatically available as a resource
+    const relations = ecs.getResource(zevy_ecs.relations.RelationManager).?;
 
-    // Add parent-child relations
-    try relations.add(Child, child1, parent);
-    try relations.add(Child, child2, parent);
+    // Create entities
+    const parent = ecs.create(.{Transform{}});
+    const child1 = ecs.create(.{Transform{}});
+    const child2 = ecs.create(.{Transform{}});
+
+    // Method 1: Add relation component directly (auto-syncs to index for indexed types)
+    try ecs.addComponent(child1, zevy_ecs.relations.Relation(Child),
+        zevy_ecs.relations.Relation(Child).init(parent, .{}));
+
+    // Method 2: Use RelationManager API
+    try relations.add(ecs, child2, parent, Child);
 
     // Query children of parent
-    if (relations.getChildren(Child, parent)) |children| {
-        for (children) |child| {
-            std.debug.print("Child: {d}\n", .{child.id});
-        }
+    const children = relations.getChildren(parent, Child);
+    for (children) |child| {
+        std.debug.print("Child: {d}\n", .{child.id});
     }
 
     // Get parent of child
-    if (relations.getParent(Child, child1)) |p| {
+    if (try relations.getParent(ecs, child1, Child)) |p| {
         std.debug.print("Parent: {d}\n", .{p.id});
     }
 
     // Check if relation exists
-    if (relations.has(Child, child1, parent)) {
+    if (try relations.has(ecs, child1, parent, Child)) {
         std.debug.print("Child1 has parent relation\n", .{});
     }
 
     // Remove relation
-    try relations.remove(Child, child1, parent);
+    try relations.remove(ecs, child1, parent, Child);
 }
 
 pub fn main() !void {
@@ -585,33 +594,37 @@ pub fn main() !void {
     var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    // RelationManager is automatically created as a resource when using Relations parameter
-    const system = manager.cacheSystem(zevy_ecs.ToSystem(setupHierarchy, zevy_ecs.DefaultParamRegistry));
-    try manager.runSystem(system);
+    // RelationManager is automatically initialized
+    try setupHierarchy(&manager);
 }
 ```
 
 #### Relations with Data
 
 ```zig
-// Use Relations system parameter with custom data
 fn attachWeapon(
     ecs: *zevy_ecs.Manager,
-    relations: *zevy_ecs.Relations,
 ) !void {
-    const attachment = try ecs.create(.{Transform{}});
-    const weapon = try ecs.create(.{Transform{}});
+    const relations = ecs.getResource(zevy_ecs.relations.RelationManager).?;
 
-    // Add relation with custom data
+    const character = ecs.create(.{Transform{}});
+    const weapon = ecs.create(.{Transform{}});
+
+    // Method 1: Add relation with custom data using RelationManager API
     try relations.addWithData(
-        SocketData,
-        attachment,
+        ecs,
         weapon,
+        character,
+        SocketData,
         .{ .socket_name = "hand_socket" },
     );
 
+    // Method 2: Add relation component directly (auto-syncs)
+    // try ecs.addComponent(weapon, zevy_ecs.relations.Relation(SocketData),
+    //     .{ .target = character, .data = .{ .socket_name = "hand_socket" } });
+
     // Access relation data via component
-    if (ecs.getComponent(attachment, zevy_ecs.relations.Relation(SocketData))) |rel| {
+    if (try ecs.getComponent(weapon, zevy_ecs.relations.Relation(SocketData))) |rel| {
         std.debug.print("Socket: {s}\n", .{rel.data.socket_name});
         std.debug.print("Attached to: {d}\n", .{rel.target.id});
     }
@@ -621,24 +634,25 @@ fn attachWeapon(
 #### Non-Exclusive Relations
 
 ```zig
-// Entity can own multiple items using Relations system parameter
+// Entity can own multiple items
 fn setupInventory(
     ecs: *zevy_ecs.Manager,
-    relations: *zevy_ecs.Relations,
 ) !void {
-    const player = try ecs.create(.{Transform{}});
-    const sword = try ecs.create(.{Transform{}});
-    const shield = try ecs.create(.{Transform{}});
-    const potion = try ecs.create(.{Transform{}});
+    const relations = ecs.getResource(zevy_ecs.relations.RelationManager).?;
 
-    try relations.add(Owns, player, sword);
-    try relations.add(Owns, player, shield);
-    try relations.add(Owns, player, potion);
+    const player = ecs.create(.{Transform{}});
+    const sword = ecs.create(.{Transform{}});
+    const shield = ecs.create(.{Transform{}});
+    const potion = ecs.create(.{Transform{}});
+
+    // Add non-exclusive relations (entity can have multiple)
+    try relations.add(ecs, player, sword, Owns);
+    try relations.add(ecs, player, shield, Owns);
+    try relations.add(ecs, player, potion, Owns);
 
     // Get all owned items
-    if (relations.getParents(Owns, player)) |items| {
-        std.debug.print("Player owns {d} items\n", .{items.len});
-    }
+    const items = relations.getParents(player, Owns);
+    std.debug.print("Player owns {d} items\n", .{items.len});
 }
 ```
 
