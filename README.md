@@ -665,7 +665,7 @@ fn setupInventory(
 fn damageSystemWithMultiplier(
     manager: *zevy_ecs.Manager,
     multiplier: f32,
-    query: zevy_ecs.Query(struct { health: Health }, struct {}),
+    query: zevy_ecs.Query(struct { health: Health }, .{}),
 ) void {
     _ = manager;
     while (query.next()) |item| {
@@ -1252,41 +1252,41 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 | Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------- | ---------- | ------------- | ------------- | --------- |
-| Create 100 Entities     | 5          | 9.040 us/op   | 8.084 KB/op   | 1/op      |
-| Create 1000 Entities    | 5          | 87.560 us/op  | 115.519 KB/op | 5/op      |
-| Create 10000 Entities   | 5          | 751.160 us/op | 1.506 MB/op   | 11/op     |
-| Create 100000 Entities  | 5          | 7.293 ms/op   | 22.970 MB/op  | 18/op     |
-| Create 1000000 Entities | 5          | 65.990 ms/op  | 210.044 MB/op | 24/op     |
+| Create 100 Entities     | 3          | 12.766 us/op  | 13.474 KB/op  | 3/op      |
+| Create 1000 Entities    | 3          | 92.066 us/op  | 116.588 KB/op | 8/op      |
+| Create 10000 Entities   | 3          | 969.066 us/op | 1.661 MB/op   | 18/op     |
+| Create 100000 Entities  | 3          | 6.802 ms/op   | 18.296 MB/op  | 27/op     |
+| Create 1000000 Entities | 3          | 70.431 ms/op  | 232.605 MB/op | 39/op     |
 
 #### Batch Creation
 
 | Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------- | ---------- | ------------- | ------------- | --------- |
-| Create 100 Entities     | 5          | 13.260 us/op  | 8.084 KB/op   | 1/op      |
-| Create 1000 Entities    | 5          | 76.640 us/op  | 95.121 KB/op  | 4/op      |
-| Create 10000 Entities   | 5          | 470.120 us/op | 1.073 MB/op   | 5/op      |
-| Create 100000 Entities  | 5          | 4.488 ms/op   | 18.601 MB/op  | 6/op      |
-| Create 1000000 Entities | 5          | 37.277 ms/op  | 153.164 MB/op | 5/op      |
+| Create 100 Entities     | 3          | 19.400 us/op  | 13.474 KB/op  | 3/op      |
+| Create 1000 Entities    | 3          | 98.566 us/op  | 89.682 KB/op  | 5/op      |
+| Create 10000 Entities   | 3          | 566.000 us/op | 1.019 MB/op   | 7/op      |
+| Create 100000 Entities  | 3          | 3.687 ms/op   | 12.529 MB/op  | 7/op      |
+| Create 1000000 Entities | 3          | 38.133 ms/op  | 144.706 MB/op | 8/op      |
 
 #### Mixed Systems
 
 | Benchmark                         | Operations | Time/op       | Memory/op  | Allocs/op |
 | --------------------------------- | ---------- | ------------- | ---------- | --------- |
-| Run 7 Systems on 100 Entities     | 5          | 2.380 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000 Entities    | 5          | 5.840 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 10000 Entities   | 5          | 51.260 us/op  | 0.000 B/op | 0/op      |
-| Run 7 Systems on 100000 Entities  | 5          | 521.920 us/op | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000000 Entities | 5          | 5.422 ms/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100 Entities     | 3          | 2.166 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000 Entities    | 3          | 6.100 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 10000 Entities   | 3          | 53.700 us/op  | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100000 Entities  | 3          | 566.933 us/op | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000000 Entities | 3          | 6.032 ms/op   | 0.000 B/op | 0/op      |
 
 #### Relations
 
 | Benchmark                    | Operations | Time/op       | Memory/op  | Allocs/op |
 | ---------------------------- | ---------- | ------------- | ---------- | --------- |
-| Scene Graph 100 Entities     | 5          | 680.000 ns/op | 0.000 B/op | 0/op      |
-| Scene Graph 1000 Entities    | 5          | 5.440 us/op   | 0.000 B/op | 0/op      |
-| Scene Graph 10000 Entities   | 5          | 53.500 us/op  | 0.000 B/op | 0/op      |
-| Scene Graph 100000 Entities  | 5          | 543.060 us/op | 0.000 B/op | 0/op      |
-| Scene Graph 1000000 Entities | 5          | 5.648 ms/op   | 0.000 B/op | 0/op      |
+| Scene Graph 100 Entities     | 3          | 1.833 us/op   | 0.000 B/op | 0/op      |
+| Scene Graph 1000 Entities    | 3          | 5.866 us/op   | 0.000 B/op | 0/op      |
+| Scene Graph 10000 Entities   | 3          | 59.633 us/op  | 0.000 B/op | 0/op      |
+| Scene Graph 100000 Entities  | 3          | 569.433 us/op | 0.000 B/op | 0/op      |
+| Scene Graph 1000000 Entities | 3          | 6.028 ms/op   | 0.000 B/op | 0/op      |
 
 ## License
 
