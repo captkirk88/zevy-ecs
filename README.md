@@ -2,6 +2,10 @@
 
 zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
 
+[license]: https://img.shields.io/github/license/captkirk88/zevy-ecs?style=for-the-badge&logo=opensourcehardware&label=License&logoColor=C0CAF5&labelColor=414868&color=8c73cc
+
+[![][license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
+
 ## Features
 
 - **Archetype-based storage**: Efficiently groups entities with the same component combinations for cache-friendly iteration
@@ -50,7 +54,6 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
     - [Event Registration](#event-registration)
     - [Getting Stage Information](#getting-stage-information)
 - [Performance](#performance)
-- [License](#license)
 - [Contributing](#contributing)
 
 ## Quick Start
@@ -1287,10 +1290,6 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 | Scene Graph 10000 Entities   | 3          | 59.633 us/op  | 0.000 B/op | 0/op      |
 | Scene Graph 100000 Entities  | 3          | 569.433 us/op | 0.000 B/op | 0/op      |
 | Scene Graph 1000000 Entities | 3          | 6.028 ms/op   | 0.000 B/op | 0/op      |
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
 
 ## Contributing
 
