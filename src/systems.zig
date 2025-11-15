@@ -332,6 +332,41 @@ pub fn Res(comptime T: type) type {
     };
 }
 
+/// OnAdded(T) system param: read-only view of components of type T
+/// that were added since the last system run.
+pub fn OnAdded(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const ComponentType = T;
+        pub const is_on_added = true;
+
+        pub const Item = struct { entity: ecs_mod.Entity, comp: *T };
+
+        items: []const Item,
+
+        pub fn iter(self: *const Self) []const Item {
+            return self.items;
+        }
+    };
+}
+
+/// OnRemoved(T) system param: exposes entities from which component T
+/// was removed since last system run. This is a lightweight wrapper
+/// over an event stream produced by the scheduler.
+pub fn OnRemoved(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const ComponentType = T;
+        pub const is_on_removed = true;
+
+        removed: []const ecs_mod.Entity,
+
+        pub fn iter(self: *const Self) []const ecs_mod.Entity {
+            return self.removed;
+        }
+    };
+}
+
 /// State provides a query for checking if a specific state enum value is active
 /// Use as a system parameter: state: State(GameState)
 /// Where GameState is an enum type

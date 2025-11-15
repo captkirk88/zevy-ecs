@@ -14,6 +14,8 @@ pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
     params.QuerySystemParam,
     params.LocalSystemParam,
     params.RelationsSystemParam,
+    params.OnAddedSystemParam,
+    params.OnRemovedSystemParam,
 });
 
 /// SystemParam registry for runtime-extensible parameter type analysis and instantiation
@@ -68,6 +70,8 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
 /// Example:
 /// ```zig
 /// const NewSystemParamRegistry = SystemParamRegistry(&[_]type{ GameRulesParam, DefaultRegistry });
+/// const MergedRegistry = MergedSystemParamRegistry(.{ DefaultParamRegistry, NewSystemParamRegistry });
+/// ```
 pub fn MergedSystemParamRegistry(comptime registries: anytype) type {
     comptime var merged_types: []const type = &[_]type{};
     inline for (registries) |reg| {
@@ -126,7 +130,7 @@ test "merged SystemParamRegistry" {
     };
     const CustomRegistry = SystemParamRegistry(&[_]type{CustomParam});
     const merge = MergedSystemParamRegistry(.{ DefaultParamRegistry, CustomRegistry });
-    try std.testing.expect(merge.len() == 9); // State, NextState, EventReader, EventWriter, Resource, Query, Local, Relations, CustomParam
+    try std.testing.expect(merge.len() == 11); // State, NextState, EventReader, EventWriter, Resource, Query, Local, Relations, OnAdded, OnRemoved, CustomParam
 
     // Test that we can apply a custom param (returns value)
     const custom_val = merge.apply(&ecs_instance, i32);

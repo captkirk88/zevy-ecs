@@ -463,3 +463,29 @@ test "RelationManager - memory efficiency for sparse relations" {
         try std.testing.expect(target.?.eql(entities[i + 10]));
     }
 }
+
+test "RelationManager - auto index update when Relation component added directly" {
+    const allocator = std.testing.allocator;
+
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    var rel_manager = RelationManager.init(allocator);
+    defer rel_manager.deinit();
+
+    const parent = manager.create(.{Transform{}});
+    const child = manager.create(.{Transform{}});
+
+    // Manually add Relation(ChildOf) component via ECS, simulating user code
+    try manager.addComponent(child, Relation(ChildOf), .{
+        .target = parent,
+        .data = ChildOf{},
+    });
+
+    // Use RelationManager.add to ensure index is updated consistently
+    try rel_manager.add(&manager, child, parent, ChildOf);
+
+    const children = try rel_manager.getChildren(parent, ChildOf);
+    try std.testing.expect(children.len == 1);
+    try std.testing.expect(children[0].eql(child));
+}

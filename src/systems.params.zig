@@ -247,6 +247,76 @@ pub const RelationsSystemParam = struct {
     }
 };
 
+/// OnAdded(T) SystemParam analyzer and applier
+/// Currently this is a thin wrapper that just provides a normal Query
+/// for entities with component T. A higher-level scheduler is expected
+/// to constrain which entities are actually considered "added".
+pub const OnAddedSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            return analyze(Child);
+        }
+        if (type_info == .@"struct" and @hasDecl(T, "ComponentType") and @hasDecl(T, "is_on_added")) {
+            return T.ComponentType;
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime Component: type) systems.OnAdded(Component) {
+        const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
+        var results = std.ArrayList(systems.OnAdded(Component).Item){};
+        defer results.deinit(e.allocator);
+
+        var iter = e.component_added.iterator();
+        while (iter.next()) |ev_ptr| {
+            const ev = ev_ptr.*;
+            if (ev.data.type_hash != event_type_hash) continue;
+            const comp = e.getComponent(ev.data.entity, Component) catch continue;
+            if (comp) |comp_ptr| {
+                results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr }) catch @panic("OutOfMemory");
+            }
+        }
+
+        const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
+        return systems.OnAdded(Component){ .items = slice };
+    }
+};
+
+/// OnRemoved(T) SystemParam analyzer and applier
+/// Exposes entities from which T was removed. For now this uses an
+/// EventStore of Entity generated elsewhere (e.g. by scheduler).
+pub const OnRemovedSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            return analyze(Child);
+        }
+        if (type_info == .@"struct" and @hasDecl(T, "ComponentType") and @hasDecl(T, "is_on_removed")) {
+            return T.ComponentType;
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime Component: type) systems.OnRemoved(Component) {
+        const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
+        var results = std.ArrayList(ecs.Entity){};
+        defer results.deinit(e.allocator);
+
+        var iter = e.component_removed.iterator();
+        while (iter.next()) |ev_ptr| {
+            const ev = ev_ptr.*;
+            if (ev.data.type_hash != event_type_hash) continue;
+            results.append(e.allocator, ev.data.entity) catch @panic("OutOfMemory");
+        }
+
+        const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
+        return systems.OnRemoved(Component){ .removed = slice };
+    }
+};
+
 test "ResourceSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);

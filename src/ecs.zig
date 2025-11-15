@@ -4,6 +4,7 @@ const World = world.World;
 const serialize = @import("serialize.zig");
 const qry = @import("query.zig");
 const errs = @import("errors.zig");
+const events = @import("events.zig");
 const hash = std.hash;
 const sys = @import("systems.zig");
 const registry = @import("systems.registry.zig");
@@ -49,6 +50,10 @@ pub const Manager = struct {
     resources: std.AutoHashMap(u64, ResourceEntry), // TypeHash -> ResourceEntry
     systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
 
+    // Component lifecycle event stores
+    component_added: events.EventStore(ComponentEvent),
+    component_removed: events.EventStore(ComponentEvent),
+
     /// Initialize the ECS with an optional custom allocator.
     /// If no allocator is provided, the default page allocator is used.
     pub fn init(allocator: std.mem.Allocator) !Manager {
@@ -60,6 +65,8 @@ pub const Manager = struct {
             .world = World.init(allocator),
             .resources = std.AutoHashMap(u64, ResourceEntry).init(allocator),
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
+            .component_added = events.EventStore(ComponentEvent).init(allocator, 64),
+            .component_removed = events.EventStore(ComponentEvent).init(allocator, 64),
         };
     }
 
@@ -82,7 +89,15 @@ pub const Manager = struct {
             self.allocator.destroy(system);
         }
         self.systems.deinit();
+
+        self.component_added.deinit();
+        self.component_removed.deinit();
     }
+
+    pub const ComponentEvent = struct {
+        entity: Entity,
+        type_hash: u64,
+    };
 
     /// Get the total number of alive entities
     pub fn count(self: *Manager) usize {
@@ -215,12 +230,18 @@ pub const Manager = struct {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         const tuple = .{value};
         try self.world.add(entity, @TypeOf(tuple), tuple);
+
+        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
     pub fn removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        const type_hash = hash.Wyhash.hash(0, @typeName(T));
         try self.world.removeComponent(entity, T);
+
+        self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
     /// Get a mutable pointer to a component of type T for the given entity, or an error if not found or entity is dead.

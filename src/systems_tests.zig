@@ -12,6 +12,7 @@ const registry = @import("systems.registry.zig");
 const DefaultRegistry = registry.DefaultParamRegistry;
 const events = @import("events.zig");
 const Query = @import("query.zig").Query;
+const relations = @import("relations.zig");
 
 // Test components
 const Position = struct {
@@ -107,6 +108,23 @@ fn errorSys(_: *Manager) !void {
 
 fn returnSys(_: *Manager) i32 {
     return 123; // Would return 123 if systems supported it
+}
+
+fn onAddedRemovedSystem(_: *Manager, added: systems.OnAdded(Position), removed: systems.OnRemoved(Position)) void {
+    var added_count: usize = 0;
+    for (added.iter()) |item| {
+        _ = item;
+        added_count += 1;
+    }
+
+    var removed_count: usize = 0;
+    for (removed.iter()) |entity| {
+        _ = entity;
+        removed_count += 1;
+    }
+
+    std.testing.expect(added_count >= 1) catch unreachable;
+    std.testing.expect(removed_count >= 1) catch unreachable;
 }
 
 test "System - basic execution" {
@@ -260,6 +278,23 @@ test "System - return value" {
 
     try std.testing.expect(ret == 123);
 }
+
+test "System - OnAdded and OnRemoved system params" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Ensure no leftover component events from earlier tests
+    manager.component_added.clear();
+    manager.component_removed.clear();
+
+    const entity = manager.create(.{});
+    try manager.addComponent(entity, Position, .{ .x = 1, .y = 2 });
+    try manager.removeComponent(entity, Position);
+
+    const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
+    _ = try system.run(&manager, system.ctx);
+}
+
 test "System - multiple cached systems" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
