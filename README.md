@@ -340,6 +340,8 @@ Systems can request various parameters that are automatically injected:
 - **`NextState(T)`**: Trigger state transitions (where T is an enum)
 - **`EventReader(T)`**: Read events of type T
 - **`EventWriter(T)`**: Write events of type T
+- **`OnAdded(T)`**: Iterate over entities that had component T added since the last system run
+- **`OnRemoved(T)`**: Iterate over entities from which component T was removed since the last system run
 - **`*Relations`**: Access to the RelationManager for entity relationships
 
 - More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
@@ -433,6 +435,75 @@ pub fn main() !void {
 
     // recommended to discard unhandled events later on
     collision_events.discardUnhandled();
+}
+```
+
+### Component Lifecycle Tracking
+
+`OnAdded` and `OnRemoved` system parameters allow you to react to component changes in real-time.
+
+```zig
+const Position = struct { x: f32, y: f32 };
+
+// System that reacts to Position components being added
+fn onPositionAddedSystem(
+    manager: *zevy_ecs.Manager,
+    added: zevy_ecs.OnAdded(Position),
+) void {
+    _ = manager;
+    for (added.iter()) |item| {
+        std.debug.print("Entity {d} gained Position at ({d}, {d})\n",
+            .{ item.entity.id, item.comp.x, item.comp.y });
+    }
+}
+
+// System that reacts to Position components being removed
+fn onPositionRemovedSystem(
+    manager: *zevy_ecs.Manager,
+    removed: zevy_ecs.OnRemoved(Position),
+) void {
+    _ = manager;
+    for (removed.iter()) |entity| {
+        std.debug.print("Entity {d} lost Position component\n", .{entity.id});
+    }
+}
+
+// Both can be used together
+fn positionChangeSystem(
+    manager: *zevy_ecs.Manager,
+    added: zevy_ecs.OnAdded(Position),
+    removed: zevy_ecs.OnRemoved(Position),
+) void {
+    _ = manager;
+
+    // Track new entities with Position
+    for (added.iter()) |item| {
+        std.debug.print("Added: {d}\n", .{item.entity.id});
+    }
+
+    // Track entities losing Position
+    for (removed.iter()) |entity| {
+        std.debug.print("Removed: {d}\n", .{entity.id});
+    }
+}
+
+pub fn main() !void {
+    var manager = try zevy_ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Create and cache systems
+    const added_system = manager.cacheSystem(zevy_ecs.ToSystem(onPositionAddedSystem, zevy_ecs.DefaultParamRegistry));
+    const removed_system = manager.cacheSystem(zevy_ecs.ToSystem(onPositionRemovedSystem, zevy_ecs.DefaultParamRegistry));
+
+    // Add/remove components to trigger the systems
+    const entity = manager.create(.{});
+    try manager.addComponent(entity, Position, .{ .x = 0, .y = 0 });
+
+    try manager.runSystem(added_system);    // Prints: "Entity X gained Position..."
+
+    try manager.removeComponent(entity, Position);
+
+    try manager.runSystem(removed_system);  // Prints: "Entity X lost Position..."
 }
 ```
 
