@@ -29,6 +29,11 @@ pub const LocalSystemParam = struct {
         };
         return &static_storage.local;
     }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
+    }
 };
 
 /// EventReader(T) SystemParam analyzer and applier
@@ -53,6 +58,11 @@ pub const EventReaderSystemParam = struct {
         };
         return systems.EventReader(T){ .event_store = event_store };
     }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
+    }
 };
 
 /// EventWriter(T) SystemParam analyzer and applier
@@ -76,6 +86,11 @@ pub const EventWriterSystemParam = struct {
             return systems.EventWriter(T){ .event_store = stored_event_store };
         };
         return systems.EventWriter(T){ .event_store = event_store };
+    }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
     }
 };
 
@@ -108,6 +123,11 @@ pub const StateSystemParam = struct {
         }
 
         std.debug.panic("StateManager({s}) resource not found. Register the state type with scheduler.registerState before using State parameter", .{@typeName(StateEnum)});
+    }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
+        _ = e;
+        _ = ptr;
+        _ = StateEnum;
     }
 };
 
@@ -161,6 +181,11 @@ pub const NextStateSystemParam = struct {
 
         return next_state_ptr;
     }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
+        _ = e;
+        _ = ptr;
+        _ = StateEnum;
+    }
 };
 
 /// Res(T) SystemParam analyzer and applier
@@ -194,12 +219,12 @@ pub const ResourceSystemParam = struct {
         }
     }
 
-    pub fn unalloc(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
-        const res_type = comptime ResourceSystemParam.analyze(T);
-        if (res_type == null) {
-            std.debug.panic("Cannot unalloc non-resource type '{s}'", .{@typeName(T)});
-        }
-        e.allocator.destroy(@as(*systems.Res(res_type.?), ptr));
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
+        // Resource system params do not allocate temporary memory; nothing to free.
+        // Keep a no-op deinit so the registry can call it uniformly if present.
+        _ = e;
+        _ = ptr;
+        _ = ResourceType;
     }
 };
 
@@ -218,6 +243,11 @@ pub const QuerySystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) T {
         return e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+    }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
     }
 };
 
@@ -244,6 +274,11 @@ pub const RelationsSystemParam = struct {
             };
         }
         return e.getResource(relations.RelationManager) orelse unreachable;
+    }
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
     }
 };
 
@@ -272,15 +307,26 @@ pub const OnAddedSystemParam = struct {
         var iter = e.component_added.iterator();
         while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
-            const comp = e.getComponent(ev.data.entity, Component) catch continue;
+            const comp = e.getComponent(ev.data.entity, Component) catch null;
             if (comp) |comp_ptr| {
                 results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr }) catch @panic("OutOfMemory");
-                ev.handled = true;
+            } else {
+                // Even if the component is no longer present, we still consider it as "added" for this frame.
+                // Use a null pointer for the component to indicate it was removed before system execution.
+                results.append(e.allocator, .{ .entity = ev.data.entity, .comp = null }) catch @panic("OutOfMemory");
             }
+            ev.handled = true;
         }
 
         const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
         return systems.OnAdded(Component){ .items = slice };
+    }
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
+        const p: *systems.OnAdded(Component) = @ptrCast(@alignCast(ptr));
+        if (p.items.len != 0) {
+            e.allocator.free(p.items);
+        }
     }
 };
 
@@ -314,6 +360,13 @@ pub const OnRemovedSystemParam = struct {
 
         const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
         return systems.OnRemoved(Component){ .removed = slice };
+    }
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
+        const p: *systems.OnRemoved(Component) = @ptrCast(@alignCast(ptr));
+        if (p.removed.len != 0) {
+            e.allocator.free(p.removed);
+        }
     }
 };
 

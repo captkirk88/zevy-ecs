@@ -253,14 +253,14 @@ pub const Manager = struct {
         self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
 
         // Auto-sync Relation components to RelationManager
-        if (@hasDecl(T, "relation_kind")) {
+        if (@hasDecl(T, "relation_kind") and @hasDecl(T, "config")) {
             const Kind = T.relation_kind;
             const config = T.config;
 
-            if (self.getResource(relations.RelationManager)) |rel_mgr| {
+            if (self.getResource(relations.RelationManager)) |rel| {
                 // Only sync indexed relations to the index
                 if (config.indexed) {
-                    const index = try rel_mgr.getOrCreateIndex(Kind);
+                    const index = try rel.getOrCreateIndex(Kind);
                     try index.add(entity, value.target);
                 }
             }
@@ -371,6 +371,30 @@ pub const Manager = struct {
             return @ptrCast(@alignCast(entry.ptr));
         }
         return null;
+    }
+
+    /// Get a mutable pointer to a resource of type T, adding it with default_value if it doesn't exist.
+    /// The default_value will be deinitialized if the resource already exists and has a deinit method.
+    ///
+    /// ### Warning
+    /// Initialization of `default_value` requiring a allocator must use `zevy_ecs.Manager.allocator` for proper memory management if `deinit` requires the allocator used to initialize.
+    pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T) error{OutOfMemory}!*T {
+        if (self.getResource(T)) |res| {
+            const reflect = @import("reflect.zig");
+            if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator})) {
+                default_value.deinit(self.allocator);
+            } else if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{})) {
+                default_value.deinit();
+            }
+            return res;
+        } else {
+            return self.addResource(T, default_value) catch |err| switch (err) {
+                error.ResourceAlreadyExists => {
+                    return self.getResource(T) orelse @panic("Resource should exist after ResourceAlreadyExists error");
+                },
+                else => return error.OutOfMemory,
+            };
+        }
     }
 
     /// Check if a resource of type T exists.
@@ -644,4 +668,17 @@ test "Entity destruction and reuse" {
 
     try std.testing.expect(ecs.isAlive(entity3));
     try std.testing.expect(ecs.isAlive(entity2));
+}
+
+test "getOrAddResource" {
+    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs.deinit();
+
+    const MyResource = struct {
+        value: u32,
+    };
+
+    _ = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }) catch unreachable;
+
+    try std.testing.expect(ecs.hasResource(MyResource));
 }

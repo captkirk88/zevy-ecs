@@ -83,6 +83,17 @@ const TypedRelationIndex = struct {
         self.incoming.deinit();
     }
 
+    pub fn has(self: *TypedRelationIndex, child: Entity, parent: Entity) bool {
+        if (self.outgoing.get(child.id)) |list| {
+            for (list.items) |item| {
+                if (item.eql(parent)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Add a relation between entities
     pub fn add(self: *TypedRelationIndex, child: Entity, parent: Entity) !void {
         // Add to outgoing (child points to parent)

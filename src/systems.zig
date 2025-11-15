@@ -181,6 +181,13 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
 
             // Build args tuple with mutable resolved args
             const all_args_tuple = .{ecs} ++ context.args ++ resolved_args;
+            // Deallocate any system param resources after the system finishes.
+            // We need to call deinit for each resolved argument type if it provides a deinit implementation.
+                inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
+                const ParamType = param.type.?;
+                const resolved_ptr: *anyopaque = @ptrCast(@constCast(@alignCast(&resolved_args[i])));
+                defer ParamRegistry.deinit(ecs, resolved_ptr, ParamType);
+            }
             if (is_error_union) {
                 return try @call(.auto, fn_ptr_typed, all_args_tuple);
             } else {
@@ -340,7 +347,7 @@ pub fn OnAdded(comptime T: type) type {
         pub const ComponentType = T;
         pub const is_on_added = true;
 
-        pub const Item = struct { entity: ecs_mod.Entity, comp: *T };
+        pub const Item = struct { entity: ecs_mod.Entity, comp: ?*T };
 
         items: []const Item,
 

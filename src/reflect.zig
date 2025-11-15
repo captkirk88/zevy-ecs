@@ -27,6 +27,26 @@ pub fn hasFunc(comptime T: type, comptime func_name: []const u8) bool {
     return false;
 }
 
+pub fn hasFuncWithArgs(comptime T: type, comptime func_name: []const u8, comptime arg_types: []const type) bool {
+    const type_info = @typeInfo(T);
+    if (type_info == .@"struct") {
+        if (!hasFunc(T, func_name)) return false;
+        const fn_type = @typeInfo(@TypeOf(@field(T, func_name)));
+        if (fn_type != .@"fn") return false;
+        if (fn_type.@"fn".params.len != arg_types.len) return false;
+        inline for (0..arg_types.len) |i| {
+            if (fn_type.@"fn".params[i].type != arg_types[i]) {
+                return false;
+            }
+        }
+        return true;
+    } else if (type_info == .pointer) {
+        const Child = type_info.pointer.child;
+        return hasFuncWithArgs(Child, func_name, arg_types);
+    }
+    return false;
+}
+
 pub fn hasField(comptime T: type, comptime field_name: []const u8) bool {
     const type_info = @typeInfo(T);
     if (type_info == .@"struct") {
@@ -177,6 +197,25 @@ test "hasFunc - pointer to struct" {
 
     try std.testing.expect(comptime hasFunc(*TestStruct, "testMethod"));
     try std.testing.expect(comptime !hasFunc(*TestStruct, "nonExistentMethod"));
+}
+
+test "hasFuncWithArgs - struct with function" {
+    const TestStruct = struct {
+        value: i32,
+
+        pub fn add(self: @This(), other: i32) i32 {
+            return self.value + other;
+        }
+
+        pub fn noArgs(self: @This()) i32 {
+            return self.value;
+        }
+    };
+
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "add", &[_]type{ TestStruct, i32 }));
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "noArgs", &[_]type{TestStruct}));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "add", &[_]type{TestStruct})); // Wrong arg count
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "nonExistent", &[_]type{TestStruct})); // Function doesn't exist
 }
 
 test "hasField - struct with fields" {

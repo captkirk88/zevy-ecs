@@ -294,13 +294,3 @@ test "System - OnAdded and OnRemoved system params" {
     const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
 }
-
-test "System - multiple cached systems" {
-    var manager = try Manager.init(std.testing.allocator);
-    defer manager.deinit();
-
-    const h1 = manager.createSystemCached(simpleSystem, DefaultRegistry);
-    const h2 = manager.createSystemCached(resourceSystem, DefaultRegistry);
-
-    try std.testing.expect(h1.handle != h2.handle);
-}

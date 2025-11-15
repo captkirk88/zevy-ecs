@@ -472,11 +472,7 @@ test "RelationManager - auto index update when Relation component added directly
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var rel_manager = RelationManager.init(allocator);
-    defer rel_manager.deinit();
-
-    // Add RelationManager as resource so addComponent auto-syncs to index
-    _ = try manager.addResource(RelationManager, rel_manager);
+    const rel_manager = manager.getResource(RelationManager) orelse unreachable;
 
     const parent = manager.create(.{Transform{}});
     var children: [10]ecs.Entity = undefined;

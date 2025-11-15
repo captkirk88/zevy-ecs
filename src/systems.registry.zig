@@ -62,6 +62,18 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             }
             @compileError(std.fmt.comptimePrint("No registered SystemParam can handle type: {s}", .{@typeName(ParamType)}));
         }
+
+        pub fn deinit(ecs_instance: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+            inline for (registered_params) |SystemParam| {
+                const analyzed = SystemParam.analyze(ParamType);
+                if (analyzed) |param| {
+                    if (reflect.hasFuncWithArgs(SystemParam, "deinit", &[_]type{*ecs.Manager, *anyopaque, type})) {
+                        SystemParam.deinit(ecs_instance, ptr, param);
+                    }
+                    return;
+                }
+            }
+        }
     };
 }
 
