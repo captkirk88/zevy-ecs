@@ -44,6 +44,13 @@ pub fn Relation(comptime Kind: type) type {
             Kind.relation_config
         else
             RelationConfig{};
+
+        pub fn init(target: Entity, data: Kind) Relation(Kind) {
+            return .{
+                .target = target,
+                .data = data,
+            };
+        }
     };
 }
 
@@ -169,7 +176,7 @@ const TypedRelationIndex = struct {
     }
 };
 
-/// Adaptive relation manager - only indexes types that need it
+/// Manager for all relations
 pub const RelationManager = struct {
     allocator: std.mem.Allocator,
 

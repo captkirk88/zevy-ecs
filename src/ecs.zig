@@ -232,6 +232,7 @@ pub const Manager = struct {
         try self.world.add(entity, @TypeOf(tuple), tuple);
 
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        self.component_removed.discardHandled();
         self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
@@ -241,6 +242,7 @@ pub const Manager = struct {
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         try self.world.removeComponent(entity, T);
 
+        self.component_removed.discardHandled();
         self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
     }
 

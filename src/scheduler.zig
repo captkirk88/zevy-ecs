@@ -437,7 +437,7 @@ pub const Scheduler = struct {
 
 /// Returns a temporary stage ID for systems that should run when entering a specific state
 /// Usage: scheduler.addSystem(OnEnter(GameState.Playing), my_system_handle)
-pub fn OnEnter(comptime state: anytype) StageId {
+pub inline fn OnEnter(comptime state: anytype) StageId {
     const StateEnum = @TypeOf(state);
     const type_info = @typeInfo(StateEnum);
     if (type_info != .@"enum") {
@@ -457,7 +457,7 @@ pub fn OnEnter(comptime state: anytype) StageId {
 
 /// Returns a temporary stage ID for systems that should run when exiting a specific state
 /// Usage: scheduler.addSystem(OnExit(GameState.Playing), my_cleanup_system_handle)
-pub fn OnExit(comptime state: anytype) StageId {
+pub inline fn OnExit(comptime state: anytype) StageId {
     const StateEnum = @TypeOf(state);
     const type_info = @typeInfo(StateEnum);
     if (type_info != .@"enum") {
@@ -477,7 +477,7 @@ pub fn OnExit(comptime state: anytype) StageId {
 
 /// Returns a temporary stage ID for systems that should run only while in a specific state
 /// Usage: scheduler.addSystem(InState(GameState.Playing), gameplay_system_handle)
-pub fn InState(comptime state: anytype) StageId {
+pub inline fn InState(comptime state: anytype) StageId {
     const StateEnum = @TypeOf(state);
     const type_info = @typeInfo(StateEnum);
     if (type_info != .@"enum") {

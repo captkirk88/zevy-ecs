@@ -477,10 +477,7 @@ test "RelationManager - auto index update when Relation component added directly
     const child = manager.create(.{Transform{}});
 
     // Manually add Relation(ChildOf) component via ECS, simulating user code
-    try manager.addComponent(child, Relation(ChildOf), .{
-        .target = parent,
-        .data = ChildOf{},
-    });
+    try manager.addComponent(child, Relation(ChildOf), Relation(ChildOf).init(parent, .{}));
 
     // Use RelationManager.add to ensure index is updated consistently
     try rel_manager.add(&manager, child, parent, ChildOf);
