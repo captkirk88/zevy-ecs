@@ -243,6 +243,7 @@ pub const Manager = struct {
         self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
+    /// Add a component of type T to the given entity, or an error if entity is dead.
     pub fn addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         const tuple = .{value};
@@ -251,20 +252,6 @@ pub const Manager = struct {
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         self.component_removed.discardHandled();
         self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
-
-        // Auto-sync Relation components to RelationManager
-        if (@hasDecl(T, "relation_kind") and @hasDecl(T, "config")) {
-            const Kind = T.relation_kind;
-            const config = T.config;
-
-            if (self.getResource(relations.RelationManager)) |rel| {
-                // Only sync indexed relations to the index
-                if (config.indexed) {
-                    const index = try rel.getOrCreateIndex(Kind);
-                    try index.add(entity, value.target);
-                }
-            }
-        }
     }
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
