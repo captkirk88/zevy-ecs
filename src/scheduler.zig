@@ -85,6 +85,10 @@ pub const Stages = struct {
         pub const priority: StageId = 7 * STAGE_GAP; // 700,000
     };
 
+    pub const Last = struct {
+        pub const priority: StageId = 8 * STAGE_GAP; // 800,000
+    };
+
     // State management stages (1,000,000 - 1,999,999)
     pub const StateTransition = struct {
         pub const priority: StageId = 1_000_000;
@@ -99,14 +103,11 @@ pub const Stages = struct {
         pub const priority: StageId = StateOnEnter.priority + STAGE_GAP;
     };
 
-    pub const Last = struct {
-        pub const priority: StageId = std.math.maxInt(i32) - 1;
-    };
     pub const Exit = struct {
-        pub const priority: StageId = std.math.maxInt(i32);
+        pub const priority: StageId = std.math.maxInt(i32) - STAGE_GAP;
     };
     pub const Max = struct {
-        pub const priority: StageId = Exit.priority;
+        pub const priority: StageId = std.math.maxInt(i32);
     };
 };
 

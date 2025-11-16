@@ -76,6 +76,8 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                         } else {
                             field_type = ?*component_type;
                         }
+                    } else if (@typeInfo(T) == .pointer) {
+                        @compileError(std.fmt.comptimePrint("Query includes/excludes must be value types {s}", @typeName(T)));
                     } else {
                         if (component_type == Entity) {
                             field_type = Entity;
