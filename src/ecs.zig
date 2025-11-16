@@ -159,7 +159,7 @@ pub const Manager = struct {
     }
 
     /// Create an entity from an array of ComponentInstance
-    pub fn createFromComponents(self: *Manager, components: []const world.ComponentInstance) !Entity {
+    pub fn createFromComponents(self: *Manager, components: []const serialize.ComponentInstance) !Entity {
         // Allocate entity ID
         const entity = if (self.free_ids.pop()) |id| blk: {
             break :blk Entity{ .id = id, .generation = self.generations.items[id] };
