@@ -55,6 +55,7 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
     - [Getting Stage Information](#getting-stage-information)
 - [Performance](#performance)
 - [Contributing](#contributing)
+- [Projects](#projects)
 
 ## Quick Start
 
@@ -1295,3 +1296,9 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 Contributions are welcome!
 Please describe issues in detail. Bug reports, feature requests, etc. Pull requests are also welcome.
+
+## Projects
+
+- [zevy-raylib](https://github.com/captkirk88/zevy-ecs)
+  - A game engine built on top of zevy_ecs and raylib for graphics and input handling.
+  - Uses plugins. Either call plug() or add the plugins manually.
