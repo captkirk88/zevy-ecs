@@ -45,13 +45,6 @@ pub fn Relation(comptime Kind: type) type {
             Kind.relation_config
         else
             RelationConfig{};
-
-        pub fn init(target: Entity, data: Kind) Relation(Kind) {
-            return .{
-                .target = target,
-                .data = data,
-            };
-        }
     };
 }
 

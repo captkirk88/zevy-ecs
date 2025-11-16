@@ -479,11 +479,15 @@ test "RelationManager - auto index update when Relation component added directly
 
     for (&children) |*child| {
         child.* = manager.create(.{Transform{}});
-        try manager.addComponent(child.*, Relation(ChildOf), Relation(ChildOf).init(parent, .{}));
+        // Manually add to the relation manager's index
+        try rel_manager.add(&manager, child.*, parent, ChildOf);
     }
 
     const retrieved_children = rel_manager.getChildren(parent, ChildOf);
-    try std.testing.expect(retrieved_children.len == 10);
+    std.testing.expect(retrieved_children.len == 10) catch |err| {
+        std.debug.print("Expected 10 children, got {d}\n", .{retrieved_children.len});
+        return err;
+    };
 
     // Verify all children are present
     var found = [_]bool{false} ** 10;

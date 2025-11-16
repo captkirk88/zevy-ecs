@@ -90,8 +90,13 @@ pub fn EventStore(comptime T: type) type {
                 self.capacity = new_capacity;
             }
 
-            // Add the new event at the tail position
-            self.events.append(self.allocator, Event{ .data = event, .handled = false }) catch |err| @panic(@errorName(err));
+            // Ensure ArrayList has space for the tail index
+            while (self.events.items.len <= self.tail) {
+                self.events.append(self.allocator, undefined) catch |err| @panic(@errorName(err));
+            }
+
+            // Write the new event directly at the tail position
+            self.events.items[self.tail] = Event{ .data = event, .handled = false };
             self.tail = (self.tail + 1) % self.capacity;
             self.len += 1;
         }
@@ -162,8 +167,12 @@ pub fn EventStore(comptime T: type) type {
                 self.head = 0;
                 self.tail = 0;
             } else {
-                self.head = self.getActualIndex(0);
-                self.tail = self.getActualIndex(self.len);
+                // self.head = self.getActualIndex(0);
+                // self.tail = self.getActualIndex(self.len);
+
+                // After compacting, events are now contiguous starting at head
+                // tail points to the next position after the last event
+                self.tail = (self.head + self.len) % self.capacity;
             }
         }
 
