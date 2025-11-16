@@ -1299,6 +1299,6 @@ Please describe issues in detail. Bug reports, feature requests, etc. Pull reque
 
 ## Projects
 
-- [zevy-raylib](https://github.com/captkirk88/zevy-ecs)
+- [zevy-raylib](https://github.com/captkirk88/zevy-raylib)
   - A game engine built on top of zevy_ecs and raylib for graphics and input handling.
   - Uses plugins. Either call plug() or add the plugins manually.
