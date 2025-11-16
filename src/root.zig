@@ -63,6 +63,7 @@ pub const Scheduler = scheduler.Scheduler;
 /// StageId type for identifying execution stages
 pub const StageId = scheduler.StageId;
 pub const Stage = scheduler.Stage;
+pub const StageInRange = scheduler.StageInRange;
 pub const Stages = scheduler.Stages;
 /// Returns a stage ID for systems that should run when entering a specific state
 pub const OnEnter = scheduler.OnEnter;

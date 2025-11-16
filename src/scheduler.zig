@@ -24,6 +24,17 @@ pub inline fn Stage(comptime T: type) StageId {
     return @intCast(2_000_000 + (@as(u32, @truncate(hash)) % max_custom_range));
 }
 
+/// Get a stage ID that falls within a specified range.
+pub inline fn StageInRange(comptime T: type, start: StageId, end: StageId) StageId {
+    const base_stage = Stage(T);
+    if (base_stage < start or base_stage > end) {
+        const hash = std.hash.Wyhash.hash(0, @typeName(T));
+        const range_size = end - start;
+        return start + (@as(u32, @truncate(hash)) % range_size);
+    }
+    return base_stage;
+}
+
 const STAGE_GAP: StageId = 100_000;
 
 /// Predefined execution stage types.
@@ -42,6 +53,7 @@ const STAGE_GAP: StageId = 100_000;
 /// scheduler.addSystem(Stage(MyStages.EarlyGame), my_system);
 /// ```
 pub const Stages = struct {
+    /// Predefined stages (0 - 999,999)
     pub const Min = struct {
         pub const priority: StageId = 0;
     };
@@ -712,6 +724,34 @@ test "Custom stage types with hash-based IDs" {
     try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Physics)));
     try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Audio)));
     try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Networking)));
+}
+
+test "StageInRange returns base if in range and maps out-of-range to within range" {
+
+    // Priority-based type that sits in the range
+    const InRange = struct {
+        pub const priority: StageId = 150;
+    };
+    try std.testing.expect(StageInRange(InRange, 100, 200) == 150);
+
+    // Priority-based type outside the range should be mapped into it
+    const OutRangePriority = struct {
+        pub const priority: StageId = 800;
+    };
+    const mapped_priority = StageInRange(OutRangePriority, 100, 200);
+    try std.testing.expect(mapped_priority >= 100);
+    try std.testing.expect(mapped_priority < 200);
+
+    // Non-priority (hash-based) type should also be mapped into the given range
+    const HashBased = struct {};
+    const start = 2_000_000;
+    const end = 2_000_100;
+    const mapped_hash = StageInRange(HashBased, start, end);
+    try std.testing.expect(mapped_hash >= start);
+    try std.testing.expect(mapped_hash < end);
+
+    // Sanity: start must be less than end
+    try std.testing.expect(start < end);
 }
 
 test "State management without registration throws errors" {
