@@ -19,7 +19,7 @@ pub const ComponentInstance = struct {
 
     /// Get the component data as a specific type T
     /// Returns null if the type hash doesn't match
-    pub fn as(self: ComponentInstance, comptime T: type) ?*const T {
+    pub fn as(self: *const ComponentInstance, comptime T: type) ?*const T {
         const expected_info = reflect.getTypeInfo(T);
         if (self.hash == expected_info.hash and self.size == expected_info.size) {
             return @alignCast(std.mem.bytesAsValue(T, self.data[0..self.size]));
@@ -29,7 +29,7 @@ pub const ComponentInstance = struct {
     }
 
     /// Write this component to any std.io.Writer
-    pub fn writeTo(self: ComponentInstance, writer: std.io.AnyWriter) anyerror!void {
+    pub fn writeTo(self: *const ComponentInstance, writer: std.io.AnyWriter) anyerror!void {
         try writer.writeInt(u64, self.hash, .little);
         try writer.writeInt(usize, self.size, .little);
         try writer.writeAll(self.data);
@@ -169,13 +169,13 @@ pub const EntityInstance = struct {
     /// Create an entity in the ECS from this EntityInstance
     /// Returns the created entity
     /// Note: Entity references in components will maintain their original ID values
-    pub fn toEntity(self: EntityInstance, manager: *ecs.Manager) !ecs.Entity {
+    pub fn toEntity(self: *EntityInstance, manager: *ecs.Manager) !ecs.Entity {
         return try manager.createFromComponents(self.components);
     }
 
     /// Create all referenced entities and the main entity
     /// Returns the main entity; referenced entities are created separately
-    pub fn toEntityWithReferences(self: EntityInstance, manager: *ecs.Manager, allocator: std.mem.Allocator) !ecs.Entity {
+    pub fn toEntityWithReferences(self: *EntityInstance, manager: *ecs.Manager, allocator: std.mem.Allocator) !ecs.Entity {
         // Create all referenced entities first
         var entity_map = std.AutoHashMap(u32, ecs.Entity).init(allocator);
         defer entity_map.deinit();
@@ -191,7 +191,7 @@ pub const EntityInstance = struct {
     }
 
     /// Write this entity instance to any std.io.Writer
-    pub fn writeTo(self: EntityInstance, writer: std.io.AnyWriter) anyerror!void {
+    pub fn writeTo(self: *const EntityInstance, writer: std.io.AnyWriter) anyerror!void {
         try writer.writeInt(usize, self.components.len, .little);
         for (self.components) |component| {
             try component.writeTo(writer);
