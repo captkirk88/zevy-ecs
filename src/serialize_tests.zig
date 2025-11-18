@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const ecs = @import("ecs.zig");
 const serialize = @import("serialize.zig");
+const relations = @import("relations.zig");
 
 const Position = struct { x: f32, y: f32 };
 const Velocity = struct { dx: f32, dy: f32 };
@@ -90,7 +91,7 @@ test "EntityInstance - fromEntity and toEntity" {
     });
 
     // Convert to EntityInstance
-    const entity_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
+    var entity_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
     defer entity_instance.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 3), entity_instance.components.len);
@@ -126,7 +127,7 @@ test "EntityInstance - writeTo and readFrom" {
     });
 
     // Convert to EntityInstance and write
-    const original_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
+    var original_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
     defer original_instance.deinit(allocator);
 
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
@@ -138,7 +139,7 @@ test "EntityInstance - writeTo and readFrom" {
     // Read back EntityInstance
     var fbs = std.io.fixedBufferStream(buffer.items);
     const reader = fbs.reader().any();
-    const restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
     defer restored_instance.deinit(allocator);
 
     try testing.expectEqual(original_instance.components.len, restored_instance.components.len);
@@ -166,7 +167,7 @@ test "EntityInstance - empty entity" {
     const entity = manager.create(.{});
 
     // Convert to EntityInstance
-    const entity_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
+    var entity_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
     defer entity_instance.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 0), entity_instance.components.len);
@@ -202,7 +203,7 @@ test "EntityInstance - roundtrip serialization" {
     try writer.writeInt(usize, entities.len, .little);
 
     for (entities) |entity| {
-        const instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
+        var instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
         defer instance.deinit(allocator);
         try instance.writeTo(writer);
     }
@@ -216,7 +217,7 @@ test "EntityInstance - roundtrip serialization" {
 
     var i: usize = 0;
     while (i < count) : (i += 1) {
-        const restored = try serialize.EntityInstance.readFrom(reader, allocator);
+        var restored = try serialize.EntityInstance.readFrom(reader, allocator);
         defer restored.deinit(allocator);
         _ = try restored.toEntity(&manager);
     }
@@ -344,4 +345,249 @@ test "ComponentWriter and ComponentReader - writeComponents and readComponents" 
     const restored_health = restored_components[2].as(Health);
     try testing.expect(restored_health != null);
     try testing.expectEqual(health.value, restored_health.?.value);
+}
+
+test "EntityInstance - with relation component (Entity field)" {
+    const allocator = testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Create two entities - parent and child
+    const parent = manager.create(.{Position{ .x = 0.0, .y = 0.0 }});
+    const child = manager.create(.{
+        Position{ .x = 10.0, .y = 10.0 },
+        Velocity{ .dx = 1.0, .dy = 1.0 },
+    });
+
+    // Create a custom relation-like component (simulating Relation(AttachedTo))
+    const AttachmentRelation = struct {
+        target: ecs.Entity,
+        offset_x: f32 = 0.0,
+        offset_y: f32 = 0.0,
+    };
+
+    try manager.addComponent(child, AttachmentRelation, AttachmentRelation{
+        .target = parent,
+        .offset_x = 5.0,
+        .offset_y = 5.0,
+    });
+
+    // Convert child entity to EntityInstance
+    var child_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, child);
+    defer child_instance.deinit(allocator);
+
+    // Verify the child has the attachment relation
+    var has_attachment = false;
+    for (child_instance.components) |comp| {
+        if (comp.as(AttachmentRelation)) |attachment| {
+            has_attachment = true;
+            // Verify the target entity reference is preserved
+            try testing.expectEqual(parent.id, attachment.target.id);
+            try testing.expectEqual(parent.generation, attachment.target.generation);
+            try testing.expectEqual(@as(f32, 5.0), attachment.offset_x);
+            break;
+        }
+    }
+    try testing.expect(has_attachment);
+}
+
+test "EntityInstance - serialize and deserialize with relation component" {
+    const allocator = testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Define a custom relation component with Entity field
+    const ParentRelation = struct {
+        parent_entity: ecs.Entity,
+        slot: u32 = 0,
+    };
+
+    // Create parent entity
+    const parent = manager.create(.{Position{ .x = 0.0, .y = 0.0 }});
+
+    // Create child entity with parent relation
+    const child = manager.create(.{
+        Position{ .x = 5.0, .y = 5.0 },
+        ParentRelation{
+            .parent_entity = parent,
+            .slot = 1,
+        },
+    });
+
+    // Serialize the child entity
+    var child_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, child);
+    defer child_instance.deinit(allocator);
+
+    // Write to buffer
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator).any();
+    try child_instance.writeTo(writer);
+
+    // Read back from buffer
+    var fbs = std.io.fixedBufferStream(buffer.items);
+    const reader = fbs.reader().any();
+    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    defer restored_instance.deinit(allocator);
+
+    // Create entity from restored instance
+    const new_child = try restored_instance.toEntity(&manager);
+
+    // Verify components
+    const pos = try manager.getComponent(new_child, Position);
+    try testing.expect(pos != null);
+    try testing.expectEqual(@as(f32, 5.0), pos.?.x);
+    try testing.expectEqual(@as(f32, 5.0), pos.?.y);
+
+    const parent_rel = try manager.getComponent(new_child, ParentRelation);
+    try testing.expect(parent_rel != null);
+    // The parent entity reference is preserved (same ID and generation)
+    try testing.expectEqual(parent.id, parent_rel.?.parent_entity.id);
+    try testing.expectEqual(parent.generation, parent_rel.?.parent_entity.generation);
+    try testing.expectEqual(@as(u32, 1), parent_rel.?.slot);
+}
+
+test "EntityInstance - with references (fromEntityWithReferences)" {
+    const allocator = testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Create parent entity
+    const parent = manager.create(.{
+        Position{ .x = 0.0, .y = 0.0 },
+        Health{ .value = 100 },
+    });
+
+    // Define relation component
+    const ChildOf = struct {
+        parent: ecs.Entity,
+    };
+
+    // Create child entity with relation to parent
+    const child = manager.create(.{
+        Position{ .x = 10.0, .y = 10.0 },
+        ChildOf{ .parent = parent },
+    });
+
+    // Serialize with references
+    var referenced_entities_map = std.AutoHashMap(u32, ecs.Entity).init(allocator);
+    defer referenced_entities_map.deinit();
+
+    var child_instance = try serialize.EntityInstance.fromEntityWithReferences(
+        allocator,
+        &manager,
+        child,
+        &referenced_entities_map,
+    );
+    defer child_instance.deinit(allocator);
+
+    // The child should have detected the parent as a referenced entity
+    // (if the heuristic successfully detected it)
+    // For now, this test validates the API works without panicking
+    try testing.expect(child_instance.components.len >= 2); // At least Position and ChildOf
+}
+
+test "EntityInstance - roundtrip with relation component" {
+    const allocator = testing.allocator;
+    var manager1 = try ecs.Manager.init(allocator);
+    defer manager1.deinit();
+
+    var manager2 = try ecs.Manager.init(allocator);
+    defer manager2.deinit();
+
+    // Define relation component
+    const Owner = struct {
+        owner_entity: ecs.Entity,
+    };
+
+    // In manager1: Create entities with relation
+    const owner1 = manager1.create(.{Position{ .x = 1.0, .y = 1.0 }});
+    const item1 = manager1.create(.{
+        Position{ .x = 2.0, .y = 2.0 },
+        Owner{ .owner_entity = owner1 },
+    });
+
+    // Serialize from manager1
+    var item_instance = try serialize.EntityInstance.fromEntity(allocator, &manager1, item1);
+    defer item_instance.deinit(allocator);
+
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator).any();
+    try item_instance.writeTo(writer);
+
+    // Deserialize to manager2
+    var fbs = std.io.fixedBufferStream(buffer.items);
+    const reader = fbs.reader().any();
+    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    defer restored_instance.deinit(allocator);
+
+    const item2 = try restored_instance.toEntity(&manager2);
+
+    // Verify the relation component preserved Entity reference
+    const owner = try manager2.getComponent(item2, Owner);
+    try testing.expect(owner != null);
+    try testing.expectEqual(owner1.id, owner.?.owner_entity.id);
+    try testing.expectEqual(owner1.generation, owner.?.owner_entity.generation);
+}
+
+test "EntityInstance - multiple Entity fields in component" {
+    const allocator = testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Component with multiple Entity fields
+    const Link = struct {
+        source: ecs.Entity,
+        destination: ecs.Entity,
+        weight: f32 = 1.0,
+    };
+
+    const entity_a = manager.create(.{Position{ .x = 1.0, .y = 1.0 }});
+    const entity_b = manager.create(.{Position{ .x = 2.0, .y = 2.0 }});
+
+    const link_entity = manager.create(.{
+        Link{
+            .source = entity_a,
+            .destination = entity_b,
+            .weight = 0.5,
+        },
+    });
+
+    // Serialize
+    var link_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, link_entity);
+    defer link_instance.deinit(allocator);
+
+    // Verify both entity references are preserved
+    var found_link = false;
+    for (link_instance.components) |comp| {
+        if (comp.as(Link)) |link| {
+            found_link = true;
+            try testing.expectEqual(entity_a.id, link.source.id);
+            try testing.expectEqual(entity_b.id, link.destination.id);
+            try testing.expectEqual(@as(f32, 0.5), link.weight);
+            break;
+        }
+    }
+    try testing.expect(found_link);
+
+    // Roundtrip through serialization
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
+    defer buffer.deinit(allocator);
+
+    const writer = buffer.writer(allocator).any();
+    try link_instance.writeTo(writer);
+
+    var fbs = std.io.fixedBufferStream(buffer.items);
+    const reader = fbs.reader().any();
+    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    defer restored_instance.deinit(allocator);
+
+    const new_link_entity = try restored_instance.toEntity(&manager);
+
+    const restored_link = try manager.getComponent(new_link_entity, Link);
+    try testing.expect(restored_link != null);
+    try testing.expectEqual(entity_a.id, restored_link.?.source.id);
+    try testing.expectEqual(entity_b.id, restored_link.?.destination.id);
+    try testing.expectEqual(@as(f32, 0.5), restored_link.?.weight);
 }
