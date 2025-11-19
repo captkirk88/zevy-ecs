@@ -193,12 +193,12 @@ test "States parameter in system" {
     try scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // System that uses State and NextState parameters
-    const systems_mod = @import("systems.zig");
+    const params = @import("systems.params.zig");
     const test_system = struct {
         pub fn run(
             _: *ecs_mod.Manager,
-            game_state: systems_mod.State(GameState),
-            next_state: *systems_mod.NextState(GameState),
+            game_state: params.State(GameState),
+            next_state: *params.NextState(GameState),
         ) void {
             // Check current state using State parameter
             std.debug.assert(game_state.isActive(.Menu));
@@ -253,30 +253,30 @@ test "OnEnter and OnExit systems" {
     const playing_exited = try ecs.addResource(PlayingExited, .{ .value = false });
 
     // Create OnEnter system for Menu state
-    const systems_mod = @import("systems.zig");
+    const params = @import("systems.params.zig");
     const menu_enter_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(MenuEntered)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(MenuEntered)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     // Create OnExit system for Menu state
     const menu_exit_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(MenuExited)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(MenuExited)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     // Create OnEnter system for Playing state
     const playing_enter_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(PlayingEntered)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PlayingEntered)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     // Create OnExit system for Playing state
     const playing_exit_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(PlayingExited)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PlayingExited)) void {
             flag.ptr.value = true;
         }
     }.run;
@@ -357,21 +357,21 @@ test "InState systems" {
     const paused_ran = try ecs.addResource(PausedSystemRan, .{ .value = false });
 
     // Create InState systems for each state
-    const systems_mod = @import("systems.zig");
+    const params = @import("systems.params.zig");
     const menu_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(MenuSystemRan)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(MenuSystemRan)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     const playing_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(PlayingSystemRan)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PlayingSystemRan)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     const paused_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: systems_mod.Res(PausedSystemRan)) void {
+        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PausedSystemRan)) void {
             flag.ptr.value = true;
         }
     }.run;

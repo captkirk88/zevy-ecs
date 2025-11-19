@@ -2,8 +2,47 @@ const std = @import("std");
 const ecs = @import("ecs.zig");
 const events = @import("events.zig");
 const systems = @import("systems.zig");
+const params = @import("systems.params.zig");
 const state = @import("state.zig");
 const relations = @import("relations.zig");
+
+/// Local: Provides per-system-function persistent storage, accessible only to the declaring system.
+/// Value persists across system invocations (lifetime: ECS instance or until explicitly cleared).
+pub fn Local(comptime T: type) type {
+    return struct {
+        _value: T = undefined,
+        _set: bool = false,
+
+        /// Set the local value (persists across invocations).
+        pub fn set(self: *Self, val: T) void {
+            self._value = val;
+            self._set = true;
+        }
+
+        /// Get the local value.
+        pub fn get(self: *Self) T {
+            return self._value;
+        }
+
+        /// Get the local value, returns null if not set.
+        pub fn value(self: *Self) ?T {
+            if (self._set) return self._value;
+            return null;
+        }
+
+        /// Reset the local value (clears persistent state).
+        pub fn clear(self: *Self) void {
+            self._set = false;
+        }
+
+        /// Returns true if the value has been set.
+        pub fn isSet(self: *Self) bool {
+            return self._set;
+        }
+
+        const Self = @This();
+    };
+}
 
 pub const LocalSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
@@ -21,11 +60,11 @@ pub const LocalSystemParam = struct {
         return null;
     }
 
-    pub fn apply(_: *ecs.Manager, comptime T: type) *systems.Local(T) {
+    pub fn apply(_: *ecs.Manager, comptime T: type) *Local(T) {
         // Local params need static storage that persists across system calls
         // Each unique type T gets its own static storage
         const static_storage = struct {
-            var local: systems.Local(T) = .{ ._value = undefined, ._set = false };
+            var local: Local(T) = .{ ._value = undefined, ._set = false };
         };
         return &static_storage.local;
     }
@@ -35,6 +74,73 @@ pub const LocalSystemParam = struct {
         _ = T;
     }
 };
+
+/// EventReader provides read-only access to events of type T from the EventStore
+pub fn EventReader(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const EventType = T;
+        pub const is_event_reader = true;
+        event_store: *events.EventStore(T),
+        iterator: ?events.EventStore(T).Iterator = null,
+
+        /// Read the next event from the store
+        pub fn read(self: *const Self) ?*events.EventStore(T).Event {
+            var mut_self: *Self = @constCast(self);
+            // Initialize iterator if not already done
+            if (mut_self.iterator == null) {
+                mut_self.iterator = mut_self.event_store.iterator();
+            }
+
+            if (mut_self.iterator) |*it| {
+                if (it.next()) |event| {
+                    if (!event.handled) {
+                        return event;
+                    } else {
+                        // Skip handled events
+                        return self.read();
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// Mark the last read event as handled
+        pub fn markHandled(self: *Self) void {
+            var mut_self: *Self = @constCast(self);
+            if (mut_self.iterator) |*it| {
+                it.markHandled();
+            }
+        }
+
+        /// Reset the read position to the beginning
+        pub fn reset(self: *Self) void {
+            var mut_self: *Self = @constCast(self);
+            mut_self.iterator = mut_self.event_store.iterator();
+        }
+
+        /// Create an iterator for reading events (legacy method)
+        pub fn iter(self: *Self) events.EventStore(T).Iterator {
+            return self.event_store.iterator();
+        }
+
+        /// Get the number of events currently in the store
+        pub fn len(self: *const Self) usize {
+            return self.event_store.count();
+        }
+
+        /// Check if the store is empty
+        pub fn isEmpty(self: *const Self) bool {
+            return self.event_store.isEmpty();
+        }
+
+        /// Get all events as a slice (caller must free)
+        pub fn getAll(self: *Self, allocator: std.mem.Allocator) ![]events.EventStore(T).Event {
+            return self.event_store.getAllEvents(allocator);
+        }
+    };
+}
 
 /// EventReader(T) SystemParam analyzer and applier
 pub const EventReaderSystemParam = struct {
@@ -50,13 +156,13 @@ pub const EventReaderSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) systems.EventReader(T) {
+    pub fn apply(e: *ecs.Manager, comptime T: type) EventReader(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
             const event_store_res = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
-            return systems.EventReader(T){ .event_store = event_store_res };
+            return EventReader(T){ .event_store = event_store_res };
         };
-        return systems.EventReader(T){ .event_store = event_store };
+        return EventReader(T){ .event_store = event_store };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
@@ -64,6 +170,32 @@ pub const EventReaderSystemParam = struct {
         _ = T;
     }
 };
+
+/// EventWriter provides write access to add events of type T to the EventStore
+pub fn EventWriter(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const EventType = T;
+        pub const is_event_writer = true;
+        event_store: *events.EventStore(T),
+
+        /// Add an event to the store
+        pub fn write(self: Self, event: T) void {
+            self.event_store.push(event);
+        }
+
+        /// Get the number of events currently in the store
+        pub fn len(self: Self) usize {
+            return self.event_store.count();
+        }
+
+        /// Check if the store is empty
+        /// Returns true if there are no events in the store
+        pub fn isEmpty(self: Self) bool {
+            return self.event_store.isEmpty();
+        }
+    };
+}
 
 /// EventWriter(T) SystemParam analyzer and applier
 pub const EventWriterSystemParam = struct {
@@ -79,13 +211,13 @@ pub const EventWriterSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) systems.EventWriter(T) {
+    pub fn apply(e: *ecs.Manager, comptime T: type) EventWriter(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
             const stored_event_store = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
-            return systems.EventWriter(T){ .event_store = stored_event_store };
+            return EventWriter(T){ .event_store = stored_event_store };
         };
-        return systems.EventWriter(T){ .event_store = event_store };
+        return EventWriter(T){ .event_store = event_store };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
@@ -93,6 +225,37 @@ pub const EventWriterSystemParam = struct {
         _ = T;
     }
 };
+
+/// State provides a query for checking if a specific state enum value is active
+/// Use as a system parameter: state: State(GameState)
+/// Where GameState is an enum type
+pub fn State(comptime StateEnum: type) type {
+    // Verify StateEnum is actually an enum at compile time
+    const type_info = @typeInfo(StateEnum);
+    if (type_info != .@"enum") {
+        @compileError("State requires an enum type, got: " ++ @typeName(StateEnum));
+    }
+
+    return struct {
+        const Self = @This();
+        pub const StateEnum_ = StateEnum;
+        pub const _is_state_param = true;
+
+        // Import state module
+        const state_mod = @import("state.zig");
+        state_mgr: *state_mod.StateManager(StateEnum),
+
+        /// Check if a specific state value is currently active
+        pub fn isActive(self: *const Self, state_enum: StateEnum) bool {
+            return self.state_mgr.isInState(state_enum);
+        }
+
+        /// Get the currently active state value
+        pub fn get(self: *const Self) ?StateEnum {
+            return self.state_mgr.getActiveState();
+        }
+    };
+}
 
 /// States(StateType) SystemParam analyzer and applier
 /// Provides access to state management for checking and transitioning states
@@ -114,12 +277,12 @@ pub const StateSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) systems.State(StateEnum) {
+    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) State(StateEnum) {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
         if (e.getResource(StateManagerType)) |state_mgr| {
-            return systems.State(StateEnum){ .state_mgr = state_mgr };
+            return State(StateEnum){ .state_mgr = state_mgr };
         }
 
         std.debug.panic("StateManager({s}) resource not found. Register the state type with scheduler.registerState before using State parameter", .{@typeName(StateEnum)});
@@ -130,6 +293,32 @@ pub const StateSystemParam = struct {
         _ = StateEnum;
     }
 };
+
+/// NextState allows immediate state transitions for a specific enum type
+pub fn NextState(comptime StateEnum: type) type {
+    // Verify StateEnum is actually an enum at compile time
+    const type_info = @typeInfo(StateEnum);
+    if (type_info != .@"enum") {
+        @compileError("NextState requires an enum type, got: " ++ @typeName(StateEnum));
+    }
+
+    return struct {
+        const Self = @This();
+        pub const StateEnum_ = StateEnum;
+        pub const _is_next_state_param = true;
+
+        // Import state module
+        const state_mod = @import("state.zig");
+        state_mgr: *state_mod.StateManager(StateEnum),
+
+        /// Transition to a specific state value immediately
+        pub fn set(self: *Self, state_enum: StateEnum) void {
+            self.state_mgr.transitionTo(state_enum) catch |err| {
+                std.debug.panic("Failed to transition to state: {}", .{err});
+            };
+        }
+    };
+}
 
 /// System parameter handler for NextState(StateEnum) - allows immediate state transitions
 pub const NextStateSystemParam = struct {
@@ -158,7 +347,7 @@ pub const NextStateSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) *systems.NextState(StateEnum) {
+    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) *NextState(StateEnum) {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
@@ -167,7 +356,7 @@ pub const NextStateSystemParam = struct {
         };
 
         // Get or create NextState instance for this enum type
-        const NextStateType = systems.NextState(StateEnum);
+        const NextStateType = NextState(StateEnum);
         if (e.getResource(NextStateType)) |next_state| {
             return next_state;
         }
@@ -187,6 +376,12 @@ pub const NextStateSystemParam = struct {
         _ = StateEnum;
     }
 };
+
+pub fn Res(comptime T: type) type {
+    return struct {
+        ptr: *T,
+    };
+}
 
 /// Res(T) SystemParam analyzer and applier
 pub const ResourceSystemParam = struct {
@@ -209,11 +404,11 @@ pub const ResourceSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) systems.Res(T) {
+    pub fn apply(e: *ecs.Manager, comptime T: type) Res(T) {
         const resource_ptr = e.getResource(T);
         if (resource_ptr) |res| {
             // Return the wrapper by value - no pointer stability issues!
-            return systems.Res(T){ .ptr = @constCast(res) };
+            return Res(T){ .ptr = @constCast(res) };
         } else {
             std.debug.panic("Resource of type '{s}' not found", .{@typeName(T)});
         }
@@ -251,6 +446,8 @@ pub const QuerySystemParam = struct {
     }
 };
 
+pub const Relations = @import("relations.zig").RelationManager;
+
 /// Relations SystemParam analyzer and applier
 /// Provides access to the RelationManager resource
 pub const RelationsSystemParam = struct {
@@ -266,7 +463,7 @@ pub const RelationsSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime _: type) *relations.RelationManager {
+    pub fn apply(e: *ecs.Manager, comptime _: type) *Relations {
         if (e.hasResource(relations.RelationManager) == false) {
             const rel_mgr = relations.RelationManager.init(e.allocator);
             return e.addResource(relations.RelationManager, rel_mgr) catch |err| {
@@ -275,12 +472,31 @@ pub const RelationsSystemParam = struct {
         }
         return e.getResource(relations.RelationManager) orelse unreachable;
     }
+
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
         _ = ptr;
         _ = T;
     }
 };
+
+/// OnAdded(T) system param: read-only view of components of type T
+/// that were added since the last system run.
+pub fn OnAdded(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const ComponentType = T;
+        pub const is_on_added = true;
+
+        pub const Item = struct { entity: ecs.Entity, comp: ?*T };
+
+        items: []const Item,
+
+        pub fn iter(self: *const Self) []const Item {
+            return self.items;
+        }
+    };
+}
 
 /// OnAdded(T) SystemParam analyzer and applier
 /// Currently this is a thin wrapper that just provides a normal Query
@@ -299,9 +515,9 @@ pub const OnAddedSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime Component: type) systems.OnAdded(Component) {
+    pub fn apply(e: *ecs.Manager, comptime Component: type) OnAdded(Component) {
         const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
-        var results = std.ArrayList(systems.OnAdded(Component).Item){};
+        var results = std.ArrayList(OnAdded(Component).Item){};
         defer results.deinit(e.allocator);
 
         var iter = e.component_added.iterator();
@@ -319,16 +535,33 @@ pub const OnAddedSystemParam = struct {
         }
 
         const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
-        return systems.OnAdded(Component){ .items = slice };
+        return OnAdded(Component){ .items = slice };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        const p: *systems.OnAdded(Component) = @ptrCast(@alignCast(ptr));
+        const p: *OnAdded(Component) = @ptrCast(@alignCast(ptr));
         if (p.items.len != 0) {
             e.allocator.free(p.items);
         }
     }
 };
+
+/// OnRemoved(T) system param: exposes entities from which component T
+/// was removed since last system run. This is a lightweight wrapper
+/// over an event stream produced by the scheduler.
+pub fn OnRemoved(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const ComponentType = T;
+        pub const is_on_removed = true;
+
+        removed: []const ecs.Entity,
+
+        pub fn iter(self: *const Self) []const ecs.Entity {
+            return self.removed;
+        }
+    };
+}
 
 /// OnRemoved(T) SystemParam analyzer and applier
 /// Exposes entities from which T was removed. For now this uses an
@@ -346,7 +579,7 @@ pub const OnRemovedSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime Component: type) systems.OnRemoved(Component) {
+    pub fn apply(e: *ecs.Manager, comptime Component: type) OnRemoved(Component) {
         const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
         var results = std.ArrayList(ecs.Entity){};
         defer results.deinit(e.allocator);
@@ -359,11 +592,11 @@ pub const OnRemovedSystemParam = struct {
         }
 
         const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
-        return systems.OnRemoved(Component){ .removed = slice };
+        return OnRemoved(Component){ .removed = slice };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        const p: *systems.OnRemoved(Component) = @ptrCast(@alignCast(ptr));
+        const p: *OnRemoved(Component) = @ptrCast(@alignCast(ptr));
         if (p.removed.len != 0) {
             e.allocator.free(p.removed);
         }

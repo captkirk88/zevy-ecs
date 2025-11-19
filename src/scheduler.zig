@@ -3,6 +3,7 @@ const ecs_mod = @import("ecs.zig");
 const events = @import("events.zig");
 const registry = @import("systems.registry.zig");
 const systems = @import("systems.zig");
+const params = @import("systems.params.zig");
 const state_mod = @import("state.zig");
 
 /// Stage ID type (internal representation)
@@ -281,7 +282,7 @@ pub const Scheduler = struct {
 
         // Create cleanup system that discards handled events (consumes them)
         const cleanup_system = struct {
-            pub fn cleanup(_: *ecs_mod.Manager, store_res: systems.Res(events.EventStore(T))) void {
+            pub fn cleanup(_: *ecs_mod.Manager, store_res: params.Res(events.EventStore(T))) void {
                 store_res.ptr.discardHandled();
             }
         }.cleanup;
@@ -632,7 +633,7 @@ test "Scheduler assign outside scope" {
     const out_value = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
-        pub fn run(_: *ecs_mod.Manager, out: systems.Res(bool)) void {
+        pub fn run(_: *ecs_mod.Manager, out: params.Res(bool)) void {
             std.debug.print("Test system executed\n", .{});
             out.ptr.* = true;
         }

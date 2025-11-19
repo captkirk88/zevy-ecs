@@ -67,7 +67,7 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             inline for (registered_params) |SystemParam| {
                 const analyzed = SystemParam.analyze(ParamType);
                 if (analyzed) |param| {
-                    if (reflect.hasFuncWithArgs(SystemParam, "deinit", &[_]type{*ecs.Manager, *anyopaque, type})) {
+                    if (reflect.hasFuncWithArgs(SystemParam, "deinit", &[_]type{ *ecs.Manager, *anyopaque, type })) {
                         SystemParam.deinit(ecs_instance, ptr, param);
                     }
                     return;
@@ -151,7 +151,7 @@ test "merged SystemParamRegistry" {
     // Test that we can apply a default registry param
     const value: f32 = 42.0;
     _ = try ecs_instance.addResource(f32, value);
-    const res = merge.apply(&ecs_instance, systems.Res(f32));
+    const res = merge.apply(&ecs_instance, params.Res(f32));
     try std.testing.expect(res.ptr.* == 42.0);
 }
 
@@ -188,8 +188,8 @@ test "CustomSystemParam with Query, Res, Local fields" {
     const QueryExclude = struct {};
     const ComplexType = struct {
         query: query.Query(QueryInclude, QueryExclude),
-        res: systems.Res(i32),
-        local: *systems.Local(u64),
+        res: params.Res(i32),
+        local: *params.Local(u64),
     };
     const CustomComplexParam = struct {
         pub fn analyze(comptime T: type) ?type {

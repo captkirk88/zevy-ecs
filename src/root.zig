@@ -4,6 +4,7 @@ const errs = @import("errors.zig");
 const qry = @import("query.zig");
 const world = @import("world.zig");
 const sys = @import("systems.zig");
+const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
 const scheduler = @import("scheduler.zig");
 
@@ -39,20 +40,27 @@ pub const DefaultParamRegistry = registry.DefaultParamRegistry;
 pub const MergedSystemParamRegistry = registry.MergedSystemParamRegistry;
 /// Query parameter type for accessing entities with specific components
 pub const Query = qry.Query;
+
 /// Resource parameter type for accessing resources
-pub const Res = sys.Res;
+pub const Res = params.Res;
 /// Local parameter type for per-system-instance local state
-pub const Local = sys.Local;
+pub const Local = params.Local;
 /// EventReader parameter type for reading events
-pub const EventReader = sys.EventReader;
+pub const EventReader = params.EventReader;
 /// EventWriter parameter type for writing events
-pub const EventWriter = sys.EventWriter;
+pub const EventWriter = params.EventWriter;
 /// State parameter type for checking if a specific state enum value is active
-pub const State = sys.State;
+pub const State = params.State;
 /// NextState parameter type for immediate state transitions
-pub const NextState = sys.NextState;
+pub const NextState = params.NextState;
 /// Relations parameter type for managing entity relationships
-pub const Relations = sys.Relations;
+pub const Relations = params.Relations;
+/// OnAdded parameter type for reading components that were added this frame
+pub const OnAdded = params.OnAdded;
+/// OnRemoved parameter type for reading components that were removed this frame
+pub const OnRemoved = params.OnRemoved;
+/// Commands parameter type for queuing deferred entity and component operations
+pub const Commands = params.Commands;
 
 // Event types and functions
 const events = @import("events.zig");

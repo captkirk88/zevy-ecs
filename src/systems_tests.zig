@@ -4,10 +4,11 @@ const Manager = ecs_mod.Manager;
 const systems = @import("systems.zig");
 const ToSystem = systems.ToSystem;
 const ToSystemWithArgs = systems.ToSystemWithArgs;
-const Res = systems.Res;
-const Local = systems.Local;
-const EventReader = systems.EventReader;
-const EventWriter = systems.EventWriter;
+const params = @import("systems.params.zig");
+const Res = params.Res;
+const Local = params.Local;
+const EventReader = params.EventReader;
+const EventWriter = params.EventWriter;
 const registry = @import("systems.registry.zig");
 const DefaultRegistry = registry.DefaultParamRegistry;
 const events = @import("events.zig");
@@ -110,7 +111,7 @@ fn returnSys(_: *Manager) i32 {
     return 123; // Would return 123 if systems supported it
 }
 
-fn onAddedRemovedSystem(_: *Manager, added: systems.OnAdded(Position), removed: systems.OnRemoved(Position)) void {
+fn onAddedRemovedSystem(_: *Manager, added: params.OnAdded(Position), removed: params.OnRemoved(Position)) void {
     var added_count: usize = 0;
     for (added.iter()) |item| {
         _ = item;
