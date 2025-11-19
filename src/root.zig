@@ -59,8 +59,6 @@ pub const Relations = params.Relations;
 pub const OnAdded = params.OnAdded;
 /// OnRemoved parameter type for reading components that were removed this frame
 pub const OnRemoved = params.OnRemoved;
-/// Commands parameter type for queuing deferred entity and component operations
-pub const Commands = params.Commands;
 
 // Event types and functions
 const events = @import("events.zig");
