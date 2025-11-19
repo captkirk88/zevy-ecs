@@ -446,6 +446,49 @@ pub const QuerySystemParam = struct {
     }
 };
 
+/// Single(...) returns exactly one matching item from a Query
+/// Use as a system parameter like:
+/// fn foo(ecs: *Manager, single: Single(struct{pos: Position}, .{})) void { ... }
+pub fn Single(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) type {
+    const Q = @import("query.zig").Query(IncludeTypes, ExcludeTypes);
+    return struct {
+        pub const IncludeTypesParam = IncludeTypes;
+        pub const ExcludeTypesParam = ExcludeTypes;
+        pub const Item = Q.IncludeTypesTupleType;
+
+        item: Item,
+    };
+}
+
+/// Single SystemParam analyzer and applier
+pub const SingleSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            return analyze(Child);
+        }
+        if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasDecl(T, "ExcludeTypesParam") and @hasDecl(T, "item")) {
+            return T;
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime T: type) T {
+        var q = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+        const first = q.next() orelse std.debug.panic("Single system param expected a single match but none found\n", .{});
+        // Ensure there is exactly one match
+        if (q.next() != null) std.debug.panic("Single system param expected exactly one match, found multiple\n", .{});
+        return T{ .item = first };
+    }
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
+    }
+};
+
 pub const Relations = @import("relations.zig").RelationManager;
 
 /// Relations SystemParam analyzer and applier
@@ -636,4 +679,83 @@ test "EventWriterSystemParam basic" {
     defer ecs_instance.deinit();
     const writer = EventWriterSystemParam.apply(&ecs_instance, u32);
     try std.testing.expect(@intFromPtr(writer.event_store) != 0);
+}
+
+test "OnAddedSystemParam basic" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    const Position = struct { x: f32, y: f32 };
+
+    // Create empty entity then add a component to trigger component_added event
+    const entity = manager.create(.{});
+    try manager.addComponent(entity, Position, Position{ .x = 3.0, .y = 4.0 });
+
+    var on_added = OnAddedSystemParam.apply(&manager, Position);
+    try std.testing.expect(on_added.items.len >= 1);
+    try std.testing.expect(on_added.items[0].entity.eql(entity));
+    try std.testing.expect(on_added.items[0].comp != null);
+
+    // cleanup / free allocated slice
+    OnAddedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_added)), Position);
+}
+
+test "OnRemovedSystemParam basic" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    const Position = struct { x: f32, y: f32 };
+
+    const entity = manager.create(.{});
+    try manager.addComponent(entity, Position, Position{ .x = 7.0, .y = 8.0 });
+    try manager.removeComponent(entity, Position);
+
+    var on_removed = OnRemovedSystemParam.apply(&manager, Position);
+    try std.testing.expect(on_removed.removed.len >= 1);
+    try std.testing.expect(on_removed.removed[0].eql(entity));
+
+    OnRemovedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_removed)), Position);
+}
+
+test "RelationsSystemParam basic" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    const Child = @import("relations.zig").Child;
+
+    const a = manager.create(.{});
+    const b = manager.create(.{});
+
+    const rel = RelationsSystemParam.apply(&manager, *relations.RelationManager);
+
+    // Add relation a -> b using Child
+    try rel.add(&manager, a, b, Child);
+
+    // Index should be created and queryable
+    const children = rel.getChildren(b, Child);
+    try std.testing.expect(children.len == 1);
+    try std.testing.expect(children[0].eql(a));
+
+    try std.testing.expect(try rel.has(&manager, a, b, Child));
+
+    const parent = try rel.getParent(&manager, a, Child);
+    try std.testing.expect(parent.?.eql(b));
+}
+
+test "SingleSystemParam basic" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    // Create an entity with Position component
+    const Position = struct { x: f32, y: f32 };
+    _ = manager.create(.{Position{ .x = 1.0, .y = 2.0 }});
+
+    const single = SingleSystemParam.apply(&manager, Single(struct { pos: Position }, .{}));
+
+    try std.testing.expectEqual(single.item.pos.*.x, 1.0);
+    try std.testing.expectEqual(single.item.pos.*.y, 2.0);
 }
