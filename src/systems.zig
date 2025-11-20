@@ -1,10 +1,13 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ecs_mod = @import("ecs.zig");
 const world = @import("world.zig");
 const events = @import("events.zig");
 const registry = @import("systems.registry.zig");
 const scheduler_mod = @import("scheduler.zig");
 const reflect = @import("reflect.zig");
+
+const is_debug = builtin.mode == .Debug;
 
 pub const SystemType = enum {
     /// A system represented as a function
@@ -54,11 +57,26 @@ pub fn getSystemTypeFromType(comptime T: type) SystemType {
 pub fn SystemHandle(comptime ReturnType: type) type {
     return struct {
         handle: u64,
+        signature: if (is_debug) []const u8 else void,
 
         pub const return_type = ReturnType;
 
         pub fn eraseType(self: @This()) UntypedSystemHandle {
-            return UntypedSystemHandle{ .handle = self.handle };
+            return if (is_debug)
+                UntypedSystemHandle{ .handle = self.handle, .signature = self.signature }
+            else
+                UntypedSystemHandle{ .handle = self.handle, .signature = {} };
+        }
+
+        pub fn format(
+            self: @This(),
+            writer: anytype,
+        ) !void {
+            if (is_debug) {
+                try writer.print("SystemHandle({s}){{ .handle = {}, .sig = \"{s}\" }}", .{ @typeName(ReturnType), self.handle, self.signature });
+            } else {
+                try writer.print("SystemHandle({s}){{ .handle = {} }}", .{ @typeName(ReturnType), self.handle });
+            }
         }
     };
 }
@@ -66,18 +84,24 @@ pub fn SystemHandle(comptime ReturnType: type) type {
 /// Type-erased system handle for storage in containers.
 pub const UntypedSystemHandle = struct {
     handle: u64,
+    signature: if (is_debug) []const u8 else void,
 
-    pub fn formatNumber(self: UntypedSystemHandle, writer: anytype, _: std.fmt.Number) !void {
+    pub fn formatNumber(
+        self: UntypedSystemHandle,
+        writer: anytype,
+        options: std.fmt.Number,
+    ) !void {
+        _ = options;
         try writer.print("{d}", .{self.handle});
     }
 
-    pub fn format(self: UntypedSystemHandle, comptime fmt_str: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = options;
-        if (fmt_str.len > 0 and fmt_str[0] == 'd') {
-            // For {d}, just print the handle number
-            try writer.print("{d}", .{self.handle});
+    pub fn format(
+        self: UntypedSystemHandle,
+        writer: anytype,
+    ) !void {
+        if (is_debug) {
+            try writer.print("SystemHandle{{ .handle = {}, .sig = \"{s}\" }}", .{ self.handle, self.signature });
         } else {
-            // For other formats, print the full struct
             try writer.print("SystemHandle{{ .handle = {} }}", .{self.handle});
         }
     }
@@ -90,6 +114,8 @@ pub fn System(comptime ReturnType: type) type {
         run: *const fn (*ecs_mod.Manager, ?*anyopaque) anyerror!ReturnType,
         /// Opaque pointer to static metadata/context for argument construction
         ctx: ?*anyopaque,
+        /// Debug sig of the system (only populated in debug builds)
+        signature: if (is_debug) []const u8 else void,
 
         pub const return_type = ReturnType;
     };
@@ -127,9 +153,14 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
         @compileError("ParamRegistry must have an 'apply' function with signature: fn (*ecs_mod.Manager, type) type");
     }
     const log = std.log.scoped(.zevy_ecs);
-    log.debug("Creating trampoline for system: {s}", .{@typeName(system_type)});
+    const system_name = @typeName(system_type);
+    log.debug("Creating trampoline for system: {s}", .{system_name});
     return &struct {
+        pub const debug_system_name = system_name;
         pub fn trampoline(ecs: *ecs_mod.Manager, ctx: ?*anyopaque) anyerror!ReturnType {
+            if (is_debug) {
+                log.debug("Running system: {s}", .{debug_system_name});
+            }
             if (ctx == null) return error.SystemContextNull;
 
             const ContextType = SystemWithArgsContext(Args);
@@ -314,6 +345,7 @@ pub fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: ty
     return System(ReturnType){
         .run = makeSystemTrampolineWithArgs(system_fn, ReturnType, Registry, ArgsType),
         .ctx = @ptrCast(static_context.context),
+        .signature = if (is_debug) @typeName(@TypeOf(system_fn)) else {},
     };
 }
 

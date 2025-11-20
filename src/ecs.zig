@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const world = @import("world.zig");
 const World = world.World;
 const serialize = @import("serialize.zig");
@@ -10,6 +11,8 @@ const hash = std.hash;
 const sys = @import("systems.zig");
 const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
+
+const is_debug = builtin.mode == .Debug;
 
 pub const errors = errs.ECSError;
 
@@ -461,7 +464,10 @@ pub const Manager = struct {
 
         // Check if system already exists
         if (self.systems.get(system_hash)) |_| {
-            return sys.SystemHandle(ReturnType){ .handle = system_hash };
+            return if (is_debug)
+                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = @typeName(@TypeOf(system_fn)) }
+            else
+                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
         }
 
         // Create and cache new system
@@ -470,7 +476,10 @@ pub const Manager = struct {
         sys_ptr.* = s;
         const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        return sys.SystemHandle(ReturnType){ .handle = system_hash };
+        return if (is_debug)
+            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = @typeName(@TypeOf(system_fn)) }
+        else
+            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
     }
 
     /// Run a cached system by its SystemHandle.
@@ -512,7 +521,10 @@ pub const Manager = struct {
 
         // Check if system already exists
         if (self.systems.get(system_hash)) |_| {
-            return sys.SystemHandle(ReturnType){ .handle = system_hash };
+            return if (is_debug)
+                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = system.signature }
+            else
+                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
         }
 
         // Create and cache new system
@@ -520,7 +532,10 @@ pub const Manager = struct {
         sys_ptr.* = system;
         const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        return sys.SystemHandle(ReturnType){ .handle = system_hash };
+        return if (is_debug)
+            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = system.signature }
+        else
+            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
     }
 
     pub fn removeSystem(self: *Manager, sys_handle: anytype) void {

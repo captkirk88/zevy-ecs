@@ -1,4 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const is_debug = builtin.mode == .Debug;
+
 const ecs_mod = @import("ecs.zig");
 const Manager = ecs_mod.Manager;
 const systems = @import("systems.zig");
@@ -294,4 +297,165 @@ test "System - OnAdded and OnRemoved system params" {
 
     const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
+}
+
+test "System signature populated in Debug mode" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const TestSystem = struct {
+        pub fn run(_: *Manager) void {}
+    }.run;
+
+    const system = ToSystem(TestSystem, DefaultRegistry);
+
+    if (is_debug) {
+        // In debug mode, signature should be populated with function signature
+        try std.testing.expect(system.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, system.signature, "fn") != null);
+    } else {
+        // In release mode, signature is void (no field access needed)
+        const debug_sig_type = @TypeOf(system.signature);
+        try std.testing.expect(debug_sig_type == void);
+    }
+}
+
+test "SystemHandle signature in Debug mode" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const TestSystem = struct {
+        pub fn run(_: *Manager) void {}
+    }.run;
+
+    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+
+    if (is_debug) {
+        // In debug mode, signature should be populated with function signature
+        std.debug.print("System debug sig: {s}\n", .{handle.signature});
+        try std.testing.expect(handle.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, handle.signature, "fn") != null);
+    } else {
+        // In release mode, signature is void
+        const debug_name_type = @TypeOf(handle.signature);
+        try std.testing.expect(debug_name_type == void);
+    }
+}
+
+test "UntypedSystemHandle signature in Debug mode" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const TestSystem = struct {
+        pub fn run(_: *Manager) void {}
+    }.run;
+
+    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const untyped = handle.eraseType();
+
+    if (is_debug) {
+        // In debug mode, signature should be populated with function signature
+        std.debug.print("Untyped debug sig: {s}\n", .{untyped.signature});
+        try std.testing.expect(untyped.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, untyped.signature, "fn") != null);
+    } else {
+        // In release mode, signature is void
+        const debug_name_type = @TypeOf(untyped.signature);
+        try std.testing.expect(debug_name_type == void);
+    }
+}
+
+test "UntypedSystemHandle format includes sig in Debug mode" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const TestSystem = struct {
+        pub fn run(_: *Manager) void {}
+    }.run;
+
+    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const untyped = handle.eraseType();
+
+    // Format the handle as a string using {f} to call format method
+    var buffer = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
+    defer buffer.deinit(std.testing.allocator);
+    try buffer.writer(std.testing.allocator).print("{f}", .{untyped});
+
+    const formatted = buffer.items;
+
+    if (is_debug) {
+        // In debug mode, the formatted output should include both handle and sig
+        std.debug.print("Formatted untyped handle: {s}\n", .{formatted});
+        try std.testing.expect(std.mem.indexOf(u8, formatted, "SystemHandle") != null);
+        try std.testing.expect(std.mem.indexOf(u8, formatted, ".sig = ") != null);
+    } else {
+        // In release mode, should only show handle number
+        std.debug.print("Formatted untyped handle (release): {s}\n", .{formatted});
+        try std.testing.expect(std.mem.indexOf(u8, formatted, "SystemHandle") != null);
+    }
+}
+
+test "SystemHandle format with {d} shows only number" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const TestSystem = struct {
+        pub fn run(_: *Manager) void {}
+    }.run;
+
+    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const untyped = handle.eraseType();
+
+    // Format with {d} specifier
+    var buffer = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
+    defer buffer.deinit(std.testing.allocator);
+    try buffer.writer(std.testing.allocator).print("{d}", .{untyped});
+
+    const formatted = buffer.items;
+
+    // Should only contain digits (the handle number)
+    try std.testing.expect(formatted.len > 0);
+    for (formatted) |c| {
+        try std.testing.expect(std.ascii.isDigit(c));
+    }
+}
+
+test "Multiple systems have different debug sigs" {
+    if (!is_debug) return error.SkipZigTest;
+
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Use systems with different signatures to get different output
+    const System1 = struct {
+        pub fn run(_: *Manager) void {}
+    }.run;
+
+    const System2 = struct {
+        pub fn run(_: *Manager) i32 {
+            return 42;
+        }
+    }.run;
+
+    const handle1 = manager.createSystemCached(System1, DefaultRegistry);
+    const handle2 = manager.createSystemCached(System2, DefaultRegistry);
+
+    // Different systems should have different debug sigs (different return types)
+    try std.testing.expect(!std.mem.eql(u8, handle1.signature, handle2.signature));
+}
+
+test "System with injected args has correct debug name" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const TestSystem = struct {
+        pub fn run(_: *Manager, _: i32, _: []const u8) void {}
+    }.run;
+
+    const system = ToSystemWithArgs(TestSystem, .{ 42, "test" }, DefaultRegistry);
+
+    if (is_debug) {
+        try std.testing.expect(system.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, system.signature, "fn") != null);
+    }
 }

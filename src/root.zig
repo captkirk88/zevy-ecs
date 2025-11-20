@@ -98,10 +98,11 @@ pub const reflect = @import("reflect.zig");
 // Tests
 test {
     const builtin = @import("builtin");
-    _ = builtin;
-    const benchmarks = @import("benchmark_tests.zig");
+    if (builtin.mode != .Debug) {
+        const benchmarks = @import("benchmark_tests.zig");
+        std.testing.refAllDecls(benchmarks);
+    }
     std.testing.refAllDecls(ecs);
-    std.testing.refAllDecls(benchmarks);
     std.testing.refAllDecls(@import("ecs_tests.zig"));
     std.testing.refAllDecls(@import("query_tests.zig"));
     std.testing.refAllDecls(@import("archetype_tests.zig"));
