@@ -9,6 +9,17 @@ const reflect = @import("reflect.zig");
 
 const is_debug = builtin.mode == .Debug;
 
+/// Debug information for a single system parameter (only available in debug builds)
+pub const ParamDebugInfo = struct {
+    type_name: []const u8,
+};
+
+/// Debug information for a system (only available in debug builds)
+pub const SystemDebugInfo = struct {
+    signature: []const u8,
+    params: []const ParamDebugInfo,
+};
+
 pub const SystemType = enum {
     /// A system represented as a function
     func,
@@ -57,15 +68,15 @@ pub fn getSystemTypeFromType(comptime T: type) SystemType {
 pub fn SystemHandle(comptime ReturnType: type) type {
     return struct {
         handle: u64,
-        signature: if (is_debug) []const u8 else void,
+        debug_info: if (is_debug) SystemDebugInfo else void,
 
         pub const return_type = ReturnType;
 
         pub fn eraseType(self: @This()) UntypedSystemHandle {
             return if (is_debug)
-                UntypedSystemHandle{ .handle = self.handle, .signature = self.signature }
+                UntypedSystemHandle{ .handle = self.handle, .debug_info = self.debug_info }
             else
-                UntypedSystemHandle{ .handle = self.handle, .signature = {} };
+                UntypedSystemHandle{ .handle = self.handle, .debug_info = {} };
         }
 
         pub fn format(
@@ -73,7 +84,7 @@ pub fn SystemHandle(comptime ReturnType: type) type {
             writer: anytype,
         ) !void {
             if (is_debug) {
-                try writer.print("SystemHandle({s}){{ .handle = {}, .sig = \"{s}\" }}", .{ @typeName(ReturnType), self.handle, self.signature });
+                try writer.print("SystemHandle({s}){{ .handle = {}, .sig = \"{s}\", .params = {} }}", .{ @typeName(ReturnType), self.handle, self.debug_info.signature, self.debug_info.params.len });
             } else {
                 try writer.print("SystemHandle({s}){{ .handle = {} }}", .{ @typeName(ReturnType), self.handle });
             }
@@ -84,7 +95,7 @@ pub fn SystemHandle(comptime ReturnType: type) type {
 /// Type-erased system handle for storage in containers.
 pub const UntypedSystemHandle = struct {
     handle: u64,
-    signature: if (is_debug) []const u8 else void,
+    debug_info: if (is_debug) SystemDebugInfo else void,
 
     pub fn formatNumber(
         self: UntypedSystemHandle,
@@ -100,7 +111,7 @@ pub const UntypedSystemHandle = struct {
         writer: anytype,
     ) !void {
         if (is_debug) {
-            try writer.print("SystemHandle{{ .handle = {}, .sig = \"{s}\" }}", .{ self.handle, self.signature });
+            try writer.print("SystemHandle{{ .handle = {}, .sig = \"{s}\", .params = {} }}", .{ self.handle, self.debug_info.signature, self.debug_info.params.len });
         } else {
             try writer.print("SystemHandle{{ .handle = {} }}", .{self.handle});
         }
@@ -114,8 +125,8 @@ pub fn System(comptime ReturnType: type) type {
         run: *const fn (*ecs_mod.Manager, ?*anyopaque) anyerror!ReturnType,
         /// Opaque pointer to static metadata/context for argument construction
         ctx: ?*anyopaque,
-        /// Debug sig of the system (only populated in debug builds)
-        signature: if (is_debug) []const u8 else void,
+        /// Debug information about the system (only populated in debug builds)
+        debug_info: if (is_debug) SystemDebugInfo else void,
 
         pub const return_type = ReturnType;
     };
@@ -342,10 +353,51 @@ pub fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: ty
         static_context.initialized = true;
     }
 
+    const debug_info = if (is_debug) blk: {
+        const fn_info = @typeInfo(@TypeOf(system_fn)).@"fn";
+
+        // Build param debug info for all params except the first (ECS manager)
+        comptime var param_list: []const ParamDebugInfo = &[_]ParamDebugInfo{};
+        inline for (fn_info.params[1..]) |param| {
+            const param_type = param.type.?;
+            // Check if the type has a debugInfo decl (which should be a const string) and use that, otherwise use @typeName
+            const type_name: []const u8 = blk2: {
+                const type_info = @typeInfo(param_type);
+                // Only check for debugInfo on struct/union/enum types
+                const can_have_decl = type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum";
+                if (can_have_decl and @hasDecl(param_type, "debugInfo")) {
+                    break :blk2 comptime param_type.debugInfo();
+                }
+                break :blk2 @typeName(param_type);
+            };
+            param_list = param_list ++ &[_]ParamDebugInfo{.{
+                .type_name = type_name,
+            }};
+        }
+
+        // Build clean function signature from param debug info instead of raw types
+        comptime var signature_str: []const u8 = "fn(*Manager";
+        inline for (param_list) |param_info| {
+            signature_str = signature_str ++ ", " ++ param_info.type_name;
+        }
+        signature_str = signature_str ++ ")";
+
+        // Add return type
+        const return_type = fn_info.return_type orelse void;
+        if (return_type != void) {
+            signature_str = signature_str ++ " " ++ @typeName(return_type);
+        }
+
+        break :blk SystemDebugInfo{
+            .signature = signature_str,
+            .params = param_list,
+        };
+    } else {};
+
     return System(ReturnType){
         .run = makeSystemTrampolineWithArgs(system_fn, ReturnType, Registry, ArgsType),
         .ctx = @ptrCast(static_context.context),
-        .signature = if (is_debug) @typeName(@TypeOf(system_fn)) else {},
+        .debug_info = debug_info,
     };
 }
 

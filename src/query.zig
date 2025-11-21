@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const archetype_storage = @import("archetype_storage.zig");
 const archetype_mod = @import("archetype.zig");
 const Entity = @import("ecs.zig").Entity;
@@ -50,6 +51,32 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
         entity_index: usize,
         current_archetype: ?*archetype_mod.Archetype,
         component_indices: [include_info.@"struct".fields.len]usize,
+
+        /// Returns a debug string representation of the Query type (only in Debug builds)
+        pub const debugInfo = if (builtin.mode == .Debug) struct {
+            pub fn get() []const u8 {
+                // Build include types string by iterating through fields
+                comptime var include_str: []const u8 = "";
+                inline for (include_info.@"struct".fields, 0..) |field, i| {
+                    const T = field.type;
+                    const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
+                    if (i > 0) include_str = include_str ++ ", ";
+                    include_str = include_str ++ @typeName(component_type);
+                }
+
+                // Build exclude types string by iterating through fields
+                comptime var exclude_str: []const u8 = "";
+                inline for (exclude_info.@"struct".fields, 0..) |field, i| {
+                    const T = field.type;
+                    const component_type = if (T == type) @field(ExcludeTypes, field.name) else getComponentType(T);
+                    if (i > 0) exclude_str = exclude_str ++ ", ";
+                    exclude_str = exclude_str ++ @typeName(component_type);
+                }
+
+                return "Query({" ++ include_str ++ "}, {" ++ exclude_str ++ "})";
+            }
+        }.get else void;
+
         pub const IncludeTypesParam = IncludeTypes;
         pub const ExcludeTypesParam = ExcludeTypes;
         pub const IncludeTypesTupleType = blk: {

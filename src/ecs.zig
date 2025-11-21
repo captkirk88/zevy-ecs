@@ -464,10 +464,13 @@ pub const Manager = struct {
 
         // Check if system already exists
         if (self.systems.get(system_hash)) |_| {
-            return if (is_debug)
-                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = @typeName(@TypeOf(system_fn)) }
-            else
-                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
+            const debug_info = if (is_debug) blk: {
+                break :blk sys.SystemDebugInfo{
+                    .signature = @typeName(@TypeOf(system_fn)),
+                    .params = &[_]sys.ParamDebugInfo{},
+                };
+            } else {};
+            return sys.SystemHandle(ReturnType){ .handle = system_hash, .debug_info = debug_info };
         }
 
         // Create and cache new system
@@ -476,10 +479,13 @@ pub const Manager = struct {
         sys_ptr.* = s;
         const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        return if (is_debug)
-            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = @typeName(@TypeOf(system_fn)) }
-        else
-            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
+        const debug_info = if (is_debug) blk: {
+            break :blk sys.SystemDebugInfo{
+                .signature = @typeName(@TypeOf(system_fn)),
+                .params = &[_]sys.ParamDebugInfo{},
+            };
+        } else {};
+        return sys.SystemHandle(ReturnType){ .handle = system_hash, .debug_info = debug_info };
     }
 
     /// Run a cached system by its SystemHandle.
@@ -521,10 +527,7 @@ pub const Manager = struct {
 
         // Check if system already exists
         if (self.systems.get(system_hash)) |_| {
-            return if (is_debug)
-                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = system.signature }
-            else
-                sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
+            return sys.SystemHandle(ReturnType){ .handle = system_hash, .debug_info = system.debug_info };
         }
 
         // Create and cache new system
@@ -532,10 +535,7 @@ pub const Manager = struct {
         sys_ptr.* = system;
         const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
         self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        return if (is_debug)
-            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = system.signature }
-        else
-            sys.SystemHandle(ReturnType){ .handle = system_hash, .signature = {} };
+        return sys.SystemHandle(ReturnType){ .handle = system_hash, .debug_info = system.debug_info };
     }
 
     pub fn removeSystem(self: *Manager, sys_handle: anytype) void {

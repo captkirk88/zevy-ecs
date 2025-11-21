@@ -332,12 +332,51 @@ pub fn main() !void {
 }
 ```
 
+#### Debug Information
+
+In Debug builds, systems include additional metadata about their signature and parameters. This is useful for logging, debugging, and tooling.
+
+```zig
+const system = zevy_ecs.ToSystem(movementSystem, zevy_ecs.DefaultParamRegistry);
+
+// In Debug builds, access system debug info
+if (@import("builtin").mode == .Debug) {
+    // Access function signature
+    std.debug.print("System signature: {s}\n", .{system.debug_info.signature});
+    // Example output: "fn(*Manager, Query(Position, Velocity))"
+
+    // Access individual parameter types
+    std.debug.print("Number of params: {}\n", .{system.debug_info.params.len});
+    for (system.debug_info.params, 0..) |param, i| {
+        std.debug.print("  Param {}: {s}\n", .{ i, param.type_name });
+        // Example output: "Param 0: Query(Position, Velocity)"
+    }
+}
+
+// System handles also have debug info
+const handle = manager.createSystemCached(movementSystem, zevy_ecs.DefaultParamRegistry);
+if (@import("builtin").mode == .Debug) {
+    std.debug.print("Handle signature: {s}\n", .{handle.debug_info.signature});
+}
+```
+
+The debug info provides clean, readable type names for all system parameters including:
+
+- `Res(T)` - Resource types
+- `Query(Include, Exclude)` - Query types with component names
+- `Local(T)` - Local storage types
+- `EventReader(T)` / `EventWriter(T)` - Event types
+- `OnAdded(T)` / `OnRemoved(T)` - Component lifecycle types
+- And all other system parameters
+
+In Release builds, `debug_info` is `void` and has zero runtime overhead.
+
 ### System Parameters
 
 Systems can request various parameters that are automatically injected:
 
 - **`*Manager`**: Reference to the ECS manager (required first parameter)
-- **`Query(Include, Exclude)`**: Query entities with specific components
+- **`Query(Include, Exclude)`**: Query entities with specific components or **`Single`** to get a single entity with specific components
 - **`Res(T)`**: Access to a global resource of type T
 - **`Local(T)`**: Per-system persistent local state
 - **`State(T)`**: Read-only access to check the current state (where T is an enum)

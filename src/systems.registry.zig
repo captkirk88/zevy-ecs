@@ -11,12 +11,12 @@ pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
     params.EventReaderSystemParam,
     params.EventWriterSystemParam,
     params.ResourceSystemParam,
+    params.SingleSystemParam,
     params.QuerySystemParam,
     params.LocalSystemParam,
     params.RelationsSystemParam,
     params.OnAddedSystemParam,
     params.OnRemovedSystemParam,
-    params.SingleSystemParam,
 });
 
 /// SystemParam registry for runtime-extensible parameter type analysis and instantiation
@@ -38,8 +38,20 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             return registered_params.len;
         }
 
+        pub fn contains(comptime ParamType: type) bool {
+            inline for (registered_params) |SystemParam| {
+                const result = SystemParam.analyze(ParamType);
+                if (result) return true;
+            }
+            return false;
+        }
+
         pub fn get(index: usize) type {
             return registered_params[index];
+        }
+
+        pub fn params() []const type {
+            return registered_params;
         }
 
         fn analyze(comptime ParamType: type) ?type {

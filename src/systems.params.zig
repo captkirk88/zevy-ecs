@@ -13,6 +13,12 @@ pub fn Local(comptime T: type) type {
         _value: T = undefined,
         _set: bool = false,
 
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "Local(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
+
         /// Set the local value (persists across invocations).
         pub fn set(self: *Self, val: T) void {
             self._value = val;
@@ -83,6 +89,12 @@ pub fn EventReader(comptime T: type) type {
         pub const is_event_reader = true;
         event_store: *events.EventStore(T),
         iterator: ?events.EventStore(T).Iterator = null,
+
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "EventReader(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
 
         /// Read the next event from the store
         pub fn read(self: *const Self) ?*events.EventStore(T).Event {
@@ -178,6 +190,12 @@ pub fn EventWriter(comptime T: type) type {
         pub const EventType = T;
         pub const is_event_writer = true;
         event_store: *events.EventStore(T),
+
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "EventWriter(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
 
         /// Add an event to the store
         pub fn write(self: Self, event: T) void {
@@ -380,6 +398,12 @@ pub const NextStateSystemParam = struct {
 pub fn Res(comptime T: type) type {
     return struct {
         ptr: *T,
+
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "Res(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
     };
 }
 
@@ -457,6 +481,15 @@ pub fn Single(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) ty
         pub const Item = Q.IncludeTypesTupleType;
 
         item: Item,
+
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                // Reuse Query's debugInfo logic
+                const query_str = Q.debugInfo();
+                // Replace "Query" with "Single"
+                return "Single" ++ query_str[5..];
+            }
+        }.get else void;
     };
 }
 
@@ -468,7 +501,7 @@ pub const SingleSystemParam = struct {
             const Child = type_info.pointer.child;
             return analyze(Child);
         }
-        if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasDecl(T, "ExcludeTypesParam") and @hasDecl(T, "item")) {
+        if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasDecl(T, "ExcludeTypesParam") and @hasField(T, "item")) {
             return T;
         }
         return null;
@@ -535,6 +568,12 @@ pub fn OnAdded(comptime T: type) type {
 
         items: []const Item,
 
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "OnAdded(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
+
         pub fn iter(self: *const Self) []const Item {
             return self.items;
         }
@@ -599,6 +638,12 @@ pub fn OnRemoved(comptime T: type) type {
         pub const is_on_removed = true;
 
         removed: []const ecs.Entity,
+
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "OnRemoved(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
 
         pub fn iter(self: *const Self) []const ecs.Entity {
             return self.removed;

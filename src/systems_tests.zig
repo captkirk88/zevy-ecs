@@ -98,6 +98,31 @@ fn predicateTrue(_: *Manager) bool {
 
 fn conditionalSystem(_: *Manager) void {}
 
+const GameState = enum { menu, playing, paused };
+
+fn actualFuncSystem(
+    _: *Manager,
+    res: Res(DeltaTime),
+    local: *Local(u32),
+    query: Query(struct { pos: Position }, .{Velocity}),
+    single: params.Single(struct { vel: Velocity }, .{}),
+    event_reader: EventReader(u32),
+    event_writer: EventWriter(u32),
+    on_added: params.OnAdded(Position),
+    on_removed: params.OnRemoved(Position),
+    relation_mgr: *params.Relations,
+) void {
+    _ = res;
+    _ = local;
+    _ = query;
+    _ = single;
+    _ = event_reader;
+    _ = event_writer;
+    _ = on_added;
+    _ = on_removed;
+    _ = relation_mgr;
+}
+
 fn mutateRes(_: *Manager, res: Res(DeltaTime)) void {
     res.ptr.value = 2.0;
 }
@@ -310,13 +335,13 @@ test "System signature populated in Debug mode" {
     const system = ToSystem(TestSystem, DefaultRegistry);
 
     if (is_debug) {
-        // In debug mode, signature should be populated with function signature
-        try std.testing.expect(system.signature.len > 0);
-        try std.testing.expect(std.mem.indexOf(u8, system.signature, "fn") != null);
+        // In debug mode, debug_info should be populated with function signature
+        try std.testing.expect(system.debug_info.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.signature, "fn") != null);
     } else {
-        // In release mode, signature is void (no field access needed)
-        const debug_sig_type = @TypeOf(system.signature);
-        try std.testing.expect(debug_sig_type == void);
+        // In release mode, debug_info is void (no field access needed)
+        const debug_info_type = @TypeOf(system.debug_info);
+        try std.testing.expect(debug_info_type == void);
     }
 }
 
@@ -331,14 +356,14 @@ test "SystemHandle signature in Debug mode" {
     const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
 
     if (is_debug) {
-        // In debug mode, signature should be populated with function signature
-        std.debug.print("System debug sig: {s}\n", .{handle.signature});
-        try std.testing.expect(handle.signature.len > 0);
-        try std.testing.expect(std.mem.indexOf(u8, handle.signature, "fn") != null);
+        // In debug mode, debug_info should be populated with function signature
+        std.debug.print("System debug sig: {s}\n", .{handle.debug_info.signature});
+        try std.testing.expect(handle.debug_info.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, handle.debug_info.signature, "fn") != null);
     } else {
-        // In release mode, signature is void
-        const debug_name_type = @TypeOf(handle.signature);
-        try std.testing.expect(debug_name_type == void);
+        // In release mode, debug_info is void
+        const debug_info_type = @TypeOf(handle.debug_info);
+        try std.testing.expect(debug_info_type == void);
     }
 }
 
@@ -354,14 +379,14 @@ test "UntypedSystemHandle signature in Debug mode" {
     const untyped = handle.eraseType();
 
     if (is_debug) {
-        // In debug mode, signature should be populated with function signature
-        std.debug.print("Untyped debug sig: {s}\n", .{untyped.signature});
-        try std.testing.expect(untyped.signature.len > 0);
-        try std.testing.expect(std.mem.indexOf(u8, untyped.signature, "fn") != null);
+        // In debug mode, debug_info should be populated with function signature
+        std.debug.print("Untyped debug sig: {s}\n", .{untyped.debug_info.signature});
+        try std.testing.expect(untyped.debug_info.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, untyped.debug_info.signature, "fn") != null);
     } else {
-        // In release mode, signature is void
-        const debug_name_type = @TypeOf(untyped.signature);
-        try std.testing.expect(debug_name_type == void);
+        // In release mode, debug_info is void
+        const debug_info_type = @TypeOf(untyped.debug_info);
+        try std.testing.expect(debug_info_type == void);
     }
 }
 
@@ -441,7 +466,7 @@ test "Multiple systems have different debug sigs" {
     const handle2 = manager.createSystemCached(System2, DefaultRegistry);
 
     // Different systems should have different debug sigs (different return types)
-    try std.testing.expect(!std.mem.eql(u8, handle1.signature, handle2.signature));
+    try std.testing.expect(!std.mem.eql(u8, handle1.debug_info.signature, handle2.debug_info.signature));
 }
 
 test "System with injected args has correct debug name" {
@@ -455,7 +480,49 @@ test "System with injected args has correct debug name" {
     const system = ToSystemWithArgs(TestSystem, .{ 42, "test" }, DefaultRegistry);
 
     if (is_debug) {
-        try std.testing.expect(system.signature.len > 0);
-        try std.testing.expect(std.mem.indexOf(u8, system.signature, "fn") != null);
+        try std.testing.expect(system.debug_info.signature.len > 0);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.signature, "fn") != null);
+    }
+}
+
+test "SystemDebugInfo contains parameter information" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Setup resources and entities for the system
+    const dt = DeltaTime{ .value = 0.016 };
+    _ = try manager.addResource(DeltaTime, dt);
+
+    // Create entities for Query and Single to work
+    const pos_entity = manager.create(.{Position{ .x = 1.0, .y = 2.0 }});
+    _ = manager.create(.{Velocity{ .dx = 3.0, .dy = 4.0 }});
+
+    // Trigger component events for OnAdded/OnRemoved
+    try manager.addComponent(pos_entity, Position, Position{ .x = 5.0, .y = 6.0 });
+    try manager.removeComponent(pos_entity, Position);
+
+    const system = ToSystem(actualFuncSystem, DefaultRegistry);
+
+    if (is_debug) {
+        std.debug.print("\nSystem signature: {s}\n", .{system.debug_info.signature});
+        std.debug.print("Number of params: {}\n", .{system.debug_info.params.len});
+
+        for (system.debug_info.params, 0..) |param, i| {
+            std.debug.print("  Param {}: type={s}\n", .{ i, param.type_name });
+        }
+
+        // Should have 9 params (not counting the Manager)
+        try std.testing.expect(system.debug_info.params.len == 9);
+
+        // Verify param types
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[0].type_name, "Res") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[1].type_name, "Local") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[2].type_name, "Query") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[3].type_name, "Single") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[4].type_name, "EventReader") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[5].type_name, "EventWriter") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[6].type_name, "OnAdded") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[7].type_name, "OnRemoved") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[8].type_name, "RelationManager") != null);
     }
 }
