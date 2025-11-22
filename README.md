@@ -69,7 +69,9 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 ### Installation
 
 ```zig
-zig fetch --save git+https://github.com/captkirk88/zevy_ecs
+zig fetch --save https://github.com/captkirk88/zevy-ecs/archive/refs/tags/<tag name>.tar.gz
+// OR for latest commit from main branch
+zig fetch --save git+https://github.com/captkirk88/zevy-ecs
 ```
 
 And in your `build.zig`:
