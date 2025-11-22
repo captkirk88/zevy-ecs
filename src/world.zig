@@ -151,8 +151,9 @@ pub const World = struct {
             // Compute sorted component hashes at compile time
             comptime var sorted_indices: [field_count]usize = undefined;
             comptime {
+                const Pair = struct { hash: u64, index: usize };
                 // Build array of (hash, index) pairs
-                var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
+                var hash_index_pairs: [field_count]Pair = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
                     const comp_info = reflect.getTypeInfo(T);
@@ -160,11 +161,12 @@ pub const World = struct {
                 }
                 // Sort by hash
                 const lessThan = struct {
-                    fn f(_: void, a: @TypeOf(hash_index_pairs[0]), b: @TypeOf(hash_index_pairs[0])) bool {
+                    fn f(_: void, a: Pair, b: Pair) bool {
                         return a.hash < b.hash;
                     }
                 }.f;
-                std.sort.insertion(@TypeOf(hash_index_pairs[0]), &hash_index_pairs, {}, lessThan);
+                std.sort.insertion(Pair, &hash_index_pairs, {}, lessThan);
+
                 // Extract sorted indices
                 for (hash_index_pairs, 0..) |pair, i| {
                     sorted_indices[i] = pair.index;
@@ -297,18 +299,19 @@ pub const World = struct {
         comptime var sorted_indices: [field_count]usize = undefined;
         comptime {
             if (field_count > 0) {
-                var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
+                const Pair = struct { hash: u64, index: usize };
+                var hash_index_pairs: [field_count]Pair = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
                     const comp_info = reflect.getTypeInfo(T);
                     hash_index_pairs[i] = .{ .hash = comp_info.hash, .index = i };
                 }
                 const lessThan = struct {
-                    fn f(_: void, a: @TypeOf(hash_index_pairs[0]), b: @TypeOf(hash_index_pairs[0])) bool {
+                    fn f(_: void, a: Pair, b: Pair) bool {
                         return a.hash < b.hash;
                     }
                 }.f;
-                std.sort.insertion(@TypeOf(hash_index_pairs[0]), &hash_index_pairs, {}, lessThan);
+                std.sort.insertion(Pair, &hash_index_pairs, {}, lessThan);
                 for (hash_index_pairs, 0..) |pair, i| {
                     sorted_indices[i] = pair.index;
                 }

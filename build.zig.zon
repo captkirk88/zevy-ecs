@@ -5,9 +5,14 @@
 
     .fingerprint = 0xf22b53cc99fd8256, // Changing this has security and trust implications.
 
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0-dev.1412",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .zigbeam = .{
+            .url = "git+https://github.com/eakova/zigbeam#ff5edc52edb52166b66fe8998459ee38185a1ca6",
+            .hash = "zigbeam-0.0.1-eZKHgrzQEAD-nTlzKPxPhVxTBTav0Tlf4GIPYDDudnSI",
+        },
+    },
 
     .paths = .{
         "build.zig",

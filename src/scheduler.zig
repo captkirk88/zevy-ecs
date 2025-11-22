@@ -247,6 +247,60 @@ pub const Scheduler = struct {
         }
     }
 
+    // Helper used by std.Io tasks: run a stage inside an Io task frame.
+    fn runStageTask(io: std.Io, scheduler: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) anyerror!void {
+        _ = io; // accepted shape for Io tasks; we don't need to use io in the stage runner itself
+        // Delegate to the synchronous runStage which runs all systems in the stage.
+        return scheduler.runStage(ecs, stage);
+    }
+
+    /// Run the stages in the range concurrently using std.Io.
+    ///
+    /// This will attempt to run each stage concurrently via `io.concurrent` (preferred),
+    /// falling back to `io.async` if concurrency is unavailable. If any spawned task
+    /// returns an error the function will cancel any remaining tasks and return that
+    /// error.
+    pub fn runStagesAsync(self: *Scheduler, io: std.Io, ecs: *ecs_mod.Manager, start: StageId, end: StageId) anyerror!void {
+        // Collect stages in the range and sort them
+        var stages_in_range = std.ArrayList(StageId).initCapacity(self.allocator, 0) catch |err| @panic(@errorName(err));
+        defer stages_in_range.deinit(self.allocator);
+
+        var it = self.systems.iterator();
+        while (it.next()) |entry| {
+            if (entry.key_ptr.* >= start and entry.key_ptr.* <= end) {
+                stages_in_range.append(self.allocator, entry.key_ptr.*) catch |err| @panic(@errorName(err));
+            }
+        }
+
+        // Sort stages by their ID (ascending order)
+        std.mem.sort(StageId, stages_in_range.items, {}, std.sort.asc(StageId));
+
+        var futures = std.ArrayList(std.Io.Future(anyerror!void)).initCapacity(self.allocator, stages_in_range.items.len) catch |err| @panic(@errorName(err));
+        defer futures.deinit(self.allocator);
+
+        // Spawn tasks for each stage. Prefer concurrent but fall back to async.
+        for (stages_in_range.items) |stage| {
+            // Try to create a concurrently-executing task. If concurrency is not
+            // available, fall back to spawning an asynchronous task.
+            const f = io.concurrent(runStageTask, .{ io, self, ecs, stage }) catch |err| switch (err) {
+                error.ConcurrencyUnavailable => io.async(runStageTask, .{ io, self, ecs, stage }),
+                else => return err,
+            };
+            futures.append(self.allocator, f) catch |err| @panic(@errorName(err));
+        }
+
+        // Await results and cancel remaining tasks on the first error we see.
+        for (futures.items) |*future| {
+            _ = future.await(io) catch |err| {
+                // cancellation is idempotent; best-effort cancel remaining tasks
+                for (futures.items) |*f| {
+                    _ = f.cancel(io) catch {};
+                }
+                return err;
+            };
+        }
+    }
+
     pub fn getStageInfo(self: *Scheduler, allocator: std.mem.Allocator) std.ArrayList(StageInfo) {
         var info_list = std.ArrayList(StageInfo).initCapacity(allocator, self.systems.count()) catch |err| @panic(@errorName(err));
         var it = self.systems.iterator();
@@ -643,6 +697,41 @@ test "Scheduler assign outside scope" {
 
     // Run stages from First to PostUpdate, which includes the custom stage
     try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
+
+    try std.testing.expect(out_value.* == true);
+}
+
+test "Scheduler runStagesAsync executes concurrent stages using std.Io" {
+    // std.Io.Threaded is available in newer std (Zig dev). For older stdlib
+    // (stable Zig) where std.Io.Threaded doesn't exist, skip this test.
+    if (!(@hasDecl(std, "Io") and @hasDecl(std.Io, "Threaded"))) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var ecs = try ecs_mod.Manager.init(allocator);
+    defer ecs.deinit();
+
+    var scheduler = try Scheduler.init(allocator);
+    defer scheduler.deinit();
+
+    // Add a custom stage and a system to it
+    const custom_stage = 150_000; // Between First (100,000) and PreUpdate (200,000)
+    const out_value = try ecs.addResource(bool, false);
+    try scheduler.addStage(custom_stage);
+    const test_system = struct {
+        pub fn run(_: *ecs_mod.Manager, out: params.Res(bool)) void {
+            std.debug.print("Async test system executed\n", .{});
+            out.ptr.* = true;
+        }
+    }.run;
+
+    scheduler.addSystem(&ecs, custom_stage, test_system, registry.DefaultParamRegistry);
+
+    // Run stages async from First to PostUpdate, which includes the custom stage
+    try scheduler.runStagesAsync(io, &ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
 
     try std.testing.expect(out_value.* == true);
 }

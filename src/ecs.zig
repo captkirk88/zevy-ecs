@@ -55,6 +55,9 @@ pub const Manager = struct {
     resources: std.AutoHashMap(u64, ResourceEntry), // TypeHash -> ResourceEntry
     systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
 
+    // Thread safety for entity ID generation and generations tracking
+    entity_mutex: std.Thread.Mutex = std.Thread.Mutex{},
+
     // Component lifecycle event stores
     component_added: events.EventStore(ComponentEvent),
     component_removed: events.EventStore(ComponentEvent),
@@ -115,6 +118,9 @@ pub const Manager = struct {
 
     /// Create an empty entity with no components
     pub fn createEmpty(self: *Manager) Entity {
+        self.entity_mutex.lock();
+        defer self.entity_mutex.unlock();
+
         const entity = if (self.free_ids.pop()) |id| blk: {
             break :blk Entity{ .id = id, .generation = self.generations.items[id] };
         } else blk: {
@@ -132,13 +138,16 @@ pub const Manager = struct {
         return entity;
     }
 
-    /// Create an entity with the specified components
+    /// Create an entity with the specified components (thread-safe)
     ///
     /// Example:
     /// ```zig
     /// const entity = manager.create(.{ Position{ .x = 0, .y = 0 }, Velocity{ .x = 1, .y = 1 } });
     /// ```
     pub fn create(self: *Manager, components: anytype) Entity {
+        self.entity_mutex.lock();
+        defer self.entity_mutex.unlock();
+
         // Allocate entity ID without adding to archetype yet
         const entity = if (self.free_ids.pop()) |id| blk: {
             break :blk Entity{ .id = id, .generation = self.generations.items[id] };
@@ -222,6 +231,9 @@ pub const Manager = struct {
     }
 
     pub fn destroy(self: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
+        self.entity_mutex.lock();
+        defer self.entity_mutex.unlock();
+
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
 
         // Remove from archetype storage

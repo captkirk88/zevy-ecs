@@ -146,14 +146,26 @@ fn onAddedRemovedSystem(_: *Manager, added: params.OnAdded(Position), removed: p
         added_count += 1;
     }
 
+    const removed_slice = removed.iter();
+    if (removed_slice.len > 0) {
+        // std.debug.assert(@intFromPtr(&removed_slice[0]) != 0);
+    }
+
     var removed_count: usize = 0;
-    for (removed.iter()) |entity| {
+    for (removed_slice) |entity| {
         _ = entity;
         removed_count += 1;
     }
 
+    std.debug.print("onAddedRemovedSystem() counts - added={}, removed={}\n", .{ added_count, removed_count });
     std.testing.expect(added_count >= 1) catch unreachable;
     std.testing.expect(removed_count >= 1) catch unreachable;
+}
+
+fn onAddedOnlySystem(_: *Manager, added: params.OnAdded(Position)) void {
+    var count: usize = 0;
+    for (added.iter()) |_| count += 1;
+    std.testing.expect(count >= 1) catch unreachable;
 }
 
 test "System - basic execution" {
@@ -320,6 +332,10 @@ test "System - OnAdded and OnRemoved system params" {
     try manager.addComponent(entity, Position, .{ .x = 1, .y = 2 });
     try manager.removeComponent(entity, Position);
 
+    // Sanity-check event stores before running the system
+    try std.testing.expectEqual(@as(usize, 1), manager.component_added.count());
+    try std.testing.expectEqual(@as(usize, 1), manager.component_removed.count());
+
     const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
 }
@@ -404,9 +420,11 @@ test "UntypedSystemHandle format includes sig in Debug mode" {
     // Format the handle as a string using {f} to call format method
     var buffer = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
     defer buffer.deinit(std.testing.allocator);
-    try buffer.writer(std.testing.allocator).print("{f}", .{untyped});
-
-    const formatted = buffer.items;
+    var aw = std.Io.Writer.Allocating.fromArrayList(std.testing.allocator, &buffer);
+    try aw.writer.print("{f}", .{untyped});
+    var out_list = aw.toArrayList();
+    defer out_list.deinit(std.testing.allocator);
+    const formatted = out_list.items;
 
     if (is_debug) {
         // In debug mode, the formatted output should include both handle and sig
@@ -434,9 +452,11 @@ test "SystemHandle format with {d} shows only number" {
     // Format with {d} specifier
     var buffer = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
     defer buffer.deinit(std.testing.allocator);
-    try buffer.writer(std.testing.allocator).print("{d}", .{untyped});
-
-    const formatted = buffer.items;
+    var aw = std.Io.Writer.Allocating.fromArrayList(std.testing.allocator, &buffer);
+    try aw.writer.print("{d}", .{untyped});
+    var out_list = aw.toArrayList();
+    defer out_list.deinit(std.testing.allocator);
+    const formatted = out_list.items;
 
     // Should only contain digits (the handle number)
     try std.testing.expect(formatted.len > 0);

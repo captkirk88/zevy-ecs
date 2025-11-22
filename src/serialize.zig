@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const reflect = @import("reflect.zig");
 const ecs = @import("ecs.zig");
 
@@ -29,7 +31,7 @@ pub const ComponentInstance = struct {
     }
 
     /// Write this component to any std.io.Writer
-    pub fn writeTo(self: *const ComponentInstance, writer: std.io.AnyWriter) anyerror!void {
+    pub fn writeTo(self: *const ComponentInstance, writer: *std.Io.Writer) anyerror!void {
         try writer.writeInt(u64, self.hash, .little);
         try writer.writeInt(usize, self.size, .little);
         try writer.writeAll(self.data);
@@ -38,15 +40,13 @@ pub const ComponentInstance = struct {
     /// Create a ComponentInstance from any std.io.Reader
     ///
     /// The caller is responsible for freeing the returned data
-    pub fn readFrom(reader: std.io.AnyReader, allocator: std.mem.Allocator) anyerror!ComponentInstance {
-        const comp_hash = try reader.readInt(u64, .little);
-        const comp_size = try reader.readInt(usize, .little);
+    pub fn readFrom(reader: *std.Io.Reader, allocator: std.mem.Allocator) error{ ReadFailed, EndOfStream, OutOfMemory }!ComponentInstance {
+        const comp_hash = try reader.takeInt(u64, .little);
+        const comp_size = try reader.takeInt(usize, .little);
+        const temp = try reader.take(comp_size);
         const comp_data = try allocator.alloc(u8, comp_size);
         errdefer allocator.free(comp_data);
-        const bytes_read = try reader.readAll(comp_data);
-        if (bytes_read != comp_size) {
-            return error.UnexpectedEndOfStream;
-        }
+        @memcpy(comp_data, temp);
         return ComponentInstance{
             .hash = comp_hash,
             .size = comp_size,
@@ -191,7 +191,7 @@ pub const EntityInstance = struct {
     }
 
     /// Write this entity instance to any std.io.Writer
-    pub fn writeTo(self: *const EntityInstance, writer: std.io.AnyWriter) anyerror!void {
+    pub fn writeTo(self: *const EntityInstance, writer: *std.Io.Writer) anyerror!void {
         try writer.writeInt(usize, self.components.len, .little);
         for (self.components) |component| {
             try component.writeTo(writer);
@@ -205,8 +205,8 @@ pub const EntityInstance = struct {
 
     /// Read an EntityInstance from any std.io.Reader
     /// The caller is responsible for freeing the returned data using deinit()
-    pub fn readFrom(reader: std.io.AnyReader, allocator: std.mem.Allocator) anyerror!EntityInstance {
-        const count = try reader.readInt(usize, .little);
+    pub fn readFrom(reader: *std.Io.Reader, allocator: std.mem.Allocator) anyerror!EntityInstance {
+        const count = try reader.takeInt(usize, .little);
         const components = try allocator.alloc(ComponentInstance, count);
         errdefer allocator.free(components);
 
@@ -224,7 +224,7 @@ pub const EntityInstance = struct {
         }
 
         // Read referenced entities
-        const ref_count = try reader.readInt(usize, .little);
+        const ref_count = try reader.takeInt(usize, .little);
         const referenced_entities = try allocator.alloc(EntityInstance, ref_count);
         errdefer allocator.free(referenced_entities);
 
@@ -263,9 +263,9 @@ pub const EntityInstance = struct {
 
 /// ComponentWriter for writing multiple components to a stream
 pub const ComponentWriter = struct {
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
 
-    pub fn init(writer: std.io.AnyWriter) ComponentWriter {
+    pub fn init(writer: *std.Io.Writer) ComponentWriter {
         return ComponentWriter{ .writer = writer };
     }
 
@@ -297,9 +297,9 @@ pub const ComponentWriter = struct {
 
 /// ComponentReader for reading components from a stream
 pub const ComponentReader = struct {
-    reader: std.io.AnyReader,
+    reader: *std.Io.Reader,
 
-    pub fn init(reader: std.io.AnyReader) ComponentReader {
+    pub fn init(reader: *std.Io.Reader) ComponentReader {
         return ComponentReader{ .reader = reader };
     }
 
@@ -316,7 +316,7 @@ pub const ComponentReader = struct {
     ///
     /// Returns errors from the underlying reader or OutOfMemory from allocation.
     pub fn readComponents(self: *ComponentReader, allocator: std.mem.Allocator) anyerror![]ComponentInstance {
-        const count = try self.reader.readInt(usize, .little);
+        const count = try self.reader.takeInt(usize, .little);
         const components = try allocator.alloc(ComponentInstance, count);
         errdefer allocator.free(components);
 

@@ -143,7 +143,7 @@ pub const Benchmark = struct {
         errdefer self.allocator.free(name_copy);
 
         self.counting_allocator.reset();
-        const start = std.time.nanoTimestamp();
+        var timer = try std.time.Timer.start();
         var i: usize = 0;
         while (i < ops) : (i += 1) {
             const return_type = @typeInfo(@TypeOf(func)).@"fn".return_type;
@@ -158,8 +158,7 @@ pub const Benchmark = struct {
                 _ = @call(.auto, func, args);
             }
         }
-        const end = std.time.nanoTimestamp();
-        const total_duration = @as(u64, @intCast(end - start));
+        const total_duration = timer.read();
         const total_bytes = self.counting_allocator.bytes_allocated;
         const per_op_ns = if (ops > 0) total_duration / ops else 0;
         const per_op_bytes = if (ops > 0) total_bytes / ops else 0;

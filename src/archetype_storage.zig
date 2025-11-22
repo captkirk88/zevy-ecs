@@ -24,6 +24,8 @@ pub const EntityMapEntry = struct { archetype: *Archetype, index: usize };
 /// Manages all archetypes and entity-to-archetype mapping
 pub const ArchetypeStorage = struct {
     allocator: std.mem.Allocator,
+    // Mutex to protect concurrent access to archetypes map and sparse array
+    mutex: std.Thread.Mutex = std.Thread.Mutex{},
     // Map: ArchetypeSignature -> *Archetype
     archetypes: std.HashMap(ArchetypeSignature, *Archetype, Context, 80),
     // Sparse array: Entity ID -> (archetype ptr, index in archetype)
@@ -50,8 +52,8 @@ pub const ArchetypeStorage = struct {
         self.entity_sparse_array.deinit(self.allocator);
     }
 
-    /// Get or create an archetype for the given signature and component sizes
-    pub fn getOrCreateArchetype(self: *ArchetypeStorage, signature: ArchetypeSignature, component_sizes: []const usize) !*Archetype {
+    /// Internal: Get or create an archetype
+    fn getOrCreateArchetypeUnlocked(self: *ArchetypeStorage, signature: ArchetypeSignature, component_sizes: []const usize) !*Archetype {
         if (self.archetypes.get(signature)) |archetype| {
             return archetype;
         } else {
@@ -66,9 +68,19 @@ pub const ArchetypeStorage = struct {
         }
     }
 
+    /// Get or create an archetype for the given signature and component sizes
+    pub fn getOrCreateArchetype(self: *ArchetypeStorage, signature: ArchetypeSignature, component_sizes: []const usize) !*Archetype {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.getOrCreateArchetypeUnlocked(signature, component_sizes);
+    }
+
     /// Add an entity to the archetype with the given signature and component data
     pub fn addEntityToArchetype(self: *ArchetypeStorage, entity: Entity, signature: ArchetypeSignature, component_sizes: []const usize, component_data: [][]const u8) !void {
-        const archetype = try self.getOrCreateArchetype(signature, component_sizes);
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const archetype = try self.getOrCreateArchetypeUnlocked(signature, component_sizes);
         try archetype.addEntity(entity, component_data);
         const idx = archetype.entities.items.len - 1;
 
@@ -80,16 +92,22 @@ pub const ArchetypeStorage = struct {
         self.entity_sparse_array.items[entity_id] = EntityMapEntry{ .archetype = archetype, .index = idx };
     }
 
-    /// Get entity map entry (archetype + index)
+    /// Get entity map entry (archetype + index) - thread-safe
     pub fn getEntityEntry(self: *ArchetypeStorage, entity: Entity) ?EntityMapEntry {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (entity.id < self.entity_sparse_array.items.len) {
             return self.entity_sparse_array.items[entity.id];
         }
         return null;
     }
 
-    /// Update entity map entry - UNSAFE: direct write after ensuring capacity
+    /// Update entity map entry - thread-safe
     pub fn setEntityEntry(self: *ArchetypeStorage, entity: Entity, entry: EntityMapEntry) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         const entity_id = entity.id;
         // Ensure capacity in one shot instead of append loop
         if (entity_id >= self.entity_sparse_array.items.len) {
@@ -103,8 +121,11 @@ pub const ArchetypeStorage = struct {
         self.entity_sparse_array.items[entity_id] = entry;
     }
 
-    /// Remove entity from map
+    /// Remove entity from map - thread-safe
     pub fn removeEntity(self: *ArchetypeStorage, entity: Entity) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         if (entity.id < self.entity_sparse_array.items.len) {
             self.entity_sparse_array.items[entity.id] = null;
         }

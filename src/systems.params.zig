@@ -566,7 +566,7 @@ pub fn OnAdded(comptime T: type) type {
 
         pub const Item = struct { entity: ecs.Entity, comp: ?*T };
 
-        items: []const Item,
+        items: std.ArrayList(Item),
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
             pub fn get() []const u8 {
@@ -574,8 +574,8 @@ pub fn OnAdded(comptime T: type) type {
             }
         }.get else void;
 
-        pub fn iter(self: *const Self) []const Item {
-            return self.items;
+        pub fn iter(self: *const Self) std.ArrayList(Item).Slice {
+            return self.items.items;
         }
     };
 }
@@ -600,31 +600,21 @@ pub const OnAddedSystemParam = struct {
     pub fn apply(e: *ecs.Manager, comptime Component: type) OnAdded(Component) {
         const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
         var results = std.ArrayList(OnAdded(Component).Item){};
-        defer results.deinit(e.allocator);
 
         var iter = e.component_added.iterator();
         while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
             const comp = e.getComponent(ev.data.entity, Component) catch null;
-            if (comp) |comp_ptr| {
-                results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr }) catch @panic("OutOfMemory");
-            } else {
-                // Even if the component is no longer present, we still consider it as "added" for this frame.
-                // Use a null pointer for the component to indicate it was removed before system execution.
-                results.append(e.allocator, .{ .entity = ev.data.entity, .comp = null }) catch @panic("OutOfMemory");
-            }
+            results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp }) catch @panic("OutOfMemory");
             ev.handled = true;
         }
 
-        const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
-        return OnAdded(Component){ .items = slice };
+        return OnAdded(Component){ .items = results };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
         const p: *OnAdded(Component) = @ptrCast(@alignCast(ptr));
-        if (p.items.len != 0) {
-            e.allocator.free(p.items);
-        }
+        p.items.deinit(e.allocator);
     }
 };
 
@@ -637,7 +627,7 @@ pub fn OnRemoved(comptime T: type) type {
         pub const ComponentType = T;
         pub const is_on_removed = true;
 
-        removed: []const ecs.Entity,
+        removed: std.ArrayList(ecs.Entity),
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
             pub fn get() []const u8 {
@@ -645,8 +635,8 @@ pub fn OnRemoved(comptime T: type) type {
             }
         }.get else void;
 
-        pub fn iter(self: *const Self) []const ecs.Entity {
-            return self.removed;
+        pub fn iter(self: *const Self) std.ArrayList(ecs.Entity).Slice {
+            return self.removed.items;
         }
     };
 }
@@ -670,7 +660,6 @@ pub const OnRemovedSystemParam = struct {
     pub fn apply(e: *ecs.Manager, comptime Component: type) OnRemoved(Component) {
         const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
         var results = std.ArrayList(ecs.Entity){};
-        defer results.deinit(e.allocator);
 
         var iter = e.component_removed.iterator();
         while (iter.next()) |ev| {
@@ -679,15 +668,12 @@ pub const OnRemovedSystemParam = struct {
             ev.handled = true;
         }
 
-        const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
-        return OnRemoved(Component){ .removed = slice };
+        return OnRemoved(Component){ .removed = results };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
         const p: *OnRemoved(Component) = @ptrCast(@alignCast(ptr));
-        if (p.removed.len != 0) {
-            e.allocator.free(p.removed);
-        }
+        p.removed.deinit(e.allocator);
     }
 };
 
@@ -738,9 +724,9 @@ test "OnAddedSystemParam basic" {
     try manager.addComponent(entity, Position, Position{ .x = 3.0, .y = 4.0 });
 
     var on_added = OnAddedSystemParam.apply(&manager, Position);
-    try std.testing.expect(on_added.items.len >= 1);
-    try std.testing.expect(on_added.items[0].entity.eql(entity));
-    try std.testing.expect(on_added.items[0].comp != null);
+    try std.testing.expect(on_added.items.items.len >= 1);
+    try std.testing.expect(on_added.items.items[0].entity.eql(entity));
+    try std.testing.expect(on_added.items.items[0].comp != null);
 
     // cleanup / free allocated slice
     OnAddedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_added)), Position);
@@ -758,8 +744,8 @@ test "OnRemovedSystemParam basic" {
     try manager.removeComponent(entity, Position);
 
     var on_removed = OnRemovedSystemParam.apply(&manager, Position);
-    try std.testing.expect(on_removed.removed.len >= 1);
-    try std.testing.expect(on_removed.removed[0].eql(entity));
+    try std.testing.expect(on_removed.removed.items.len >= 1);
+    try std.testing.expect(on_removed.removed.items[0].eql(entity));
 
     OnRemovedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_removed)), Position);
 }

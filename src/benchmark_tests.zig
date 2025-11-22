@@ -263,7 +263,7 @@ test "ECS Benchmark - Mixed Systems" {
 
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
-    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
+    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems - Synchronous");
     for (counts) |count| {
         var manager = try Manager.init(bench.getCountingAllocator());
         defer manager.deinit();
@@ -317,6 +317,121 @@ const Transform = struct {
     world_y: f32 = 0,
     world_z: f32 = 0,
 };
+
+// Scheduler and Async Benchmarks
+
+/// Setup scheduler with multiple stages containing systems
+fn setupScheduler(manager: *Manager, entity_count: usize, stage_count: usize) !root.Scheduler {
+    const allocator = manager.allocator;
+    var scheduler = try root.Scheduler.init(allocator);
+
+    const DefaultRegistry = @import("root.zig").DefaultParamRegistry;
+
+    // Create entities with components for systems to operate on
+    for (0..entity_count) |i| {
+        const pos = Position{
+            .x = @floatFromInt(i),
+            .y = 0.0,
+            .z = 0.0,
+        };
+        const vel = Velocity{ .dx = 1.0, .dy = 0.5, .dz = -0.5 };
+        const health = Health{ .current = 100, .max = 100 };
+        _ = manager.create(.{ pos, vel, health });
+    }
+
+    // Create systems and distribute across stages
+    const stages = [_]root.StageId{
+        root.Stage(root.Stages.PreUpdate),
+        root.Stage(root.Stages.Update),
+        root.Stage(root.Stages.PostUpdate),
+    };
+
+    // Add all 7 systems to each stage (up to stage_count stages)
+    for (0..@min(stage_count, stages.len)) |s| {
+        const stage = stages[s];
+
+        scheduler.addSystem(manager, stage, systemMovement, DefaultRegistry);
+        scheduler.addSystem(manager, stage, systemHealthRegen, DefaultRegistry);
+        scheduler.addSystem(manager, stage, systemDamageWithArmor, DefaultRegistry);
+        scheduler.addSystem(manager, stage, systemDamageNoArmor, DefaultRegistry);
+        scheduler.addSystem(manager, stage, systemTeamCollision, DefaultRegistry);
+        scheduler.addSystem(manager, stage, systemTargetTracking, DefaultRegistry);
+        scheduler.addSystem(manager, stage, systemVelocityDamping, DefaultRegistry);
+    }
+
+    return scheduler;
+}
+
+/// Benchmark synchronous scheduler execution
+fn benchSchedulerSync(manager: *Manager, scheduler: *root.Scheduler) void {
+    scheduler.runStages(manager, root.Stage(root.Stages.PreUpdate), root.Stage(root.Stages.PostUpdate)) catch |err| {
+        std.debug.print("Error running scheduler: {s}\n", .{@errorName(err)});
+    };
+}
+
+/// Benchmark asynchronous scheduler execution
+fn benchSchedulerAsync(manager: *Manager, scheduler: *root.Scheduler, threaded: *std.Io.Threaded) void {
+    const io = threaded.io();
+    scheduler.runStagesAsync(io, manager, root.Stage(root.Stages.PreUpdate), root.Stage(root.Stages.PostUpdate)) catch |err| {
+        std.debug.print("Error running scheduler async: {s}\n", .{@errorName(err)});
+    };
+}
+
+test "ECS Benchmark - Scheduler Synchronous" {
+    const allocator = std.testing.allocator;
+    var bench = Benchmark.init(allocator);
+    defer bench.deinit();
+
+    const entity_counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
+    const stage_count = 3;
+
+    Benchmark.printMarkdownHeaderWithTitle("Scheduler Synchronous");
+    for (entity_counts) |count| {
+        var manager = try Manager.init(bench.getCountingAllocator());
+        defer manager.deinit();
+
+        var scheduler = try setupScheduler(&manager, count, stage_count);
+        defer scheduler.deinit();
+
+        const label = try std.fmt.allocPrint(allocator, "3 Stages/7 Systems on {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerSync, .{ &manager, &scheduler });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+}
+
+test "ECS Benchmark - Scheduler Asynchronous" {
+    const allocator = std.testing.allocator;
+    var bench = Benchmark.init(allocator);
+    defer bench.deinit();
+
+    const entity_counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
+    const stage_count = 3;
+
+    Benchmark.printMarkdownHeaderWithTitle("Scheduler Asynchronous");
+    for (entity_counts) |count| {
+        var manager = try Manager.init(bench.getCountingAllocator());
+        defer manager.deinit();
+
+        var scheduler = try setupScheduler(&manager, count, stage_count);
+        defer scheduler.deinit();
+
+        const label = try std.fmt.allocPrint(allocator, "3 Stages/7 Systems on {d} Entities", .{count});
+        defer allocator.free(label);
+
+        // Create threaded IO context for async execution
+        var threaded: std.Io.Threaded = .init(allocator);
+        defer threaded.deinit();
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerAsync, .{ &manager, &scheduler, &threaded });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+}
 
 // Setup hierarchical scene graph (game objects with parent-child relationships)
 fn setupSceneGraph(manager: *Manager, rel: *root.Relations, count: usize) !std.ArrayList(Entity) {
