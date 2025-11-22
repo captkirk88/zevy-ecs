@@ -33,9 +33,18 @@ pub fn hasFuncWithArgs(comptime T: type, comptime func_name: []const u8, comptim
         if (!hasFunc(T, func_name)) return false;
         const fn_type = @typeInfo(@TypeOf(@field(T, func_name)));
         if (fn_type != .@"fn") return false;
-        if (fn_type.@"fn".params.len != arg_types.len) return false;
+
+        // Check if first parameter is self (has type T)
+        const has_self_param = fn_type.@"fn".params.len > 0 and fn_type.@"fn".params[0].type == T;
+
+        // If it has self, skip it when checking arg_types; otherwise check all params
+        const start_idx = if (has_self_param) 1 else 0;
+        const expected_len = arg_types.len + (if (has_self_param) 1 else 0);
+
+        if (fn_type.@"fn".params.len != expected_len) return false;
+
         inline for (0..arg_types.len) |i| {
-            if (fn_type.@"fn".params[i].type != arg_types[i]) {
+            if (fn_type.@"fn".params[start_idx + i].type != arg_types[i]) {
                 return false;
             }
         }
@@ -267,10 +276,54 @@ test "hasFuncWithArgs - struct with function" {
         }
     };
 
-    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "add", &[_]type{ TestStruct, i32 }));
-    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "noArgs", &[_]type{TestStruct}));
-    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "add", &[_]type{TestStruct})); // Wrong arg count
-    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "nonExistent", &[_]type{TestStruct})); // Function doesn't exist
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "add", &[_]type{i32}));
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "noArgs", &[_]type{}));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "add", &[_]type{})); // Wrong arg count
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "nonExistent", &[_]type{})); // Function doesn't exist
+}
+
+test "hasFuncWithArgs - funcs with self only (no additional args)" {
+    const TestStruct = struct {
+        value: i32,
+
+        pub fn getValue(self: @This()) i32 {
+            return self.value;
+        }
+    };
+
+    // arg_types does NOT include self, so empty array means only self param
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "getValue", &[_]type{}));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "getValue", &[_]type{i32}));
+}
+
+test "hasFuncWithArgs - funcs with self and one additional arg" {
+    const TestStruct = struct {
+        value: i32,
+
+        pub fn add(self: @This(), other: i32) i32 {
+            return self.value + other;
+        }
+    };
+
+    // arg_types does NOT include self, only the additional args
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "add", &[_]type{i32}));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "add", &[_]type{}));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "add", &[_]type{ i32, i32 }));
+}
+
+test "hasFuncWithArgs - funcs with self and multiple args" {
+    const TestStruct = struct {
+        value: i32,
+
+        pub fn combine(self: @This(), a: i32, b: f32) i32 {
+            return self.value + a + @as(i32, @intFromFloat(b));
+        }
+    };
+
+    // arg_types does NOT include self
+    try std.testing.expect(comptime hasFuncWithArgs(TestStruct, "combine", &[_]type{ i32, f32 }));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "combine", &[_]type{i32}));
+    try std.testing.expect(comptime !hasFuncWithArgs(TestStruct, "combine", &[_]type{ i32, f32, i32 }));
 }
 
 test "hasField - struct with fields" {
