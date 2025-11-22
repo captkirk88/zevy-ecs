@@ -1288,67 +1288,77 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 ### Benchmarks
 
-#### 4GHz CPU, async compatible, ReleaseFast
+#### 4GHz CPU, asynchronous, ReleaseFast
 
 #### Creation
 
 | Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------- | ---------- | ------------- | ------------- | --------- |
-| Create 100 Entities     | 3          | 14.133 us/op  | 13.474 KB/op  | 3/op      |
-| Create 1000 Entities    | 3          | 104.933 us/op | 116.740 KB/op | 8/op      |
-| Create 10000 Entities   | 3          | 904.266 us/op | 1.665 MB/op   | 18/op     |
-| Create 100000 Entities  | 3          | 8.125 ms/op   | 18.326 MB/op  | 27/op     |
-| Create 1000000 Entities | 3          | 86.547 ms/op  | 232.946 MB/op | 39/op     |
+| Create 100 Entities     | 3          | 15.500 us/op  | 13.474 KB/op  | 3/op      |
+| Create 1000 Entities    | 3          | 112.600 us/op | 116.740 KB/op | 8/op      |
+| Create 10000 Entities   | 3          | 916.400 us/op | 1.665 MB/op   | 18/op     |
+| Create 100000 Entities  | 3          | 8.197 ms/op   | 18.326 MB/op  | 27/op     |
+| Create 1000000 Entities | 3          | 86.835 ms/op  | 232.946 MB/op | 39/op     |
 
 #### Batch Creation
 
 | Benchmark               | Operations | Time/op       | Memory/op     | Allocs/op |
 | ----------------------- | ---------- | ------------- | ------------- | --------- |
-| Create 100 Entities     | 3          | 11.000 us/op  | 13.474 KB/op  | 3/op      |
-| Create 1000 Entities    | 3          | 47.033 us/op  | 52.703 KB/op  | 4/op      |
-| Create 10000 Entities   | 3          | 320.100 us/op | 599.744 KB/op | 5/op      |
-| Create 100000 Entities  | 3          | 2.575 ms/op   | 8.024 MB/op   | 6/op      |
-| Create 1000000 Entities | 3          | 24.821 ms/op  | 91.566 MB/op  | 6/op      |
+| Create 100 Entities     | 3          | 12.733 us/op  | 13.474 KB/op  | 3/op      |
+| Create 1000 Entities    | 3          | 61.966 us/op  | 52.703 KB/op  | 4/op      |
+| Create 10000 Entities   | 3          | 368.633 us/op | 599.744 KB/op | 5/op      |
+| Create 100000 Entities  | 3          | 2.593 ms/op   | 8.024 MB/op   | 6/op      |
+| Create 1000000 Entities | 3          | 26.920 ms/op  | 91.566 MB/op  | 6/op      |
 
 #### Mixed Systems - Synchronous
 
 | Benchmark                         | Operations | Time/op       | Memory/op  | Allocs/op |
 | --------------------------------- | ---------- | ------------- | ---------- | --------- |
-| Run 7 Systems on 100 Entities     | 3          | 3.700 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000 Entities    | 3          | 5.800 us/op   | 0.000 B/op | 0/op      |
-| Run 7 Systems on 10000 Entities   | 3          | 51.966 us/op  | 0.000 B/op | 0/op      |
-| Run 7 Systems on 100000 Entities  | 3          | 526.233 us/op | 0.000 B/op | 0/op      |
-| Run 7 Systems on 1000000 Entities | 3          | 5.602 ms/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100 Entities     | 3          | 2.733 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000 Entities    | 3          | 5.833 us/op   | 0.000 B/op | 0/op      |
+| Run 7 Systems on 10000 Entities   | 3          | 52.066 us/op  | 0.000 B/op | 0/op      |
+| Run 7 Systems on 100000 Entities  | 3          | 533.000 us/op | 0.000 B/op | 0/op      |
+| Run 7 Systems on 1000000 Entities | 3          | 5.633 ms/op   | 0.000 B/op | 0/op      |
+
+#### Mixed Systems - Asynchronous
+
+| Benchmark                         | Operations | Time/op       | Memory/op    | Allocs/op |
+| --------------------------------- | ---------- | ------------- | ------------ | --------- |
+| Run 7 Systems on 100 Entities     | 3          | 393.966 us/op | 112.000 B/op | 1/op      |
+| Run 7 Systems on 1000 Entities    | 3          | 269.666 us/op | 112.000 B/op | 1/op      |
+| Run 7 Systems on 10000 Entities   | 3          | 270.300 us/op | 112.000 B/op | 1/op      |
+| Run 7 Systems on 100000 Entities  | 3          | 505.200 us/op | 112.000 B/op | 1/op      |
+| Run 7 Systems on 1000000 Entities | 3          | 2.643 ms/op   | 112.000 B/op | 1/op      |
 
 #### Scheduler Synchronous
 
 | Benchmark                              | Operations | Time/op       | Memory/op    | Allocs/op |
 | -------------------------------------- | ---------- | ------------- | ------------ | --------- |
-| 3 Stages/7 Systems on 100 Entities     | 3          | 5.500 us/op   | 132.000 B/op | 1/op      |
-| 3 Stages/7 Systems on 1000 Entities    | 3          | 13.333 us/op  | 132.000 B/op | 1/op      |
-| 3 Stages/7 Systems on 10000 Entities   | 3          | 118.066 us/op | 132.000 B/op | 1/op      |
-| 3 Stages/7 Systems on 100000 Entities  | 3          | 1.208 ms/op   | 132.000 B/op | 1/op      |
-| 3 Stages/7 Systems on 1000000 Entities | 3          | 12.807 ms/op  | 132.000 B/op | 1/op      |
+| 3 Stages/7 Systems on 100 Entities     | 3          | 4.033 us/op   | 132.000 B/op | 1/op      |
+| 3 Stages/7 Systems on 1000 Entities    | 3          | 12.833 us/op  | 132.000 B/op | 1/op      |
+| 3 Stages/7 Systems on 10000 Entities   | 3          | 116.500 us/op | 132.000 B/op | 1/op      |
+| 3 Stages/7 Systems on 100000 Entities  | 3          | 1.371 ms/op   | 132.000 B/op | 1/op      |
+| 3 Stages/7 Systems on 1000000 Entities | 3          | 12.872 ms/op  | 132.000 B/op | 1/op      |
 
 #### Scheduler Asynchronous
 
 | Benchmark                              | Operations | Time/op       | Memory/op    | Allocs/op |
 | -------------------------------------- | ---------- | ------------- | ------------ | --------- |
-| 3 Stages/7 Systems on 100 Entities     | 3          | 148.266 us/op | 180.000 B/op | 2/op      |
-| 3 Stages/7 Systems on 1000 Entities    | 3          | 123.433 us/op | 180.000 B/op | 2/op      |
-| 3 Stages/7 Systems on 10000 Entities   | 3          | 159.600 us/op | 180.000 B/op | 2/op      |
-| 3 Stages/7 Systems on 100000 Entities  | 3          | 665.400 us/op | 180.000 B/op | 2/op      |
-| 3 Stages/7 Systems on 1000000 Entities | 3          | 4.791 ms/op   | 180.000 B/op | 2/op      |
+| 3 Stages/7 Systems on 100 Entities     | 3          | 190.733 us/op | 180.000 B/op | 2/op      |
+| 3 Stages/7 Systems on 1000 Entities    | 3          | 147.766 us/op | 180.000 B/op | 2/op      |
+| 3 Stages/7 Systems on 10000 Entities   | 3          | 172.700 us/op | 180.000 B/op | 2/op      |
+| 3 Stages/7 Systems on 100000 Entities  | 3          | 728.800 us/op | 180.000 B/op | 2/op      |
+| 3 Stages/7 Systems on 1000000 Entities | 3          | 4.882 ms/op   | 180.000 B/op | 2/op      |
 
 #### Relations
 
 | Benchmark                    | Operations | Time/op       | Memory/op  | Allocs/op |
 | ---------------------------- | ---------- | ------------- | ---------- | --------- |
-| Scene Graph 100 Entities     | 3          | 1.933 us/op   | 0.000 B/op | 0/op      |
-| Scene Graph 1000 Entities    | 3          | 9.366 us/op   | 0.000 B/op | 0/op      |
-| Scene Graph 10000 Entities   | 3          | 93.466 us/op  | 0.000 B/op | 0/op      |
-| Scene Graph 100000 Entities  | 3          | 939.866 us/op | 0.000 B/op | 0/op      |
-| Scene Graph 1000000 Entities | 3          | 9.772 ms/op   | 0.000 B/op | 0/op      |
+| Scene Graph 100 Entities     | 3          | 2.000 us/op   | 0.000 B/op | 0/op      |
+| Scene Graph 1000 Entities    | 3          | 9.100 us/op   | 0.000 B/op | 0/op      |
+| Scene Graph 10000 Entities   | 3          | 94.133 us/op  | 0.000 B/op | 0/op      |
+| Scene Graph 100000 Entities  | 3          | 925.433 us/op | 0.000 B/op | 0/op      |
+| Scene Graph 1000000 Entities | 3          | 10.051 ms/op  | 0.000 B/op | 0/op      |
 
 ## Contributing
 

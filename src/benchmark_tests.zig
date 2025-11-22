@@ -305,6 +305,66 @@ fn benchMixedSystems(e: *Manager, systems: *const [7]root.UntypedSystemHandle) v
     }
 }
 
+fn benchMixedSystemsAsync(e: *Manager, threaded: *std.Io.Threaded, systems: *const [7]root.UntypedSystemHandle) !void {
+    const io = threaded.io();
+    const allocator = e.allocator;
+
+    const SystemTask = struct {
+        fn run(manager: *Manager, system_id: root.UntypedSystemHandle) !void {
+            _ = try manager.runSystemUntyped(void, system_id);
+        }
+    };
+
+    var futures = try std.ArrayList(@TypeOf(try io.concurrent(SystemTask.run, .{ undefined, undefined }))).initCapacity(allocator, 7);
+    defer futures.deinit(allocator);
+
+    for (systems) |sys_id| {
+        const fut = try io.concurrent(SystemTask.run, .{ e, sys_id });
+        try futures.append(allocator, fut);
+    }
+
+    // Await all futures
+    for (futures.items) |*fut| {
+        _ = try fut.await(io);
+    }
+}
+
+test "ECS Benchmark - Mixed Systems - Asynchronous" {
+    const allocator = std.testing.allocator;
+    var bench = Benchmark.init(allocator);
+    defer bench.deinit();
+
+    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
+
+    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems - Asynchronous");
+    for (counts) |count| {
+        var manager = try Manager.init(bench.getCountingAllocator());
+        defer manager.deinit();
+
+        // Setup entities
+        setupMixedEntities(&manager, count);
+
+        // Create a scheduler with 7 systems in a single stage
+        var scheduler = try root.Scheduler.init(manager.allocator);
+        defer scheduler.deinit();
+
+        const systems = setupMixedSystems(&manager);
+
+        const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
+        defer allocator.free(label);
+
+        // Create threaded IO context for async execution
+        var threaded: std.Io.Threaded = .init(allocator);
+        defer threaded.deinit();
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystemsAsync, .{ &manager, &threaded, &systems });
+
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+}
+
 // Relation Benchmarks
 
 // Realistic scenario: Scene graph with transform hierarchy
