@@ -6,6 +6,9 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 
 [![][license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
 
+> [!NOTE]
+> Please test 0.16.0 branch if you are interested in the new async compatibility and report any issues.
+
 ## Features
 
 - **Archetype-based storage**: Efficiently groups entities with the same component combinations for cache-friendly iteration
