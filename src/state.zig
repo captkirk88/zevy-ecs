@@ -199,7 +199,7 @@ test "States parameter in system" {
             _: *ecs_mod.Manager,
             game_state: params.State(GameState),
             next_state: *params.NextState(GameState),
-        ) void {
+        ) anyerror!void {
             // Check current state using State parameter
             std.debug.assert(game_state.isActive(.Menu));
             std.debug.assert(!game_state.isActive(.Playing));
@@ -210,7 +210,7 @@ test "States parameter in system" {
             std.debug.assert(active.? == .Menu);
 
             // Transition to playing state using NextState (immediate)
-            next_state.set(.Playing);
+            try next_state.set(.Playing);
         }
     }.run;
 

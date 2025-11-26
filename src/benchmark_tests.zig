@@ -428,7 +428,7 @@ test "ECS Benchmark - Scene Graph Relations" {
         defer manager.deinit();
 
         // Get Relations system parameter (creates RelationManager resource automatically)
-        const rel = root.DefaultParamRegistry.apply(&manager, *root.Relations);
+        const rel = try root.DefaultParamRegistry.apply(&manager, *root.Relations);
 
         var entities = try setupSceneGraph(&manager, rel, count);
         defer entities.deinit(bench.getCountingAllocator());

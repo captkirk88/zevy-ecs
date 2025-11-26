@@ -3,6 +3,7 @@ const ecs = @import("ecs.zig");
 const reflect = @import("reflect.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
+const errors = @import("errors.zig");
 
 /// Default system parameter registry including Query, Res, Local, EventReader, EventWriter, State, and NextState
 pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
@@ -24,10 +25,16 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
     inline for (RegisteredParams) |T| {
         comptime {
             if (!reflect.verifyFuncArgs(T, "analyze", &[_]type{type})) {
-                @compileError("Each param must be a struct with 'analyze' functions: " ++ @typeName(T));
+                @compileError(std.fmt.comptimePrint(
+                    "Each param must be a struct with 'pub fn analyze(comptime T: type) ?type' functions: {s}",
+                    .{@typeName(T)},
+                ));
             }
             if (!reflect.verifyFuncArgs(T, "apply", &[_]type{ *ecs.Manager, type })) {
-                @compileError("Each param must be a struct with 'apply' functions: " ++ @typeName(T));
+                @compileError(std.fmt.comptimePrint(
+                    "Each param must be a struct with 'pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T' functions: {s}",
+                    .{@typeName(T)},
+                ));
             }
         }
     }
@@ -66,11 +73,11 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             return null;
         }
 
-        pub fn apply(ecs_instance: *ecs.Manager, comptime ParamType: type) ParamType {
+        pub fn apply(ecs_instance: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
             inline for (registered_params) |SystemParam| {
                 const analyzed = SystemParam.analyze(ParamType);
                 if (analyzed) |param| {
-                    return SystemParam.apply(ecs_instance, param);
+                    return try SystemParam.apply(ecs_instance, param);
                 }
             }
             @compileError(std.fmt.comptimePrint("No registered SystemParam can handle type: {s}", .{@typeName(ParamType)}));
@@ -149,7 +156,7 @@ test "merged SystemParamRegistry" {
             if (@typeInfo(T) == .int) return T;
             return null;
         }
-        pub fn apply(_: *ecs.Manager, comptime T: type) T {
+        pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!T {
             return 1;
         }
     };
@@ -158,13 +165,13 @@ test "merged SystemParamRegistry" {
     try std.testing.expect(merge.len() == 12); // State, NextState, EventReader, EventWriter, Resource, Query, Local, Relations, OnAdded, OnRemoved, Single, CustomParam
 
     // Test that we can apply a custom param (returns value)
-    const custom_val = merge.apply(&ecs_instance, i32);
+    const custom_val = try merge.apply(&ecs_instance, i32);
     try std.testing.expect(custom_val == 1);
 
     // Test that we can apply a default registry param
     const value: f32 = 42.0;
     _ = try ecs_instance.addResource(f32, value);
-    const res = merge.apply(&ecs_instance, params.Res(f32));
+    const res = try merge.apply(&ecs_instance, params.Res(f32));
     try std.testing.expect(res.ptr.* == 42.0);
 }
 
@@ -177,12 +184,12 @@ test "CustomSystemParam basic" {
             if (@typeInfo(T) == .int) return T;
             return null;
         }
-        pub fn apply(_: *ecs.Manager, comptime T: type) T {
+        pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!T {
             return 123;
         }
     };
     const registry = SystemParamRegistry(&[_]type{CustomParam});
-    const custom_val = registry.apply(&ecs_instance, i32);
+    const custom_val = try registry.apply(&ecs_instance, i32);
     try std.testing.expect(custom_val == 123);
 }
 
@@ -212,10 +219,10 @@ test "CustomSystemParam with Query, Res, Local fields" {
             }
             return null;
         }
-        pub fn apply(e: *ecs.Manager, comptime _: type) ComplexType {
-            const query_val = params.QuerySystemParam.apply(e, query.Query(QueryInclude, QueryExclude));
-            const res_value = params.ResourceSystemParam.apply(e, i32);
-            const local_ptr = params.LocalSystemParam.apply(e, u64);
+        pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
+            const query_val = try params.QuerySystemParam.apply(e, query.Query(QueryInclude, QueryExclude));
+            const res_value = try params.ResourceSystemParam.apply(e, i32);
+            const local_ptr = try params.LocalSystemParam.apply(e, u64);
             return ComplexType{
                 .query = query_val,
                 .res = res_value,
@@ -225,7 +232,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
     };
 
     const registry = SystemParamRegistry(&[_]type{CustomComplexParam});
-    const complex = registry.apply(&ecs_instance, ComplexType);
+    const complex = try registry.apply(&ecs_instance, ComplexType);
     try std.testing.expect(@intFromPtr(complex.query.storage) != 0);
     try std.testing.expect(complex.res.ptr.* == 7);
     try std.testing.expect(@intFromPtr(complex.local) != 0);

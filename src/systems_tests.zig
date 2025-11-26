@@ -139,7 +139,7 @@ fn returnSys(_: *Manager) i32 {
     return 123; // Would return 123 if systems supported it
 }
 
-fn onAddedRemovedSystem(_: *Manager, added: params.OnAdded(Position), removed: params.OnRemoved(Position)) void {
+fn onAddedRemovedSystem(_: *Manager, added: params.OnAdded(Position), removed: params.OnRemoved(Position)) anyerror!void {
     var added_count: usize = 0;
     for (added.iter()) |item| {
         _ = item;
@@ -152,8 +152,8 @@ fn onAddedRemovedSystem(_: *Manager, added: params.OnAdded(Position), removed: p
         removed_count += 1;
     }
 
-    std.testing.expect(added_count >= 1) catch unreachable;
-    std.testing.expect(removed_count >= 1) catch unreachable;
+    try std.testing.expect(added_count >= 1);
+    try std.testing.expect(removed_count >= 1);
 }
 
 test "System - basic execution" {

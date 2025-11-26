@@ -754,7 +754,7 @@ pub const LocalSystemParam = struct {
         return null;
     }
 
-    pub fn apply(_: *ecs.Manager, comptime T: type) *systems.Local(T) {
+    pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!*systems.Local(T) {
         // Local params need static storage that persists across system calls
         // Each unique type T gets its own static storage
         const static_storage = struct {

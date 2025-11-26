@@ -5,6 +5,7 @@ const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
 const state = @import("state.zig");
 const relations = @import("relations.zig");
+const errors = @import("errors.zig");
 
 /// Local: Provides per-system-function persistent storage, accessible only to the declaring system.
 /// Value persists across system invocations (lifetime: ECS instance or until explicitly cleared).
@@ -66,7 +67,7 @@ pub const LocalSystemParam = struct {
         return null;
     }
 
-    pub fn apply(_: *ecs.Manager, comptime T: type) *Local(T) {
+    pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!*Local(T) {
         // Local params need static storage that persists across system calls
         // Each unique type T gets its own static storage
         const static_storage = struct {
@@ -74,6 +75,7 @@ pub const LocalSystemParam = struct {
         };
         return &static_storage.local;
     }
+
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
         _ = ptr;
@@ -168,7 +170,7 @@ pub const EventReaderSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) EventReader(T) {
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventReader(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
             const event_store_res = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
@@ -229,7 +231,7 @@ pub const EventWriterSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) EventWriter(T) {
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventWriter(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
             const stored_event_store = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
@@ -295,7 +297,7 @@ pub const StateSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) State(StateEnum) {
+    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) anyerror!State(StateEnum) {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
@@ -303,7 +305,7 @@ pub const StateSystemParam = struct {
             return State(StateEnum){ .state_mgr = state_mgr };
         }
 
-        std.debug.panic("StateManager({s}) resource not found. Register the state type with scheduler.registerState before using State parameter", .{@typeName(StateEnum)});
+        return error.StateManagerNotFound;
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
         _ = e;
@@ -330,9 +332,9 @@ pub fn NextState(comptime StateEnum: type) type {
         state_mgr: *state_mod.StateManager(StateEnum),
 
         /// Transition to a specific state value immediately
-        pub fn set(self: *Self, state_enum: StateEnum) void {
-            self.state_mgr.transitionTo(state_enum) catch |err| {
-                std.debug.panic("Failed to transition to state: {}", .{err});
+        pub fn set(self: *Self, state_enum: StateEnum) anyerror!void {
+            return self.state_mgr.transitionTo(state_enum) catch {
+                return error.StateTransitionFailed;
             };
         }
     };
@@ -365,12 +367,12 @@ pub const NextStateSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) *NextState(StateEnum) {
+    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) anyerror!*NextState(StateEnum) {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
         const state_mgr = e.getResource(StateManagerType) orelse {
-            std.debug.panic("StateManager({s}) resource not found. Register the state type with scheduler and add StateManager to ECS resources before using NextState parameter", .{@typeName(StateEnum)});
+            return error.StateManagerNotFound;
         };
 
         // Get or create NextState instance for this enum type
@@ -382,9 +384,7 @@ pub const NextStateSystemParam = struct {
         const next_state_value = NextStateType{
             .state_mgr = state_mgr,
         };
-        const next_state_ptr = e.addResource(NextStateType, next_state_value) catch |err| {
-            std.debug.panic("Failed to create NextState({s}) resource: {}", .{ @typeName(StateEnum), err });
-        };
+        const next_state_ptr = try e.addResource(NextStateType, next_state_value);
 
         return next_state_ptr;
     }
@@ -428,13 +428,13 @@ pub const ResourceSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) Res(T) {
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!Res(T) {
         const resource_ptr = e.getResource(T);
         if (resource_ptr) |res| {
             // Return the wrapper by value - no pointer stability issues!
             return Res(T){ .ptr = @constCast(res) };
         } else {
-            std.debug.panic("Resource of type '{s}' not found", .{@typeName(T)});
+            return error.ResourceNotFound;
         }
     }
 
@@ -460,7 +460,7 @@ pub const QuerySystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) T {
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
         return e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
@@ -507,11 +507,11 @@ pub const SingleSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) T {
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
         var q = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
-        const first = q.next() orelse std.debug.panic("Single system param expected a single match but none found\n", .{});
+        const first = q.next() orelse return error.SingleFoundNoMatches;
         // Ensure there is exactly one match
-        if (q.next() != null) std.debug.panic("Single system param expected exactly one match, found multiple\n", .{});
+        if (q.next() != null) return error.SingleFoundMultipleMatches;
         return T{ .item = first };
     }
 
@@ -531,22 +531,20 @@ pub const RelationsSystemParam = struct {
         const type_info = @typeInfo(T);
         if (type_info == .pointer) {
             const Child = type_info.pointer.child;
-            if (Child == relations.RelationManager) {
-                return Child;
-            }
             return analyze(Child);
+        }
+        if (T == relations.RelationManager) {
+            return T;
         }
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime _: type) *Relations {
+    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Relations {
         if (e.hasResource(relations.RelationManager) == false) {
             const rel_mgr = relations.RelationManager.init(e.allocator);
-            return e.addResource(relations.RelationManager, rel_mgr) catch |err| {
-                std.debug.panic("Failed to create RelationManager resource: {s}", .{@errorName(err)});
-            };
+            return try e.addResource(relations.RelationManager, rel_mgr);
         }
-        return e.getResource(relations.RelationManager) orelse unreachable;
+        return e.getResource(relations.RelationManager) orelse error.RelationsManagerNotFound;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
@@ -597,9 +595,9 @@ pub const OnAddedSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime Component: type) OnAdded(Component) {
+    pub fn apply(e: *ecs.Manager, comptime Component: type) anyerror!OnAdded(Component) {
         const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
-        var results = std.ArrayList(OnAdded(Component).Item){};
+        var results = try std.ArrayList(OnAdded(Component).Item).initCapacity(e.allocator, 16);
         defer results.deinit(e.allocator);
 
         var iter = e.component_added.iterator();
@@ -607,24 +605,25 @@ pub const OnAddedSystemParam = struct {
             if (ev.data.type_hash != event_type_hash) continue;
             const comp = e.getComponent(ev.data.entity, Component) catch null;
             if (comp) |comp_ptr| {
-                results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr }) catch @panic("OutOfMemory");
+                try results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr });
             } else {
                 // Even if the component is no longer present, we still consider it as "added" for this frame.
                 // Use a null pointer for the component to indicate it was removed before system execution.
-                results.append(e.allocator, .{ .entity = ev.data.entity, .comp = null }) catch @panic("OutOfMemory");
+                try results.append(e.allocator, .{ .entity = ev.data.entity, .comp = null });
             }
             ev.handled = true;
         }
 
-        const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
+        const slice = try results.toOwnedSlice(e.allocator);
         return OnAdded(Component){ .items = slice };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        const p: *OnAdded(Component) = @ptrCast(@alignCast(ptr));
-        if (p.items.len != 0) {
-            e.allocator.free(p.items);
-        }
+        // OnAdded items are owned by the caller, not the system param.
+        // The system param only passes a view of the data, so deinit should do nothing.
+        _ = e;
+        _ = ptr;
+        _ = Component;
     }
 };
 
@@ -667,27 +666,28 @@ pub const OnRemovedSystemParam = struct {
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime Component: type) OnRemoved(Component) {
+    pub fn apply(e: *ecs.Manager, comptime Component: type) anyerror!OnRemoved(Component) {
         const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
-        var results = std.ArrayList(ecs.Entity){};
+        var results = try std.ArrayList(ecs.Entity).initCapacity(e.allocator, 16);
         defer results.deinit(e.allocator);
 
         var iter = e.component_removed.iterator();
         while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
-            results.append(e.allocator, ev.data.entity) catch @panic("OutOfMemory");
+            try results.append(e.allocator, ev.data.entity);
             ev.handled = true;
         }
 
-        const slice = results.toOwnedSlice(e.allocator) catch @panic("OutOfMemory");
+        const slice = try results.toOwnedSlice(e.allocator);
         return OnRemoved(Component){ .removed = slice };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        const p: *OnRemoved(Component) = @ptrCast(@alignCast(ptr));
-        if (p.removed.len != 0) {
-            e.allocator.free(p.removed);
-        }
+        // OnRemoved items are owned by the caller, not the system param.
+        // The system param only passes a view of the data, so deinit should do nothing.
+        _ = e;
+        _ = ptr;
+        _ = Component;
     }
 };
 
@@ -697,7 +697,7 @@ test "ResourceSystemParam basic" {
     defer ecs_instance.deinit();
     const value: i32 = 42;
     _ = try ecs_instance.addResource(i32, value);
-    const res = ResourceSystemParam.apply(&ecs_instance, i32);
+    const res = try ResourceSystemParam.apply(&ecs_instance, i32);
     try std.testing.expect(res.ptr.* == 42);
 }
 
@@ -705,7 +705,7 @@ test "LocalSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const local_ptr = LocalSystemParam.apply(&ecs_instance, i32);
+    const local_ptr = try LocalSystemParam.apply(&ecs_instance, i32);
     local_ptr._value = 99;
     try std.testing.expect(local_ptr._value == 99);
 }
@@ -714,7 +714,7 @@ test "EventReaderSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const reader = EventReaderSystemParam.apply(&ecs_instance, u32);
+    const reader = try EventReaderSystemParam.apply(&ecs_instance, u32);
     try std.testing.expect(@intFromPtr(reader.event_store) != 0);
 }
 
@@ -722,7 +722,7 @@ test "EventWriterSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const writer = EventWriterSystemParam.apply(&ecs_instance, u32);
+    const writer = try EventWriterSystemParam.apply(&ecs_instance, u32);
     try std.testing.expect(@intFromPtr(writer.event_store) != 0);
 }
 
@@ -737,7 +737,7 @@ test "OnAddedSystemParam basic" {
     const entity = manager.create(.{});
     try manager.addComponent(entity, Position, Position{ .x = 3.0, .y = 4.0 });
 
-    var on_added = OnAddedSystemParam.apply(&manager, Position);
+    var on_added = try OnAddedSystemParam.apply(&manager, Position);
     try std.testing.expect(on_added.items.len >= 1);
     try std.testing.expect(on_added.items[0].entity.eql(entity));
     try std.testing.expect(on_added.items[0].comp != null);
@@ -757,7 +757,7 @@ test "OnRemovedSystemParam basic" {
     try manager.addComponent(entity, Position, Position{ .x = 7.0, .y = 8.0 });
     try manager.removeComponent(entity, Position);
 
-    var on_removed = OnRemovedSystemParam.apply(&manager, Position);
+    var on_removed = try OnRemovedSystemParam.apply(&manager, Position);
     try std.testing.expect(on_removed.removed.len >= 1);
     try std.testing.expect(on_removed.removed[0].eql(entity));
 
@@ -774,7 +774,7 @@ test "RelationsSystemParam basic" {
     const a = manager.create(.{});
     const b = manager.create(.{});
 
-    const rel = RelationsSystemParam.apply(&manager, *relations.RelationManager);
+    const rel = try RelationsSystemParam.apply(&manager, *relations.RelationManager);
 
     // Add relation a -> b using Child
     try rel.add(&manager, a, b, Child);
@@ -799,7 +799,7 @@ test "SingleSystemParam basic" {
     const Position = struct { x: f32, y: f32 };
     _ = manager.create(.{Position{ .x = 1.0, .y = 2.0 }});
 
-    const single = SingleSystemParam.apply(&manager, Single(struct { pos: Position }, .{}));
+    const single = try SingleSystemParam.apply(&manager, Single(struct { pos: Position }, .{}));
 
     try std.testing.expectEqual(single.item.pos.*.x, 1.0);
     try std.testing.expectEqual(single.item.pos.*.y, 2.0);

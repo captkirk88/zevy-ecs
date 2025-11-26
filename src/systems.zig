@@ -212,7 +212,7 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
                 var args: ResolvedArgsTuple = undefined;
                 inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
                     const ParamType = param.type.?;
-                    args[i] = ParamRegistry.apply(ecs, ParamType);
+                    args[i] = try ParamRegistry.apply(ecs, ParamType);
                 }
                 break :blk args;
             };
@@ -223,13 +223,18 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
 
             // Build args tuple with mutable resolved args
             const all_args_tuple = .{ecs} ++ context.args ++ resolved_args;
+            
             // Deallocate any system param resources after the system finishes.
             // We need to call deinit for each resolved argument type if it provides a deinit implementation.
-            inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
-                const ParamType = param.type.?;
-                const resolved_ptr: *anyopaque = @ptrCast(@alignCast(@constCast(&resolved_args[i])));
-                defer ParamRegistry.deinit(ecs, resolved_ptr, ParamType);
+            // This must be done in a defer that wraps the actual system call to ensure cleanup happens AFTER execution.
+            defer {
+                inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
+                    const ParamType = param.type.?;
+                    const resolved_ptr: *anyopaque = @ptrCast(@alignCast(@constCast(&resolved_args[i])));
+                    ParamRegistry.deinit(ecs, resolved_ptr, ParamType);
+                }
             }
+            
             if (is_error_union) {
                 return try @call(.auto, fn_ptr_typed, all_args_tuple);
             } else {
