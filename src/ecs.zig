@@ -278,7 +278,7 @@ pub const Manager = struct {
         self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
-    /// Get a mutable pointer to a component of type T for the given entity, or an error if not found or entity is dead.
+    /// Get a mutable pointer to a component of type T for the given entity, or an error if entity is not alive.
     pub fn getComponent(self: *Manager, entity: Entity, comptime T: type) error{EntityNotAlive}!?*T {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         return self.world.get(entity, T);
@@ -296,6 +296,23 @@ pub const Manager = struct {
     pub fn getAllComponents(self: *Manager, allocator: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         return self.world.getAllComponents(allocator, entity);
+    }
+
+    /// Copy an entity and all of its components from another Manager into this Manager.
+    /// Returns the newly created Entity in the destination Manager.
+    pub fn copyEntityFrom(self: *Manager, allocator: std.mem.Allocator, src: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
+        const components = try src.getAllComponents(allocator, entity);
+        defer allocator.free(components);
+
+        return try self.createFromComponents(components);
+    }
+
+    /// Move an entity and all of its components from this Manager into another Manager.
+    /// The source entity will be destroyed if the copy succeeds.
+    pub fn moveEntityTo(self: *Manager, allocator: std.mem.Allocator, dest: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
+        const new_entity = try dest.copyEntityFrom(allocator, self, entity);
+        try self.destroy(entity);
+        return new_entity;
     }
 
     /// Add or update a resource.
@@ -691,6 +708,55 @@ test "Entity destruction and reuse" {
 
     try std.testing.expect(ecs.isAlive(entity3));
     try std.testing.expect(ecs.isAlive(entity2));
+}
+
+test "copyEntityFrom copies components between managers" {
+    var ecs_src = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs_src.deinit();
+
+    var ecs_dst = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs_dst.deinit();
+
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { x: f32, y: f32 };
+
+    const e_src = ecs_src.create(.{ Position{ .x = 1, .y = 2 }, Velocity{ .x = 3, .y = 4 } });
+
+    const e_dst = ecs_dst.copyEntityFrom(std.testing.allocator, &ecs_src, e_src) catch unreachable;
+
+    const pos_src = ecs_src.getComponent(e_src, Position) catch unreachable;
+    const vel_src = ecs_src.getComponent(e_src, Velocity) catch unreachable;
+    const pos_dst = ecs_dst.getComponent(e_dst, Position) catch unreachable;
+    const vel_dst = ecs_dst.getComponent(e_dst, Velocity) catch unreachable;
+
+    try std.testing.expect(pos_src != null and vel_src != null);
+    try std.testing.expect(pos_dst != null and vel_dst != null);
+    try std.testing.expectEqual(pos_src.?.x, pos_dst.?.x);
+    try std.testing.expectEqual(pos_src.?.y, pos_dst.?.y);
+    try std.testing.expectEqual(vel_src.?.x, vel_dst.?.x);
+    try std.testing.expectEqual(vel_src.?.y, vel_dst.?.y);
+}
+
+test "moveEntityTo moves components and destroys source" {
+    var ecs_src = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs_src.deinit();
+
+    var ecs_dst = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs_dst.deinit();
+
+    const Position = struct { x: f32, y: f32 };
+
+    const e_src = ecs_src.create(.{Position{ .x = 10, .y = 20 }});
+
+    const e_dst = ecs_src.moveEntityTo(std.testing.allocator, &ecs_dst, e_src) catch unreachable;
+
+    try std.testing.expect(!ecs_src.isAlive(e_src));
+    try std.testing.expect(ecs_dst.isAlive(e_dst));
+
+    const pos_dst = ecs_dst.getComponent(e_dst, Position) catch unreachable;
+    try std.testing.expect(pos_dst != null);
+    try std.testing.expectEqual(@as(f32, 10), pos_dst.?.x);
+    try std.testing.expectEqual(@as(f32, 20), pos_dst.?.y);
 }
 
 test "getOrAddResource" {
