@@ -30,7 +30,7 @@ pub fn StateManager(comptime StateEnum: type) type {
         }
 
         /// Transition to a new state (queues the transition)
-        pub fn transitionTo(self: *Self, state: StateEnum) !void {
+        pub fn transitionTo(self: *Self, state: StateEnum) error{StateNotRegistered}!void {
             try self.scheduler.transitionTo(self.ecs, StateEnum, state);
         }
     };
