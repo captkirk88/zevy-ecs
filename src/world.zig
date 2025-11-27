@@ -10,6 +10,7 @@ const serialize = @import("serialize.zig");
 pub const ComponentInstance = serialize.ComponentInstance;
 const ComponentReader = serialize.ComponentReader;
 const ComponentWriter = serialize.ComponentWriter;
+const EntityMapEntry = @import("archetype_storage.zig").EntityMapEntry;
 
 /// The World is the main interface for managing entities and components
 pub const World = struct {
@@ -216,15 +217,8 @@ pub const World = struct {
                 arr.items.len += size;
             }
 
-            // Update sparse array - UNSAFE: direct write after ensuring capacity
-            const entity_id = entity.id;
-            try self.archetypes.entity_sparse_array.ensureUnusedCapacity(self.allocator, @max(entity_id + 1, self.archetypes.entity_sparse_array.items.len) - self.archetypes.entity_sparse_array.items.len);
-            if (self.archetypes.entity_sparse_array.items.len <= entity_id) {
-                const old_len = self.archetypes.entity_sparse_array.items.len;
-                self.archetypes.entity_sparse_array.items.len = entity_id + 1;
-                @memset(self.archetypes.entity_sparse_array.items[old_len..entity_id], null);
-            }
-            self.archetypes.entity_sparse_array.items[entity_id] = .{ .archetype = archetype_ptr, .index = idx };
+            // Update sparse set
+            try self.archetypes.entity_sparse_set.set(entity.id, .{ .archetype = archetype_ptr, .index = idx });
         }
     }
 
@@ -342,29 +336,22 @@ pub const World = struct {
             try arr.ensureTotalCapacity(self.allocator, arr.items.len + needed_bytes);
         }
 
-        // Ensure sparse array capacity for all entities
-        const max_entity_id = blk: {
-            var max: u32 = 0;
-            for (entities) |e| {
-                if (e.id > max) max = e.id;
-            }
-            break :blk max;
-        };
-        try self.archetypes.entity_sparse_array.ensureTotalCapacity(self.allocator, max_entity_id + 1);
-        if (self.archetypes.entity_sparse_array.items.len < max_entity_id + 1) {
-            const old_len = self.archetypes.entity_sparse_array.items.len;
-            self.archetypes.entity_sparse_array.items.len = max_entity_id + 1;
-            // Initialize new slots to null
-            @memset(self.archetypes.entity_sparse_array.items[old_len .. max_entity_id + 1], null);
+        // Prepare batch EntityMapEntry array
+        var entries = try self.allocator.alloc(EntityMapEntry, entities.len);
+        defer self.allocator.free(entries);
+        var ids = try self.allocator.alloc(u32, entities.len);
+        defer self.allocator.free(ids);
+        for (entities, 0..) |entity, i| {
+            entries[i] = EntityMapEntry{ .archetype = archetype_ptr, .index = archetype_ptr.entities.items.len + i };
+            ids[i] = entity.id;
         }
+        try self.archetypes.entity_sparse_set.insertMany(ids, entries);
 
         for (entities) |entity| {
             const idx = archetype_ptr.entities.items.len;
-
             // Direct write to entity array
             archetype_ptr.entities.items.ptr[idx] = entity;
             archetype_ptr.entities.items.len += 1;
-
             // Direct @memcpy for component data
             for (data, 0..) |component_data, i| {
                 const size = sizes[i];
@@ -373,9 +360,6 @@ pub const World = struct {
                 @memcpy(dest[0..size], component_data[0..size]);
                 arr.items.len += size;
             }
-
-            // Direct sparse array write (capacity already ensured)
-            self.archetypes.entity_sparse_array.items[entity.id] = .{ .archetype = archetype_ptr, .index = idx };
         }
     }
 

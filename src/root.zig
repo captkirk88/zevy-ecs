@@ -7,6 +7,7 @@ const sys = @import("systems.zig");
 const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
 const scheduler = @import("scheduler.zig");
+const sparse = @import("sparse_set.zig");
 
 /// Error enum
 pub const errors = errs.ECSError;
@@ -61,6 +62,10 @@ pub const OnAdded = params.OnAdded;
 pub const OnRemoved = params.OnRemoved;
 /// Single parameter type — returns exactly one matching query result
 pub const Single = params.Single;
+
+// Data structures
+/// SparseSet - O(1) lookup/insert/remove with cache-friendly iteration
+pub const SparseSet = sparse.SparseSet;
 
 // Event types and functions
 const events = @import("events.zig");

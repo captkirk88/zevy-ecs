@@ -13,7 +13,7 @@ test "ArchetypeStorage - init and deinit" {
     defer storage.deinit();
 
     try std.testing.expect(storage.archetypes.count() == 0);
-    try std.testing.expect(storage.entity_sparse_array.items.len == 0);
+    try std.testing.expect(storage.entity_sparse_set.count() == 0);
 }
 
 test "ArchetypeStorage - getOrCreate creates new" {
@@ -201,7 +201,8 @@ test "ArchetypeStorage - setEntityEntry grows sparse array" {
 
     try storage.set(entity, entry);
 
-    try std.testing.expect(storage.entity_sparse_array.items.len > 10000);
+    // Sparse set should contain this entity
+    try std.testing.expect(storage.entity_sparse_set.contains(10000));
 
     const retrieved = storage.get(entity);
     try std.testing.expect(retrieved != null);
@@ -334,8 +335,8 @@ test "ArchetypeStorage - stress test many entities" {
         try storage.add(entity, signature, sizes, &component_data);
     }
 
-    // Verify sparse array accommodates all entities
-    try std.testing.expect(storage.entity_sparse_array.items.len >= count);
+    // Verify sparse set contains all entities
+    try std.testing.expect(storage.entity_sparse_set.count() == count);
 
     // Spot check some entities
     for ([_]usize{ 0, 1000, 10000, 50000, 99999 }) |i| {

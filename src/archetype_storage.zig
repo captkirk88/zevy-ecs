@@ -6,6 +6,7 @@ const ArchetypeSignature = @import("archetype.zig").ArchetypeSignature;
 const Entity = @import("ecs.zig").Entity;
 const archetypeSignatureHash = @import("archetype.zig").archetypeSignatureHash;
 const archetypeSignatureEql = @import("archetype.zig").archetypeSignatureEql;
+const SparseSet = @import("sparse_set.zig").SparseSet;
 
 pub const Context = struct {
     pub fn hash(self: Context, key: ArchetypeSignature) u64 {
@@ -26,18 +27,17 @@ pub const ArchetypeStorage = struct {
     allocator: std.mem.Allocator,
     // Map: ArchetypeSignature -> *Archetype
     archetypes: std.HashMap(ArchetypeSignature, *Archetype, Context, 80),
-    // Sparse array: Entity ID -> (archetype ptr, index in archetype)
-    // Much faster than HashMap for entity lookups
-    entity_sparse_array: std.ArrayList(?EntityMapEntry),
+
+    entity_sparse_set: SparseSet(EntityMapEntry),
 
     pub fn init(allocator: std.mem.Allocator) ArchetypeStorage {
-        // Pre-allocate sparse array capacity for better performance
         const archetypes_map = std.HashMap(ArchetypeSignature, *Archetype, Context, 80).init(allocator);
-        const sparse_array = std.ArrayList(?EntityMapEntry).initCapacity(allocator, 100000) catch std.ArrayList(?EntityMapEntry).initCapacity(allocator, 0) catch unreachable;
+        // Pre-allocate sparse set capacity for better performance
+        const sparse_set = SparseSet(EntityMapEntry).initCapacity(allocator, 100000) catch SparseSet(EntityMapEntry).init(allocator);
         return ArchetypeStorage{
             .allocator = allocator,
             .archetypes = archetypes_map,
-            .entity_sparse_array = sparse_array,
+            .entity_sparse_set = sparse_set,
         };
     }
 
@@ -47,7 +47,7 @@ pub const ArchetypeStorage = struct {
             archetype.*.deinit();
         }
         self.archetypes.deinit();
-        self.entity_sparse_array.deinit(self.allocator);
+        self.entity_sparse_set.deinit();
     }
 
     /// Get or create an archetype for the given signature and component sizes
@@ -72,50 +72,38 @@ pub const ArchetypeStorage = struct {
         try archetype.addEntity(entity, component_data);
         const idx = archetype.entities.items.len - 1;
 
-        // Ensure sparse array has enough capacity
-        const entity_id = entity.id;
-        while (self.entity_sparse_array.items.len <= entity_id) {
-            try self.entity_sparse_array.append(self.allocator, null);
-        }
-        self.entity_sparse_array.items[entity_id] = EntityMapEntry{ .archetype = archetype, .index = idx };
+        try self.entity_sparse_set.set(entity.id, EntityMapEntry{ .archetype = archetype, .index = idx });
     }
 
     /// Get entity map entry (archetype + index)
     pub fn get(self: *ArchetypeStorage, entity: Entity) ?EntityMapEntry {
-        if (entity.id < self.entity_sparse_array.items.len) {
-            return self.entity_sparse_array.items[entity.id];
-        }
-        return null;
+        return self.entity_sparse_set.get(entity.id);
     }
 
-    /// Update entity map entry - UNSAFE: direct write after ensuring capacity
+    /// Update entity map entry
     pub fn set(self: *ArchetypeStorage, entity: Entity, entry: EntityMapEntry) !void {
-        const entity_id = entity.id;
-        // Ensure capacity in one shot instead of append loop
-        if (entity_id >= self.entity_sparse_array.items.len) {
-            const needed = entity_id + 1 - self.entity_sparse_array.items.len;
-            try self.entity_sparse_array.ensureUnusedCapacity(self.allocator, needed);
-            const old_len = self.entity_sparse_array.items.len;
-            self.entity_sparse_array.items.len = entity_id + 1;
-            // Initialize new slots to null
-            @memset(self.entity_sparse_array.items[old_len .. entity_id + 1], null);
-        }
-        self.entity_sparse_array.items[entity_id] = entry;
+        try self.entity_sparse_set.set(entity.id, entry);
     }
 
     /// Remove entity from map
     pub fn remove(self: *ArchetypeStorage, entity: Entity) void {
-        if (entity.id < self.entity_sparse_array.items.len) {
-            self.entity_sparse_array.items[entity.id] = null;
-        }
+        self.entity_sparse_set.remove(entity.id);
     }
 
     pub fn getArchetype(self: *ArchetypeStorage, entity: Entity) ?*Archetype {
-        if (entity.id < self.entity_sparse_array.items.len) {
-            if (self.entity_sparse_array.items[entity.id]) |entry| {
-                return entry.archetype;
-            }
+        if (self.entity_sparse_set.get(entity.id)) |entry| {
+            return entry.archetype;
         }
         return null;
+    }
+
+    /// Get count of tracked entities
+    pub fn entityCount(self: *ArchetypeStorage) usize {
+        return self.entity_sparse_set.count();
+    }
+
+    /// Iterate over all entity entries (cache-friendly, no null checks)
+    pub fn entityIterator(self: *ArchetypeStorage) SparseSet(EntityMapEntry).Iterator {
+        return self.entity_sparse_set.iterator();
     }
 };
