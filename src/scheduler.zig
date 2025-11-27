@@ -261,8 +261,8 @@ pub const Scheduler = struct {
 
     /// Register an event with the scheduler
     /// This creates an EventStore resource and adds a cleanup system at the Last stage
-    pub fn registerEvent(self: *Scheduler, ecs: *ecs_mod.Manager, comptime T: type) ecs_mod.errors!void {
-        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.PostUpdate) + 1);
+    pub fn registerEvent(self: *Scheduler, ecs: *ecs_mod.Manager, comptime T: type, comptime ParamRegistry: type) ecs_mod.errors!void {
+        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.PostUpdate) + 1, ParamRegistry);
     }
 
     /// Register an event with cleanup at a specific stage
@@ -271,6 +271,7 @@ pub const Scheduler = struct {
         ecs: *ecs_mod.Manager,
         comptime T: type,
         cleanup_stage: StageId,
+        comptime ParamRegistry: type,
     ) ecs_mod.errors!void {
         // Create EventStore for this event type
         const event_store = events.EventStore(T).init(self.allocator, 10);
@@ -288,7 +289,7 @@ pub const Scheduler = struct {
         }.cleanup;
 
         // Add cleanup system
-        self.addSystem(ecs, cleanup_stage, cleanup_system, registry.DefaultParamRegistry);
+        self.addSystem(ecs, cleanup_stage, cleanup_system, ParamRegistry);
     }
 
     // ============================================================================
@@ -302,10 +303,10 @@ pub const Scheduler = struct {
         self: *Scheduler,
         ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
-    ) !void {
+    ) error{ StateAlreadyRegistered, ExpectedEnumType, ResourceAlreadyExists, OutOfMemory }!void {
         const type_info = @typeInfo(StateEnum);
         if (type_info != .@"enum") {
-            @compileError("registerStateType requires an enum type, got: " ++ @typeName(StateEnum));
+            return error.ExpectedEnumType;
         }
 
         const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
@@ -369,7 +370,7 @@ pub const Scheduler = struct {
         ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
         state: StateEnum,
-    ) !void {
+    ) error{StateNotRegistered}!void {
         const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
 
         // Verify the state enum type is registered
@@ -526,7 +527,7 @@ test "Scheduler registerEventType" {
     defer scheduler.deinit();
 
     // Register the event type
-    scheduler.registerEvent(&ecs, TestEvent) catch |err| {
+    scheduler.registerEvent(&ecs, TestEvent, registry.DefaultParamRegistry) catch |err| {
         return err;
     };
 
