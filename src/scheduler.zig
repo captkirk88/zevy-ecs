@@ -374,7 +374,7 @@ pub const Scheduler = struct {
         const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
 
         // Verify the state enum type is registered
-        _ = self.states.get(type_hash) orelse return error.StateNotRegistered;
+        if (!self.states.contains(type_hash)) return error.StateNotRegistered;
 
         const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
         const value_name = @tagName(state);
