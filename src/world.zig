@@ -1,6 +1,8 @@
 const std = @import("std");
 const errors = @import("errors.zig");
 const ArchetypeStorage = @import("archetype_storage.zig").ArchetypeStorage;
+const archetype = @import("archetype.zig");
+const ArchetypeSignature = archetype.ArchetypeSignature;
 const Entity = @import("ecs.zig").Entity;
 const Query = @import("query.zig").Query;
 const reflect = @import("reflect.zig");
@@ -25,33 +27,32 @@ pub const World = struct {
         self.archetypes.deinit();
     }
 
-    /// Add components of types in Components to the entity, initializing with values.
+    /// Add components to the entity, initializing with values from a tuple.
     /// If the entity already has components, it will be migrated to a new archetype.
-    /// Components must be a tuple of types, values a tuple of corresponding values.
+    /// `values` must be a tuple of component instances.
     ///
     /// Example:
     /// ```zig
-    /// api.add(entity, struct { Position: comps2d.Position, Velocity: comps2d.Velocity }, .{ .Position = pos, .Velocity = vel });
+    /// world.add(entity, .{ Position{ .x = 0, .y = 0 }, Velocity{ .x = 1, .y = 1 } });
     /// ```
-    pub fn add(self: *World, entity: Entity, comptime Components: anytype, values: anytype) !void {
-        const components_type = if (@typeInfo(@TypeOf(Components)) == .type) Components else @TypeOf(Components);
+    pub fn add(self: *World, entity: Entity, values: anytype) !void {
+        const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
-        comptime if (info != .@"struct" and !info.@"struct".is_tuple) @compileError("Components must be a tuple of types");
+        comptime if (info != .@"struct" or !info.@"struct".is_tuple) @compileError(std.fmt.comptimePrint("values must be a tuple of component instances: {s}", .{@typeName(components_type)}));
         const field_count = info.@"struct".fields.len;
 
         // Check if entity exists (migration path)
-        if (self.archetypes.getEntityEntry(entity)) |entry| {
-            // SLOW PATH: Entity migration - use heap allocations
-            // Gather new component info, using heap-allocated buffers for data
+        if (self.archetypes.get(entity)) |entry| {
+            // Slow: Gather new component info, using heap-allocated buffers for data
             var new_components: [field_count]ComponentInstance = undefined;
             var heap_data: [field_count][]u8 = undefined;
             inline for (info.@"struct".fields, 0..) |field, i| {
-                const T = field.type;
-                const comp_info = reflect.getTypeInfo(T);
-                var runtime_value: T = values[i];
+                const FieldType = field.type;
+                const comp_info = reflect.getTypeInfo(FieldType);
+                var runtime_value: FieldType = values[i];
                 const bytes = std.mem.asBytes(&runtime_value);
                 heap_data[i] = try self.allocator.alloc(u8, comp_info.size);
-                std.mem.copyForwards(u8, heap_data[i], bytes);
+                @memmove(heap_data[i], bytes);
                 new_components[i] = ComponentInstance{
                     .hash = comp_info.hash,
                     .size = comp_info.size,
@@ -128,23 +129,23 @@ pub const World = struct {
             }
             // Always heap-allocate hashes for migration signature
             const hashes_heap = try self.allocator.alloc(u64, hashes.len);
-            std.mem.copyForwards(u64, hashes_heap, hashes);
-            const signature_mig = @import("archetype.zig").ArchetypeSignature{ .types = hashes_heap };
+            @memmove(hashes_heap, hashes);
+            const signature_mig = ArchetypeSignature{ .types = hashes_heap };
             self.remove(entity); // Remove from old archetype before adding to new
-            try self.archetypes.addEntityToArchetype(entity, signature_mig, sizes_mig, data_mig);
+            try self.archetypes.add(entity, signature_mig, sizes_mig, data_mig);
             // Free the migration signature's types after use
             self.allocator.free(signature_mig.types);
         } else {
-            // FAST PATH: New entity - use stack allocations and avoid all heap operations
+            // FAST: New entity - use stack allocations and avoid all heap operations
 
             if (field_count == 0) {
                 // Empty entity - special case
                 const empty_hashes = try self.allocator.alloc(u64, 0);
                 defer self.allocator.free(empty_hashes);
-                const signature = @import("archetype.zig").ArchetypeSignature{ .types = empty_hashes };
+                const signature = ArchetypeSignature{ .types = empty_hashes };
                 const empty_sizes: []const usize = &[_]usize{};
                 const empty_data: [][]const u8 = &[_][]const u8{};
-                try self.archetypes.addEntityToArchetype(entity, signature, empty_sizes, @constCast(empty_data));
+                try self.archetypes.add(entity, signature, empty_sizes, @constCast(empty_data));
                 return;
             }
 
@@ -190,27 +191,26 @@ pub const World = struct {
             }
 
             // Use stack-allocated signature for lookup
-            const stack_signature = @import("archetype.zig").ArchetypeSignature{ .types = &sorted_hashes };
+            const stack_signature = ArchetypeSignature{ .types = &sorted_hashes };
 
-            // OPTIMIZATION: Direct archetype insertion (bypasses addEntityToArchetype wrapper)
-            const archetype = try self.archetypes.getOrCreateArchetype(stack_signature, &sizes);
+            const archetype_ptr = try self.archetypes.getOrCreate(stack_signature, &sizes);
 
-            const idx = archetype.entities.items.len;
+            const idx = archetype_ptr.entities.items.len;
 
             // Ensure capacity first
-            try archetype.entities.ensureUnusedCapacity(self.allocator, 1);
-            for (archetype.component_arrays, 0..) |*arr, i| {
+            try archetype_ptr.entities.ensureUnusedCapacity(self.allocator, 1);
+            for (archetype_ptr.component_arrays, 0..) |*arr, i| {
                 try arr.ensureUnusedCapacity(self.allocator, sizes[i]);
             }
 
             // Direct write to entity array
-            archetype.entities.items.ptr[idx] = entity;
-            archetype.entities.items.len += 1;
+            archetype_ptr.entities.items.ptr[idx] = entity;
+            archetype_ptr.entities.items.len += 1;
 
             // Direct @memcpy for component data
             for (data, 0..) |component_data, i| {
                 const size = sizes[i];
-                const arr = &archetype.component_arrays[i];
+                const arr = &archetype_ptr.component_arrays[i];
                 const dest = arr.items.ptr + arr.items.len;
                 @memcpy(dest[0..size], component_data[0..size]);
                 arr.items.len += size;
@@ -224,7 +224,7 @@ pub const World = struct {
                 self.archetypes.entity_sparse_array.items.len = entity_id + 1;
                 @memset(self.archetypes.entity_sparse_array.items[old_len..entity_id], null);
             }
-            self.archetypes.entity_sparse_array.items[entity_id] = .{ .archetype = archetype, .index = idx };
+            self.archetypes.entity_sparse_array.items[entity_id] = .{ .archetype = archetype_ptr, .index = idx };
         }
     }
 
@@ -233,7 +233,7 @@ pub const World = struct {
     pub fn addFromComponentInstances(self: *World, entity: Entity, components: []const ComponentInstance) !void {
         if (components.len == 0) {
             const empty_components = .{};
-            try self.add(entity, @TypeOf(empty_components), empty_components);
+            try self.add(entity, empty_components);
             return;
         }
 
@@ -274,23 +274,21 @@ pub const World = struct {
         // Create signature
         const signature_hashes = try self.allocator.alloc(u64, hashes.len);
         defer self.allocator.free(signature_hashes);
-        std.mem.copyForwards(u64, signature_hashes, hashes);
-        const signature = @import("archetype.zig").ArchetypeSignature{ .types = signature_hashes };
+        @memmove(signature_hashes, hashes);
+        const signature = ArchetypeSignature{ .types = signature_hashes };
 
         // Add entity to archetype
-        try self.archetypes.addEntityToArchetype(entity, signature, sizes, data);
+        try self.archetypes.add(entity, signature, sizes, data);
     }
 
     /// Add multiple entities with the same component set and values (much faster than calling add() in a loop)
-    pub fn addBatch(self: *World, entities: []const Entity, comptime Components: anytype, values: anytype) !void {
+    pub fn addBatch(self: *World, entities: []const Entity, values: anytype) !void {
         if (entities.len == 0) return;
 
-        const components_type = if (@typeInfo(@TypeOf(Components)) == .type) Components else @TypeOf(Components);
+        const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
-        comptime {
-            if (info != .@"struct") @compileError("Components must be a tuple of types");
-            if (!info.@"struct".is_tuple) @compileError("Components must be a tuple of types");
-        }
+        comptime if (info != .@"struct" or !info.@"struct".is_tuple) @compileError(std.fmt.comptimePrint("values must be a tuple of component instances: {s}", .{@typeName(components_type)}));
+
         const field_count = info.@"struct".fields.len;
 
         // Compute sorted component hashes at compile time (same as add fast path)
@@ -331,14 +329,14 @@ pub const World = struct {
         }
 
         // Use stack signature for archetype lookup
-        const stack_signature = @import("archetype.zig").ArchetypeSignature{ .types = &sorted_hashes };
+        const stack_signature = ArchetypeSignature{ .types = &sorted_hashes };
 
         // Get or create archetype
-        const archetype = try self.archetypes.getOrCreateArchetype(stack_signature, &sizes);
+        const archetype_ptr = try self.archetypes.getOrCreate(stack_signature, &sizes);
 
         // Reserve capacity in archetype for batch
-        try archetype.entities.ensureTotalCapacity(self.allocator, archetype.entities.items.len + entities.len);
-        for (archetype.component_arrays, 0..) |*arr, i| {
+        try archetype_ptr.entities.ensureTotalCapacity(self.allocator, archetype_ptr.entities.items.len + entities.len);
+        for (archetype_ptr.component_arrays, 0..) |*arr, i| {
             const comp_size = sizes[i];
             const needed_bytes = comp_size * entities.len;
             try arr.ensureTotalCapacity(self.allocator, arr.items.len + needed_bytes);
@@ -361,30 +359,30 @@ pub const World = struct {
         }
 
         for (entities) |entity| {
-            const idx = archetype.entities.items.len;
+            const idx = archetype_ptr.entities.items.len;
 
             // Direct write to entity array
-            archetype.entities.items.ptr[idx] = entity;
-            archetype.entities.items.len += 1;
+            archetype_ptr.entities.items.ptr[idx] = entity;
+            archetype_ptr.entities.items.len += 1;
 
             // Direct @memcpy for component data
             for (data, 0..) |component_data, i| {
                 const size = sizes[i];
-                const arr = &archetype.component_arrays[i];
+                const arr = &archetype_ptr.component_arrays[i];
                 const dest = arr.items.ptr + arr.items.len;
                 @memcpy(dest[0..size], component_data[0..size]);
                 arr.items.len += size;
             }
 
             // Direct sparse array write (capacity already ensured)
-            self.archetypes.entity_sparse_array.items[entity.id] = .{ .archetype = archetype, .index = idx };
+            self.archetypes.entity_sparse_array.items[entity.id] = .{ .archetype = archetype_ptr, .index = idx };
         }
     }
 
     /// Get a pointer to component T for an entity, or null if not present
     pub fn get(self: *World, entity: Entity, comptime T: type) ?*T {
         const info = reflect.getTypeInfo(T);
-        if (self.archetypes.getEntityEntry(entity)) |entry| {
+        if (self.archetypes.get(entity)) |entry| {
             const arch = entry.archetype;
             var idx: ?usize = null;
             for (arch.signature.types, 0..) |h, i| {
@@ -411,8 +409,8 @@ pub const World = struct {
     /// Get all components for an entity as an array of ComponentInstance
     ///
     /// Caller is responsible for freeing the returned array
-    pub fn getAllComponents(self: *World, allocator: std.mem.Allocator, entity: Entity) ![]ComponentInstance {
-        if (self.archetypes.getEntityEntry(entity)) |entry| {
+    pub fn getAllComponents(self: *World, allocator: std.mem.Allocator, entity: Entity) error{OutOfMemory}![]ComponentInstance {
+        if (self.archetypes.get(entity)) |entry| {
             const arch = entry.archetype;
             const entity_index = entry.index;
 
@@ -450,7 +448,7 @@ pub const World = struct {
 
     /// Remove an entity entirely from the ECS
     pub fn remove(self: *World, entity: Entity) void {
-        if (self.archetypes.getEntityEntry(entity)) |entry| {
+        if (self.archetypes.get(entity)) |entry| {
             const arch = entry.archetype;
             const idx = entry.index;
             const last_idx = arch.entities.items.len - 1;
@@ -461,21 +459,21 @@ pub const World = struct {
                 const off = idx * comp_size;
                 const last_off = last_idx * comp_size;
                 if (idx != last_idx) {
-                    std.mem.copyForwards(u8, arr.items[off .. off + comp_size], arr.items[last_off .. last_off + comp_size]);
+                    @memmove(arr.items[off .. off + comp_size], arr.items[last_off .. last_off + comp_size]);
                 }
                 arr.items.len -= comp_size;
             }
             if (last_idx != idx) {
                 const swapped_entity = arch.entities.items[idx];
-                self.archetypes.setEntityEntry(swapped_entity, .{ .archetype = arch, .index = idx }) catch {};
+                self.archetypes.set(swapped_entity, .{ .archetype = arch, .index = idx }) catch {};
             }
-            self.archetypes.removeEntity(entity);
+            self.archetypes.remove(entity);
         }
     }
 
     /// Remove a single component T from an entity by migrating it to a new archetype without T
     pub fn removeComponent(self: *World, entity: Entity, comptime T: type) error{OutOfMemory}!void {
-        if (self.archetypes.getEntityEntry(entity)) |entry| {
+        if (self.archetypes.get(entity)) |entry| {
             const src_arch = entry.archetype;
             const src_idx = entry.index;
             // Build new signature: remove T's hash from the current signature
@@ -502,14 +500,14 @@ pub const World = struct {
             if (n == src_types.len) return; // T not found, nothing to do
             // Create new signature with heap-allocated types array
             const dst_types_heap = try self.allocator.alloc(u64, n);
-            std.mem.copyForwards(u64, dst_types_heap, new_types.items[0..n]);
+            @memmove(dst_types_heap, new_types.items[0..n]);
             const dst_sizes = new_sizes.items[0..n];
             const dst_data = new_data.items[0..n];
-            const dst_signature = @import("archetype.zig").ArchetypeSignature{ .types = dst_types_heap };
+            const dst_signature = ArchetypeSignature{ .types = dst_types_heap };
             // Remove from old archetype first
             self.remove(entity);
             // Add to new archetype
-            self.archetypes.addEntityToArchetype(entity, dst_signature, dst_sizes, dst_data) catch return;
+            self.archetypes.add(entity, dst_signature, dst_sizes, dst_data) catch return;
             // Free the heap-allocated signature.types after use
             self.allocator.free(dst_signature.types);
         }

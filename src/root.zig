@@ -120,7 +120,7 @@ test {
     std.testing.refAllDecls(@import("systems_tests.zig"));
     std.testing.refAllDecls(@import("serialize_tests.zig"));
     std.testing.refAllDecls(@import("relations_tests.zig"));
-    std.testing.refAllDecls(world);
+    std.testing.refAllDecls(@import("world_tests.zig"));
     std.testing.refAllDecls(scheduler);
     std.testing.refAllDecls(state);
     std.testing.refAllDecls(events);

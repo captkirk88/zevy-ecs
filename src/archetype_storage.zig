@@ -51,7 +51,7 @@ pub const ArchetypeStorage = struct {
     }
 
     /// Get or create an archetype for the given signature and component sizes
-    pub fn getOrCreateArchetype(self: *ArchetypeStorage, signature: ArchetypeSignature, component_sizes: []const usize) !*Archetype {
+    pub fn getOrCreate(self: *ArchetypeStorage, signature: ArchetypeSignature, component_sizes: []const usize) !*Archetype {
         if (self.archetypes.get(signature)) |archetype| {
             return archetype;
         } else {
@@ -67,8 +67,8 @@ pub const ArchetypeStorage = struct {
     }
 
     /// Add an entity to the archetype with the given signature and component data
-    pub fn addEntityToArchetype(self: *ArchetypeStorage, entity: Entity, signature: ArchetypeSignature, component_sizes: []const usize, component_data: [][]const u8) !void {
-        const archetype = try self.getOrCreateArchetype(signature, component_sizes);
+    pub fn add(self: *ArchetypeStorage, entity: Entity, signature: ArchetypeSignature, component_sizes: []const usize, component_data: [][]const u8) !void {
+        const archetype = try self.getOrCreate(signature, component_sizes);
         try archetype.addEntity(entity, component_data);
         const idx = archetype.entities.items.len - 1;
 
@@ -81,7 +81,7 @@ pub const ArchetypeStorage = struct {
     }
 
     /// Get entity map entry (archetype + index)
-    pub fn getEntityEntry(self: *ArchetypeStorage, entity: Entity) ?EntityMapEntry {
+    pub fn get(self: *ArchetypeStorage, entity: Entity) ?EntityMapEntry {
         if (entity.id < self.entity_sparse_array.items.len) {
             return self.entity_sparse_array.items[entity.id];
         }
@@ -89,7 +89,7 @@ pub const ArchetypeStorage = struct {
     }
 
     /// Update entity map entry - UNSAFE: direct write after ensuring capacity
-    pub fn setEntityEntry(self: *ArchetypeStorage, entity: Entity, entry: EntityMapEntry) !void {
+    pub fn set(self: *ArchetypeStorage, entity: Entity, entry: EntityMapEntry) !void {
         const entity_id = entity.id;
         // Ensure capacity in one shot instead of append loop
         if (entity_id >= self.entity_sparse_array.items.len) {
@@ -104,7 +104,7 @@ pub const ArchetypeStorage = struct {
     }
 
     /// Remove entity from map
-    pub fn removeEntity(self: *ArchetypeStorage, entity: Entity) void {
+    pub fn remove(self: *ArchetypeStorage, entity: Entity) void {
         if (entity.id < self.entity_sparse_array.items.len) {
             self.entity_sparse_array.items[entity.id] = null;
         }

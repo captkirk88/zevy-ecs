@@ -132,7 +132,7 @@ pub const Manager = struct {
 
         // Register the entity in the archetype system with no components
         const empty_components = .{};
-        self.world.add(entity, @TypeOf(empty_components), empty_components) catch @panic("Failed to add empty entity to archetype storage");
+        self.world.add(entity, empty_components) catch @panic("Failed to add empty entity to archetype storage");
         return entity;
     }
 
@@ -159,9 +159,9 @@ pub const Manager = struct {
         const components_type = @TypeOf(components);
         if (@typeInfo(components_type) == .null) {
             const empty_components = .{};
-            self.world.add(entity, @TypeOf(empty_components), empty_components) catch @panic("Failed to add entity to archetype storage");
+            self.world.add(entity, empty_components) catch @panic("Failed to add entity to archetype storage");
         } else {
-            self.world.add(entity, components_type, components) catch @panic("Failed to add entity to archetype storage");
+            self.world.add(entity, components) catch @panic("Failed to add entity to archetype storage");
         }
         return entity;
     }
@@ -183,7 +183,7 @@ pub const Manager = struct {
         if (components.len == 0) {
             // Empty entity
             const empty_components = .{};
-            self.world.add(entity, @TypeOf(empty_components), empty_components) catch @panic("Failed to add empty entity to archetype storage");
+            self.world.add(entity, empty_components) catch @panic("Failed to add empty entity to archetype storage");
             return entity;
         }
 
@@ -214,7 +214,7 @@ pub const Manager = struct {
         }
 
         // Add all entities to archetype in one batch
-        try self.world.addBatch(entities.items, @TypeOf(components), components);
+        try self.world.addBatch(entities.items, components);
 
         // Return owned slice
         return entities.toOwnedSlice(allocator);
@@ -227,7 +227,6 @@ pub const Manager = struct {
 
     pub fn destroy(self: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) {
-            log.err("Attempt to destroy dead entity: id={d}, generation={d}", .{ entity.id, entity.generation });
             return errs.ECSError.EntityNotAlive;
         }
 
@@ -248,7 +247,7 @@ pub const Manager = struct {
     pub fn addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         const tuple = .{value};
-        try self.world.add(entity, @TypeOf(tuple), tuple);
+        try self.world.add(entity, tuple);
 
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         self.component_removed.discardHandled();
@@ -258,7 +257,6 @@ pub const Manager = struct {
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
     pub fn removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) {
-            log.err("Attempt to remove component from dead entity: component={s}, entity_id={d}", .{ @typeName(T), entity.id });
             return errs.ECSError.EntityNotAlive;
         }
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
@@ -358,7 +356,6 @@ pub const Manager = struct {
             });
             return ptr;
         } else {
-            log.warn("Resource already exists: {s}", .{@typeName(T)});
             return error.ResourceAlreadyExists;
         }
     }
