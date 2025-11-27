@@ -45,6 +45,23 @@ pub fn Relation(comptime Kind: type) type {
             Kind.relation_config
         else
             RelationConfig{};
+
+        pub fn eql(self: Relation(Kind), other: Relation(Kind)) bool {
+            return self.target.eql(other.target) and self.data == other.data;
+        }
+
+        /// Check if this relation type is exclusive.
+        /// If true, only one relation of this type can exist per entity.
+        pub fn isExclusive() bool {
+            return config.exclusive;
+        }
+
+        /// Check if this relation type is indexed.
+        /// If true, reverse lookups (getting parents from children) are fast.
+        /// If false, reverse lookups require scanning all entities.
+        pub fn isIndexed() bool {
+            return config.indexed;
+        }
     };
 }
 
@@ -87,8 +104,8 @@ const TypedRelationIndex = struct {
         return false;
     }
 
-    /// Add a relation between entities
-    pub fn add(self: *TypedRelationIndex, child: Entity, parent: Entity) !void {
+    /// Add a relation between entities.
+    pub fn add(self: *TypedRelationIndex, child: Entity, parent: Entity) error{OutOfMemory}!void {
         // Add to outgoing (child points to parent)
         const out_gop = try self.outgoing.getOrPut(child.id);
         if (!out_gop.found_existing) {
@@ -245,7 +262,7 @@ pub const RelationManager = struct {
         // For non-exclusive indexed relations, only use index (no component)
         // For non-indexed or exclusive relations, add component
         if (!config.indexed or config.exclusive) {
-            try manager.addComponentRaw(child, Relation(Kind), .{ .target = parent, .data = .{} });
+            try manager.addComponent(child, Relation(Kind), .{ .target = parent, .data = .{} });
         }
 
         // Add to index if this type is configured as indexed
@@ -276,7 +293,7 @@ pub const RelationManager = struct {
         // For non-exclusive indexed relations, only use index (no component)
         // For non-indexed or exclusive relations, add component
         if (!config.indexed or config.exclusive) {
-            try manager.addComponentRaw(child, Relation(Kind), .{
+            try manager.addComponent(child, Relation(Kind), .{
                 .target = parent,
                 .data = data,
             });

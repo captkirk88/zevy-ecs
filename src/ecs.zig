@@ -56,6 +56,8 @@ pub const Manager = struct {
     resources: std.AutoHashMap(u64, ResourceEntry), // TypeHash -> ResourceEntry
     systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
 
+    relations: *relations.RelationManager,
+
     // Component lifecycle event stores
     component_added: events.EventStore(ComponentEvent),
     component_removed: events.EventStore(ComponentEvent),
@@ -73,9 +75,10 @@ pub const Manager = struct {
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
             .component_added = events.EventStore(ComponentEvent).init(allocator, 64),
             .component_removed = events.EventStore(ComponentEvent).init(allocator, 64),
+            .relations = undefined,
         };
 
-        _ = try manager.addResource(relations.RelationManager, relations.RelationManager.init(allocator));
+        manager.relations = try manager.addResource(relations.RelationManager, relations.RelationManager.init(allocator));
 
         return manager;
     }
@@ -228,6 +231,9 @@ pub const Manager = struct {
             return errs.ECSError.EntityNotAlive;
         }
 
+        // Remove all relations involving this entity
+        self.relations.removeEntity(entity);
+
         // Remove from archetype storage
         self.world.remove(entity);
 
@@ -236,22 +242,6 @@ pub const Manager = struct {
 
         // Add ID to free list for reuse
         try self.free_ids.append(self.allocator, entity.id);
-    }
-
-    /// Add a component of type T to the given entity, or an error if entity is dead.
-    /// Internal method to add component without auto-syncing relations
-    /// Used by RelationManager to avoid double-syncing
-    pub fn addComponentRaw(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
-        if (!self.isAlive(entity)) {
-            log.err("Attempt to add component to dead entity: component={s}, entity_id={d}", .{ @typeName(T), entity.id });
-            return errs.ECSError.EntityNotAlive;
-        }
-        const tuple = .{value};
-        try self.world.add(entity, @TypeOf(tuple), tuple);
-
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
-        self.component_removed.discardHandled();
-        self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
     /// Add a component of type T to the given entity, or an error if entity is dead.
@@ -292,7 +282,6 @@ pub const Manager = struct {
 
     /// Get all components for an entity as an array of ComponentInstance
     /// Caller is responsible for freeing the returned array
-    /// Returns an error if the entity is not alive
     pub fn getAllComponents(self: *Manager, allocator: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
         return self.world.getAllComponents(allocator, entity);
