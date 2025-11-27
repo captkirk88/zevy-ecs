@@ -782,9 +782,4 @@ test "State management without registration throws errors" {
     // Test 3: Verify getActiveState returns null when state not registered
     const active_state = scheduler.getActiveState(GameState);
     try std.testing.expect(active_state == null);
-
-    // Note: Testing State(StateEnum) parameter panic would require a separate test
-    // that expects a panic, which is not easily done in Zig's test framework.
-    // The panic occurs in systems.params.zig StateSystemParam.apply() when
-    // a system with State parameter tries to access an unregistered state.
 }

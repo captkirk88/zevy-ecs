@@ -269,9 +269,7 @@ pub fn State(comptime StateEnum: type) type {
         pub const StateEnum_ = StateEnum;
         pub const _is_state_param = true;
 
-        // Import state module
-        const state_mod = @import("state.zig");
-        state_mgr: *state_mod.StateManager(StateEnum),
+        state_mgr: *state.StateManager(StateEnum),
 
         /// Check if a specific state value is currently active
         pub fn isActive(self: *const Self, state_enum: StateEnum) bool {
@@ -336,15 +334,11 @@ pub fn NextState(comptime StateEnum: type) type {
         pub const StateEnum_ = StateEnum;
         pub const _is_next_state_param = true;
 
-        // Import state module
-        const state_mod = @import("state.zig");
-        state_mgr: *state_mod.StateManager(StateEnum),
+        state_mgr: *state.StateManager(StateEnum),
 
         /// Transition to a specific state value immediately
-        pub fn set(self: *Self, state_enum: StateEnum) anyerror!void {
-            return self.state_mgr.transitionTo(state_enum) catch {
-                return error.StateTransitionFailed;
-            };
+        pub fn set(self: *Self, state_enum: StateEnum) error{StateNotRegistered}!void {
+            return try self.state_mgr.transitionTo(state_enum);
         }
     };
 }
@@ -356,14 +350,7 @@ pub const NextStateSystemParam = struct {
         // Check for pointer to NextState
         if (type_info == .pointer) {
             const Child = type_info.pointer.child;
-            const child_info = @typeInfo(Child);
-            if (child_info == .@"struct" and
-                @hasDecl(Child, "StateEnum_") and
-                @hasDecl(Child, "_is_next_state_param") and
-                @hasField(Child, "state_mgr"))
-            {
-                return Child.StateEnum_;
-            }
+            return analyze(Child);
         }
         // Also check for non-pointer (though we'll return a pointer)
         if (type_info == .@"struct" and
