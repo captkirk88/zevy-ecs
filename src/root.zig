@@ -95,6 +95,16 @@ pub const Relation = relations.Relation;
 pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");
 
+/// Panic handler that logs the panic message and exits gracefully
+pub const panic = std.debug.FullPanic(gracefulPanic);
+
+fn gracefulPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+    _ = first_trace_addr;
+    const log = std.log.scoped(.zevy_ecs);
+    log.err("PANIC: {s}", .{msg});
+    std.process.exit(1);
+}
+
 // Tests
 test {
     const builtin = @import("builtin");

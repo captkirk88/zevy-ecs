@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const log = std.log.scoped(.zevy_ecs);
+
 /// A generic event store that maintains events in a queue-like structure
 /// while allowing iteration without consuming events.
 /// Internally uses a ring buffer for efficient operations.
@@ -48,7 +50,10 @@ pub fn EventStore(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator, initial_capacity: usize) Self {
             return Self{
                 .allocator = allocator,
-                .events = std.ArrayList(Event).initCapacity(allocator, initial_capacity) catch |err| @panic(@errorName(err)),
+                .events = std.ArrayList(Event).initCapacity(allocator, initial_capacity) catch |err| {
+                    log.err("Failed to allocate EventStore with capacity {d}: {s}", .{ initial_capacity, @errorName(err) });
+                    @panic(@errorName(err));
+                },
                 .head = 0,
                 .tail = 0,
                 .len = 0,
@@ -69,12 +74,16 @@ pub fn EventStore(comptime T: type) type {
                 const new_capacity = self.capacity * 2;
 
                 // Create new array with proper size
-                var new_events = std.ArrayList(Event).initCapacity(self.allocator, new_capacity) catch |err| @panic(@errorName(err));
+                var new_events = std.ArrayList(Event).initCapacity(self.allocator, new_capacity) catch |err| {
+                    log.err("Failed to grow EventStore from {d} to {d}: {s}", .{ self.capacity, new_capacity, @errorName(err) });
+                    @panic(@errorName(err));
+                };
 
                 // Copy existing events in order
                 for (0..self.len) |i| {
                     const src_idx = self.getActualIndex(i);
                     new_events.append(self.allocator, self.events.items[src_idx]) catch |err| {
+                        log.err("Failed to copy events during EventStore growth: {s}", .{@errorName(err)});
                         new_events.deinit(self.allocator);
                         @panic(@errorName(err));
                     };
@@ -92,7 +101,10 @@ pub fn EventStore(comptime T: type) type {
 
             // Ensure ArrayList has space for the tail index
             while (self.events.items.len <= self.tail) {
-                self.events.append(self.allocator, undefined) catch |err| @panic(@errorName(err));
+                self.events.append(self.allocator, undefined) catch |err| {
+                    log.err("Failed to append to EventStore during push: {s}", .{@errorName(err)});
+                    @panic(@errorName(err));
+                };
             }
 
             // Write the new event directly at the tail position
@@ -189,7 +201,10 @@ pub fn EventStore(comptime T: type) type {
         pub fn getAllEvents(self: *const Self, allocator: std.mem.Allocator) []Event {
             if (self.len == 0) return &[_]Event{};
 
-            var result = allocator.alloc(Event, self.len) catch |err| @panic(@errorName(err));
+            var result = allocator.alloc(Event, self.len) catch |err| {
+                log.err("Failed to allocate slice for {d} events: {s}", .{ self.len, @errorName(err) });
+                @panic(@errorName(err));
+            };
             for (0..self.len) |i| {
                 result[i] = self.events.items[self.getActualIndex(i)];
             }
@@ -212,10 +227,14 @@ pub fn EventStore(comptime T: type) type {
             }
 
             // Create a new array with just the current events
-            var new_events = std.ArrayList(Event).initCapacity(self.allocator, self.len) catch |err| @panic(@errorName(err));
+            var new_events = std.ArrayList(Event).initCapacity(self.allocator, self.len) catch |err| {
+                log.err("Failed to shrink EventStore: allocation failure: {s}", .{@errorName(err)});
+                @panic(@errorName(err));
+            };
             var iter = self.iterator();
             while (iter.next()) |wrapper| {
                 new_events.append(self.allocator, wrapper.*) catch |err| {
+                    log.err("Failed to shrink EventStore: append failure: {s}", .{@errorName(err)});
                     new_events.deinit(self.allocator);
                     @panic(@errorName(err));
                 };

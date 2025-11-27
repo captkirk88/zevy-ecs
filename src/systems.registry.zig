@@ -3,6 +3,8 @@ const ecs = @import("ecs.zig");
 const reflect = @import("reflect.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
+
+const log = std.log.scoped(.zevy_ecs);
 const errors = @import("errors.zig");
 
 /// Default system parameter registry including Query, Res, Local, EventReader, EventWriter, State, and NextState
@@ -204,23 +206,27 @@ test "CustomSystemParam with Query, Res, Local fields" {
 
     const TestComponentA = struct { a: i32 };
     const TestComponentB = struct { b: u32 };
-    const QueryInclude = struct { a: TestComponentA, b: TestComponentB };
-    const QueryExclude = struct {};
     const ComplexType = struct {
-        query: query.Query(QueryInclude, QueryExclude),
+        /// Unfortunately with the way zig handles anonymous structs we need to define this separately
+        pub const IncludeTypes = struct { a: TestComponentA, b: TestComponentB };
+        query: query.Query(IncludeTypes, .{}),
         res: params.Res(i32),
         local: *params.Local(u64),
     };
     const CustomComplexParam = struct {
         pub fn analyze(comptime T: type) ?type {
             const ti = @typeInfo(T);
+            if (ti == .pointer) {
+                const Child = ti.pointer.child;
+                return analyze(Child);
+            }
             if (ti == .@"struct" and @hasField(T, "query") and @hasField(T, "res") and @hasField(T, "local")) {
                 return T;
             }
             return null;
         }
         pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
-            const query_val = try params.QuerySystemParam.apply(e, query.Query(QueryInclude, QueryExclude));
+            const query_val = e.query(ComplexType.IncludeTypes, .{});
             const res_value = try params.ResourceSystemParam.apply(e, i32);
             const local_ptr = try params.LocalSystemParam.apply(e, u64);
             return ComplexType{

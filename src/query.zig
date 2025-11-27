@@ -5,6 +5,8 @@ const archetype_mod = @import("archetype.zig");
 const Entity = @import("ecs.zig").Entity;
 const reflect = @import("reflect.zig");
 
+const log = std.log.scoped(.zevy_ecs);
+
 /// Check if a type is optional (?T) and return the child type if so
 fn isOptionalType(comptime T: type) bool {
     const info = @typeInfo(T);
@@ -89,17 +91,10 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                     // In this case, we need to extract the actual type from IncludeTypes
                     const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
                     var field_type: type = undefined;
-                    // if (T == type) {
-                    //     // Bare type in tuple/struct - return pointer to component
-                    //     if (component_type == Entity) {
-                    //         field_type = Entity;
-                    //     } else {
-                    //         field_type = *component_type;
-                    //     }
-                    // }
+                    // Determine field type based on whether it's optional or not
                     if (isOptionalType(T) and T != type) {
                         if (component_type == Entity) {
-                            field_type = ?Entity;
+                            @compileError("Query field '" ++ field.name ++ "' cannot be ?Entity. Entity is always available in query results and should never be optional.");
                         } else {
                             field_type = ?*component_type;
                         }
@@ -141,6 +136,15 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             };
             self.advanceToNextMatchingArchetype();
             return self;
+        }
+
+        /// Get the current entity in the iteration
+        /// Can only be called after calling next() and getting a non-null result
+        pub fn entity(self: *const @This()) Entity {
+            if (self.current_archetype) |arch| {
+                return arch.entities.items[self.entity_index];
+            }
+            @panic("Query.entity() called when no archetype is available. Ensure next() returned a non-null result before calling entity().");
         }
 
         fn archetypeMatches(_: *@This(), signature: archetype_mod.ArchetypeSignature) bool {
@@ -233,7 +237,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                         if (comptime component_type == Entity) {
                             // This field is for Entity
                             if (j != ENTITY_SENTINEL) {
-                                @panic("Entity field does not have ENTITY_SENTINEL index");
+                                @panic("Entity field '" ++ field.name ++ "' does not have ENTITY_SENTINEL index. Expected Entity to always map to ENTITY_SENTINEL sentinel value.");
                             }
                             @field(result, field.name) = arch.entities.items[mutable_self.entity_index];
                         } else {
@@ -243,10 +247,8 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                                 if (comptime is_optional) {
                                     @field(result, field.name) = null;
                                 } else {
-                                    @panic("Required component not found in archetype: " ++ @typeName(T));
+                                    @panic("Required component field '" ++ field.name ++ "' of type '" ++ @typeName(T) ++ "' is NOT included in Query's IncludeTypes. All non-optional fields in the result struct must be included in the Query's component set. Ensure '" ++ @typeName(component_type) ++ "' is in your Query specification.");
                                 }
-                            } else if (j == ENTITY_SENTINEL) {
-                                @panic("Component field has ENTITY_SENTINEL: " ++ @typeName(component_type));
                             } else {
                                 // Only assign pointer if struct field type is a pointer or optional pointer
                                 switch (@typeInfo(@TypeOf(result))) {
@@ -269,15 +271,17 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                                                     const ptr = @as(*component_type, @ptrCast(@alignCast(slice.ptr)));
                                                     @field(result, field.name) = ptr;
                                                 } else {
-                                                    @panic("Optional component field in struct is not a pointer type: " ++ @typeName(opt_info.child));
+                                                    @panic("Field '" ++ field.name ++ "' is optional but the child type must be a pointer (*Component). Got ?" ++ @typeName(opt_info.child) ++ " but expected ?*<Component>. Optional fields must be of form ?*T where T is a component.");
                                                 }
                                             },
                                             else => {
-                                                @panic("Component field in struct is not a pointer type: " ++ @typeName(struct_field_type));
+                                                @panic("Field '" ++ field.name ++ "' has type '" ++ @typeName(struct_field_type) ++ "' but component fields in Query results must be pointers (*T) or optional pointers (?*T). Query stores components as byte arrays and returns pointers to them.");
                                             },
                                         }
                                     },
-                                    else => @panic("Struct type is not a struct: " ++ @typeName(@TypeOf(result))),
+                                    else => {
+                                        @panic("Query result type '" ++ @typeName(@TypeOf(result)) ++ "' must be a struct or tuple type. All Query results must be passed as struct or tuple types.");
+                                    },
                                 }
                             }
                         }

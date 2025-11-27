@@ -12,6 +12,7 @@ const sys = @import("systems.zig");
 const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
 
+const log = std.log.scoped(.zevy_ecs);
 const is_debug = builtin.mode == .Debug;
 
 pub const errors = errs.ECSError;
@@ -222,7 +223,10 @@ pub const Manager = struct {
     }
 
     pub fn destroy(self: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        if (!self.isAlive(entity)) {
+            log.err("Attempt to destroy dead entity: id={d}, generation={d}", .{ entity.id, entity.generation });
+            return errs.ECSError.EntityNotAlive;
+        }
 
         // Remove from archetype storage
         self.world.remove(entity);
@@ -238,7 +242,10 @@ pub const Manager = struct {
     /// Internal method to add component without auto-syncing relations
     /// Used by RelationManager to avoid double-syncing
     pub fn addComponentRaw(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        if (!self.isAlive(entity)) {
+            log.err("Attempt to add component to dead entity: component={s}, entity_id={d}", .{ @typeName(T), entity.id });
+            return errs.ECSError.EntityNotAlive;
+        }
         const tuple = .{value};
         try self.world.add(entity, @TypeOf(tuple), tuple);
 
@@ -260,7 +267,10 @@ pub const Manager = struct {
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
     pub fn removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        if (!self.isAlive(entity)) {
+            log.err("Attempt to remove component from dead entity: component={s}, entity_id={d}", .{ @typeName(T), entity.id });
+            return errs.ECSError.EntityNotAlive;
+        }
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         try self.world.removeComponent(entity, T);
 
@@ -342,6 +352,7 @@ pub const Manager = struct {
             });
             return ptr;
         } else {
+            log.warn("Resource already exists: {s}", .{@typeName(T)});
             return error.ResourceAlreadyExists;
         }
     }
@@ -491,7 +502,10 @@ pub const Manager = struct {
     /// Run a cached system by its SystemHandle.
     pub fn runSystem(self: *Manager, sys_handle: anytype) anyerror!@TypeOf(sys_handle).return_type {
         const ReturnType = @TypeOf(sys_handle).return_type;
-        const sys_ptr = self.systems.get(sys_handle.handle) orelse return error.InvalidSystemHandle;
+        const sys_ptr = self.systems.get(sys_handle.handle) orelse {
+            log.debug("Invalid system handle: {d}", .{sys_handle.handle});
+            return error.InvalidSystemHandle;
+        };
         const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr));
         return try s.run(self, s.ctx);
     }
@@ -510,10 +524,16 @@ pub const Manager = struct {
         const SystemType = @TypeOf(system);
         const type_info = @typeInfo(SystemType);
         if (type_info != .@"struct") {
-            @compileError("cacheSystem expects a System struct, got: " ++ @typeName(SystemType));
+            @compileError(std.fmt.comptimePrint(
+                "cacheSystem expects a System struct, got: {s}",
+                .{@typeName(SystemType)},
+            ));
         }
         if (!@hasDecl(SystemType, "return_type")) {
-            @compileError("System struct must have a return_type declaration");
+            @compileError(std.fmt.comptimePrint(
+                "System struct must have a return_type declaration",
+                .{},
+            ));
         }
         break :blk sys.SystemHandle(SystemType.return_type);
     } {

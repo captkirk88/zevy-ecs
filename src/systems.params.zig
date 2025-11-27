@@ -1,5 +1,7 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
+
+const log = std.log.scoped(.zevy_ecs);
 const events = @import("events.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
@@ -173,7 +175,10 @@ pub const EventReaderSystemParam = struct {
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventReader(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
-            const event_store_res = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
+            const event_store_res = e.addResource(events.EventStore(T), store_ptr) catch |err| {
+                log.err("Failed to add EventStore for type {s}: {s}", .{ @typeName(T), @errorName(err) });
+                @panic(@errorName(err));
+            };
             return EventReader(T){ .event_store = event_store_res };
         };
         return EventReader(T){ .event_store = event_store };
@@ -234,7 +239,10 @@ pub const EventWriterSystemParam = struct {
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventWriter(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
             const store_ptr = events.EventStore(T).init(e.allocator, 16);
-            const stored_event_store = e.addResource(events.EventStore(T), store_ptr) catch |err| @panic(@errorName(err));
+            const stored_event_store = e.addResource(events.EventStore(T), store_ptr) catch |err| {
+                log.err("Failed to add EventStore for type {s}: {s}", .{ @typeName(T), @errorName(err) });
+                @panic(@errorName(err));
+            };
             return EventWriter(T){ .event_store = stored_event_store };
         };
         return EventWriter(T){ .event_store = event_store };
@@ -305,6 +313,7 @@ pub const StateSystemParam = struct {
             return State(StateEnum){ .state_mgr = state_mgr };
         }
 
+        log.err("State manager not found for state type: {s}", .{@typeName(StateEnum)});
         return error.StateManagerNotFound;
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
@@ -372,6 +381,7 @@ pub const NextStateSystemParam = struct {
 
         // Get or create the StateManager resource for this specific enum type
         const state_mgr = e.getResource(StateManagerType) orelse {
+            log.err("State manager not found for state transition: {s}", .{@typeName(StateEnum)});
             return error.StateManagerNotFound;
         };
 
@@ -434,6 +444,7 @@ pub const ResourceSystemParam = struct {
             // Return the wrapper by value - no pointer stability issues!
             return Res(T){ .ptr = @constCast(res) };
         } else {
+            log.err("Resource not found: {s}", .{@typeName(T)});
             return error.ResourceNotFound;
         }
     }
@@ -509,9 +520,15 @@ pub const SingleSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
         var q = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
-        const first = q.next() orelse return error.SingleFoundNoMatches;
+        const first = q.next() orelse {
+            log.debug("Single parameter expected exactly one entity but found none for type: {s}", .{@typeName(T)});
+            return error.SingleFoundNoMatches;
+        };
         // Ensure there is exactly one match
-        if (q.next() != null) return error.SingleFoundMultipleMatches;
+        if (q.next() != null) {
+            log.debug("Single parameter expected exactly one entity but found multiple for type: {s}", .{@typeName(T)});
+            return error.SingleFoundMultipleMatches;
+        }
         return T{ .item = first };
     }
 
@@ -544,7 +561,12 @@ pub const RelationsSystemParam = struct {
             const rel_mgr = relations.RelationManager.init(e.allocator);
             return try e.addResource(relations.RelationManager, rel_mgr);
         }
-        return e.getResource(relations.RelationManager) orelse error.RelationsManagerNotFound;
+        if (e.getResource(relations.RelationManager)) |rel_mgr| {
+            return rel_mgr;
+        } else {
+            log.err("Relations manager not found", .{});
+            return error.RelationsManagerNotFound;
+        }
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
@@ -619,11 +641,9 @@ pub const OnAddedSystemParam = struct {
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        // OnAdded items are owned by the caller, not the system param.
-        // The system param only passes a view of the data, so deinit should do nothing.
-        _ = e;
-        _ = ptr;
-        _ = Component;
+        // Cast the opaque pointer back to OnAdded and free its allocated items
+        const on_added: *OnAdded(Component) = @ptrCast(@alignCast(ptr));
+        e.allocator.free(on_added.items);
     }
 };
 
@@ -683,11 +703,9 @@ pub const OnRemovedSystemParam = struct {
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        // OnRemoved items are owned by the caller, not the system param.
-        // The system param only passes a view of the data, so deinit should do nothing.
-        _ = e;
-        _ = ptr;
-        _ = Component;
+        // Cast the opaque pointer back to OnRemoved and free its allocated items
+        const on_removed: *OnRemoved(Component) = @ptrCast(@alignCast(ptr));
+        e.allocator.free(on_removed.removed);
     }
 };
 

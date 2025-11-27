@@ -735,39 +735,46 @@ try system.run(&manager, system.ctx);
 
 ### Custom System Registries
 
-You can create custom system parameter types by implementing the `analyze` and `apply` functions, then merge them with the default registry. Below is an example of a `Local` parameter type that provides per-system persistent state.
+You can create custom system parameter types by implementing the `analyze` and `apply` functions, then merge them with the default registry. Below is an example of a custom system parameter that combines multiple built-in parameters.
 
 ```zig
-pub const LocalSystemParam = struct {
+const zevy_ecs = @import("zevy_ecs");
+pub const ComplexType = struct {
+    /// Unfortunately with the way zig handles anonymous structs we need to define this separately
+    pub const IncludeTypes = struct { a: ComponentA, b: ComponentB };
+    query: zevy_ecs.Query(IncludeTypes, .{}),
+    res: params.Res(i32),
+    local: *params.Local(u64),
+};
+
+const CustomComplexParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .@"struct" and
-            @hasField(T, "_value") and
-            @hasField(T, "_set") and
-            type_info.@"struct".fields.len == 2)
-        {
-            return type_info.@"struct".fields[0].type;
-        } else if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
+        const ti = @typeInfo(T);
+        if (ti == .pointer) {
+            const Child = ti.pointer.child;
             return analyze(Child);
+        }
+        if (ti == .@"struct" and @hasField(T, "query") and @hasField(T, "res") and @hasField(T, "local")) {
+            return T;
         }
         return null;
     }
-
-    pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!*systems.Local(T) {
-        // Local params need static storage that persists across system calls
-        // Each unique type T gets its own static storage
-        const static_storage = struct {
-            var local: systems.Local(T) = .{ ._value = undefined, ._set = false };
+    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
+        const query_val = e.query(ComplexType.IncludeTypes, .{});
+        const res_value = try params.ResourceSystemParam.apply(e, i32);
+        const local_ptr = try params.LocalSystemParam.apply(e, u64);
+        return ComplexType{
+            .query = query_val,
+            .res = res_value,
+            .local = local_ptr,
         };
-        return &static_storage.local;
     }
 };
 
-const CustomParamRegistry = zevy_ecs.mergeSystemParamRegistries(
+const CustomParamRegistry = zevy_ecs.MergedSystemParamRegistry(&[_]type{
     zevy_ecs.DefaultParamRegistry,
-    .{ LocalSystemParam },
-);
+    CustomComplexParam,
+});
 ```
 
 ### Serialization
