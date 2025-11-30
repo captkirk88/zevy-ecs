@@ -26,13 +26,13 @@ pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
 pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
     inline for (RegisteredParams) |T| {
         comptime {
-            if (!reflect.verifyFuncArgs(T, "analyze", &[_]type{type})) {
+            if (!reflect.hasFuncWithArgs(T, "analyze", &[_]type{type})) {
                 @compileError(std.fmt.comptimePrint(
                     "Each param must be a struct with 'pub fn analyze(comptime T: type) ?type' functions: {s}",
                     .{@typeName(T)},
                 ));
             }
-            if (!reflect.verifyFuncArgs(T, "apply", &[_]type{ *ecs.Manager, type })) {
+            if (!reflect.hasFuncWithArgs(T, "apply", &[_]type{ *ecs.Manager, type })) {
                 @compileError(std.fmt.comptimePrint(
                     "Each param must be a struct with 'pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T' functions: {s}",
                     .{@typeName(T)},

@@ -160,7 +160,7 @@ fn SystemWithArgsContext(comptime Args: type) type {
 /// Specialized trampoline for systems with injected arguments
 fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType: type, comptime ParamRegistry: type, comptime Args: type) *const fn (*ecs_mod.Manager, ?*anyopaque) anyerror!ReturnType {
     const system_type = @TypeOf(system_fn);
-    if (!comptime reflect.verifyFuncArgs(ParamRegistry, "apply", &[_]type{ *ecs_mod.Manager, type })) {
+    if (!comptime reflect.hasFuncWithArgs(ParamRegistry, "apply", &[_]type{ *ecs_mod.Manager, type })) {
         @compileError("ParamRegistry must have an 'apply' function with signature: fn (*ecs_mod.Manager, type) type");
     }
     const log = std.log.scoped(.zevy_ecs);
@@ -223,7 +223,7 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
 
             // Build args tuple with mutable resolved args
             const all_args_tuple = .{ecs} ++ context.args ++ resolved_args;
-            
+
             // Deallocate any system param resources after the system finishes.
             // We need to call deinit for each resolved argument type if it provides a deinit implementation.
             // This must be done in a defer that wraps the actual system call to ensure cleanup happens AFTER execution.
@@ -234,7 +234,7 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
                     ParamRegistry.deinit(ecs, resolved_ptr, ParamType);
                 }
             }
-            
+
             if (is_error_union) {
                 return try @call(.auto, fn_ptr_typed, all_args_tuple);
             } else {
@@ -366,11 +366,12 @@ pub fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: ty
         inline for (fn_info.params[1..]) |param| {
             const param_type = param.type.?;
             // Check if the type has a debugInfo decl (which should be a const string) and use that, otherwise use @typeName
+            // TODO use new reflect.ReflectInfo
             const type_name: []const u8 = blk2: {
                 const type_info = @typeInfo(param_type);
                 // Only check for debugInfo on struct/union/enum types
                 const can_have_decl = type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum";
-                if (can_have_decl and @hasDecl(param_type, "debugInfo")) {
+                if (can_have_decl and comptime reflect.hasFunc(param_type, "debugInfo")) {
                     break :blk2 comptime param_type.debugInfo();
                 }
                 break :blk2 @typeName(param_type);
