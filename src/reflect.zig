@@ -1447,11 +1447,13 @@ test "reflect - ReflectInfo eql" {
     try std.testing.expect(comptime !ri_type1.eql(&ri_type2));
 }
 
-test "reflect - PackedStruct TypeInfo" {
+test "reflect - PackedStruct vs UnpackedStruct" {
     const PackedStruct = packed struct {
         a: u8,
         b: u32,
     };
+
+    const UnpackedStruct = struct { a: u8, b: u32 };
 
     const ti = comptime TypeInfo.from(PackedStruct);
 
@@ -1461,12 +1463,24 @@ test "reflect - PackedStruct TypeInfo" {
     std.debug.print("\tFields:\n", .{});
     inline for (ti.fields) |field| {
         std.debug.print("\t- Name: {s}\n", .{field.name});
-        std.debug.print("\t- Offset: {d}\n", .{field.offset});
-        std.debug.print("\t- Type: {s}\n", .{field.type.name});
+        std.debug.print("\t\t- Offset: {d}\n", .{field.offset});
+        std.debug.print("\t\t- Type: {s}\n", .{field.type.name});
     }
     // Packed struct is backed by integer type, @sizeOf returns padded size (8 bytes for u40 backing)
     try std.testing.expectEqual(@as(usize, @sizeOf(PackedStruct)), ti.size);
     try std.testing.expectEqual(@as(usize, 2), ti.fields.len);
     try std.testing.expectEqualStrings("a", ti.fields[0].name);
     try std.testing.expectEqualStrings("b", ti.fields[1].name);
+
+    const uti = comptime TypeInfo.from(UnpackedStruct);
+
+    try std.testing.expect(ti.size == uti.size);
+
+    std.debug.print("UnpackedStruct Fields:\n", .{});
+    inline for (uti.fields) |field| {
+        std.debug.print("\t- Name: {s}, Offset: {d}\n", .{ field.name, field.offset });
+    }
+
+    try std.testing.expect(ti.fields[0].offset != uti.fields[0].offset);
+    try std.testing.expect(ti.fields[1].offset != uti.fields[1].offset);
 }
