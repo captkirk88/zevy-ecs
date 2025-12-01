@@ -1,9 +1,33 @@
 const std = @import("std");
 
+/// Simple comptime-friendly FNV-1a hash that doesn't require branch quota increases.
+/// Used for type identification throughout the reflection system.
+fn comptimeHash(comptime name: []const u8) u64 {
+    var hash: u64 = 14695981039346656037; // FNV offset basis
+    for (name) |c| {
+        hash ^= c;
+        hash *%= 1099511628211; // FNV prime
+    }
+    return hash;
+}
+
+/// Shallow type information for field types - doesn't recurse into nested types.
+/// This avoids comptime explosion when reflecting complex types with many nested fields.
+pub const ShallowTypeInfo = struct {
+    type: type,
+    name: []const u8,
+    size: usize,
+
+    /// Get full TypeInfo for this type (computed lazily)
+    pub fn getFullInfo(self: *const ShallowTypeInfo) TypeInfo {
+        return comptime TypeInfo.from(self.type);
+    }
+};
+
 pub const FieldInfo = struct {
     name: []const u8,
     offset: usize,
-    type: TypeInfo,
+    type: ShallowTypeInfo,
 
     pub fn from(comptime T: type, comptime field_name: []const u8) ?FieldInfo {
         const type_info = @typeInfo(T);
@@ -16,8 +40,13 @@ pub const FieldInfo = struct {
         for (fields) |field| {
             if (std.mem.eql(u8, field.name, field_name)) {
                 return comptime FieldInfo{
+                    .name = field.name,
                     .offset = @offsetOf(T, field.name),
-                    .type = TypeInfo.from(field.type),
+                    .type = ShallowTypeInfo{
+                        .type = field.type,
+                        .name = @typeName(field.type),
+                        .size = @sizeOf(field.type),
+                    },
                 };
             }
         }
@@ -64,7 +93,7 @@ pub const FuncInfo = struct {
                 const return_ref = if (fn_type_info.@"fn".return_type) |ret_type| ReflectInfo{ .type = comptime TypeInfo.from(ret_type) } else null;
 
                 return FuncInfo{
-                    .hash = std.hash.Wyhash.hash(0, std.fmt.comptimePrint(
+                    .hash = comptimeHash(std.fmt.comptimePrint(
                         "{s}{s}",
                         .{ @typeName(type_info.type), func_name },
                     )),
@@ -140,7 +169,7 @@ pub const FuncInfo = struct {
         }
 
         var type_info = @typeInfo(FuncType);
-        const hash = std.hash.Wyhash.hash(0, @typeName(FuncType));
+        const hash = comptimeHash(@typeName(FuncType));
         // create a stub ReflectInfo for this func so recursive references can find it
         const stub_reflect = ReflectInfo{ .func = FuncInfo{
             .hash = hash,
@@ -159,23 +188,29 @@ pub const FuncInfo = struct {
             ));
         }
         var param_infos: [type_info.@"fn".params.len]ReflectInfo = undefined;
+        var valid_params: usize = 0;
         inline for (type_info.@"fn".params, 0..) |param, i| {
+            _ = i;
+            // Handle null param.type (anytype parameters)
+            if (param.type == null) {
+                return null;
+            }
             const ti = @typeInfo(@TypeOf(param.type));
-            const param_type = if (ti == .optional) param.type.? else param.type;
+            const param_type = if (ti == .optional) param.type.? else param.type.?;
             if (comptime toReflectInfo(param_type, next_visited)) |info| {
-                param_infos[i] = info;
+                param_infos[valid_params] = info;
+                valid_params += 1;
             } else {
-                @compileError(std.fmt.comptimePrint(
-                    "FuncInfo parameter type not supported for reflection: {s}",
-                    .{@typeName(param_type)},
-                ));
+                // Skip unsupported parameter types (like *anyopaque) instead of erroring
+                // Return null to indicate this function can't be fully reflected
+                return null;
             }
         }
         const return_type_info = if (type_info.@"fn".return_type) |ret_type| comptime toReflectInfo(ret_type, next_visited) else null;
         return FuncInfo{
             .hash = hash,
             .name = @typeName(FuncType),
-            .params = param_infos[0..type_info.@"fn".params.len],
+            .params = param_infos[0..valid_params],
             .return_type = return_type_info,
         };
     }
@@ -187,58 +222,42 @@ pub const TypeInfo = struct {
     type: type,
     name: []const u8,
     fields: []const FieldInfo,
-    decls: []const ReflectInfo,
-    funcs: []const FuncInfo,
+
+    // Note: decls and funcs are computed lazily via getDecl/getFunc/getDeclNames/getFuncNames
+    // to avoid exponential comptime growth when processing complex external types.
 
     fn from(comptime T: type) TypeInfo {
         return comptime toTypeInfo(T, &[_]ReflectInfo{});
     }
 
     /// Helper for TypeInfo.from with cycle detection
+    /// Uses direct type comparison at comptime instead of hashing to avoid branch quota issues.
     fn toTypeInfo(comptime T: type, comptime visited: []const ReflectInfo) TypeInfo {
+        const type_name = @typeName(T);
+
+        // Use direct type comparison for cycle detection - cheaper at comptime
         inline for (visited) |info| {
             switch (info) {
                 .type => |ti| {
-                    if (ti.hash == comptime std.hash.Wyhash.hash(0, @typeName(T))) return ti;
+                    if (ti.type == T) return ti;
                 },
                 else => {},
             }
         }
+
+        // Compute hash only once at the end, not for cycle detection
+        const hash = comptimeHash(type_name);
+
         // create stub reflect for T and append to visited so recursive refs can find it
-        const stub_reflect = ReflectInfo{ .type = TypeInfo{ .hash = std.hash.Wyhash.hash(0, @typeName(T)), .size = @sizeOf(T), .type = T, .name = @typeName(T), .fields = &[_]FieldInfo{}, .decls = &[_]ReflectInfo{}, .funcs = &[_]FuncInfo{} } };
+        const stub_reflect = ReflectInfo{ .type = TypeInfo{ .hash = hash, .size = @sizeOf(T), .type = T, .name = type_name, .fields = &[_]FieldInfo{} } };
         const next_visited = visited ++ [_]ReflectInfo{stub_reflect};
-        const decls = TypeInfo.buildDecls(T, next_visited);
-        var funcs: [16]FuncInfo = undefined; // reasonable limit
-        var func_count: usize = 0;
-        inline for (decls) |decl| {
-            switch (decl) {
-                .func => |fi| {
-                    funcs[func_count] = fi;
-                    func_count += 1;
-                },
-                else => {},
-            }
-        }
-        const funcs_slice = funcs[0..func_count];
-        var new_decls: [decls.len - func_count]ReflectInfo = undefined;
-        var decl_count: usize = 0;
-        inline for (decls) |decl| {
-            switch (decl) {
-                .type => |ti| {
-                    new_decls[decl_count] = ReflectInfo{ .type = ti };
-                    decl_count += 1;
-                },
-                else => {},
-            }
-        }
+
         return comptime TypeInfo{
-            .hash = std.hash.Wyhash.hash(0, @typeName(T)),
+            .hash = hash,
             .size = @sizeOf(T),
             .type = T,
-            .name = @typeName(T),
+            .name = type_name,
             .fields = TypeInfo.buildFields(T, next_visited),
-            .decls = &new_decls,
-            .funcs = funcs_slice,
         };
     }
 
@@ -251,22 +270,33 @@ pub const TypeInfo = struct {
         return null;
     }
 
-    pub fn getDecl(self: *const TypeInfo, decl_name: []const u8) ?TypeInfo {
-        inline for (self.decls) |decl| {
-            if (std.mem.eql(u8, decl.name, decl_name)) {
-                return decl;
-            }
-        }
-        return null;
+    /// Lazily look up a decl (type constant) by name.
+    /// This avoids comptime explosion by only processing the requested decl.
+    pub fn getDecl(self: *const TypeInfo, comptime decl_name: []const u8) ?TypeInfo {
+        return comptime lazyGetDecl(self.type, decl_name);
     }
 
-    pub fn getFunc(self: *const TypeInfo, func_name: []const u8) ?FuncInfo {
-        inline for (self.funcs) |func| {
-            if (std.mem.eql(u8, func.name, func_name)) {
-                return func;
-            }
-        }
-        return null;
+    /// Lazily look up a function by name.
+    /// This avoids comptime explosion by only processing the requested function.
+    pub fn getFunc(self: *const TypeInfo, comptime func_name: []const u8) ?FuncInfo {
+        return comptime lazyGetFunc(self.type, func_name);
+    }
+
+    /// Get the names of all type decls (non-function declarations).
+    /// Returns a comptime slice of decl names that can be iterated.
+    pub fn getDeclNames(self: *const TypeInfo) []const []const u8 {
+        return comptime lazyGetDeclNames(self.type, .types_only);
+    }
+
+    /// Get the names of all function decls.
+    /// Returns a comptime slice of function names that can be iterated.
+    pub fn getFuncNames(self: *const TypeInfo) []const []const u8 {
+        return comptime lazyGetDeclNames(self.type, .funcs_only);
+    }
+
+    /// Check if this type has a decl with the given name.
+    pub fn hasDecl(self: *const TypeInfo, comptime decl_name: []const u8) bool {
+        return @hasDecl(self.type, decl_name);
     }
 
     pub inline fn toString(self: *const TypeInfo) []const u8 {
@@ -287,6 +317,7 @@ pub const TypeInfo = struct {
     }
 
     fn buildFields(comptime T: type, comptime visited: []const ReflectInfo) []const FieldInfo {
+        _ = visited; // No longer needed since we don't recurse
         const type_info = @typeInfo(T);
         if (type_info != .@"struct") {
             return &[_]FieldInfo{};
@@ -298,61 +329,26 @@ pub const TypeInfo = struct {
             @compileError("Type is not a struct, enum, or union");
         };
         var field_infos: [fields.len]FieldInfo = undefined;
-        for (fields, 0..fields.len) |field, i| {
-            field_infos[i] = FieldInfo{
+        var field_count: usize = 0;
+        for (fields) |field| {
+            // Skip fields with opaque types
+            const field_type_info = @typeInfo(field.type);
+            if (field_type_info == .@"opaque") continue;
+            if (field_type_info == .pointer and @typeInfo(field_type_info.pointer.child) == .@"opaque") continue;
+
+            // Use shallow type info - doesn't recurse into nested types
+            field_infos[field_count] = FieldInfo{
                 .name = field.name,
                 .offset = @offsetOf(T, field.name),
-                .type = TypeInfo.toTypeInfo(field.type, visited),
+                .type = ShallowTypeInfo{
+                    .type = field.type,
+                    .name = @typeName(field.type),
+                    .size = @sizeOf(field.type),
+                },
             };
+            field_count += 1;
         }
-        return @constCast(field_infos[0..fields.len]);
-    }
-
-    fn buildDecls(comptime T: type, comptime visited: []const ReflectInfo) []const ReflectInfo {
-        const type_info = @typeInfo(T);
-        const decls = getDecls(type_info);
-        if (decls.len == 0) {
-            return &[_]ReflectInfo{};
-        }
-        var decl_type_infos: [decls.len]ReflectInfo = undefined;
-        var i: usize = 0;
-        inline for (decls) |decl| {
-            const DeclType: type = @TypeOf(@field(T, decl.name));
-            const decl_type_info = @typeInfo(DeclType);
-            const maybe_info = toReflectInfo(DeclType, visited);
-            if (maybe_info) |mi| {
-                // If it's a function, ensure the stored name is the declaration identifier (e.g., method name)
-                switch (mi) {
-                    .func => |fi| {
-                        var new_fi = fi;
-                        new_fi.name = decl.name;
-                        decl_type_infos[i] = ReflectInfo{ .func = new_fi };
-                    },
-                    .type => |ti| {
-                        var new_ti = ti;
-                        new_ti.name = decl.name;
-                        decl_type_infos[i] = ReflectInfo{ .type = new_ti };
-                    },
-                }
-            } else {
-                // Insert stub ReflectInfo for cycles or unsupported types
-                if (decl_type_info == .@"fn") {
-                    // Build a FuncInfo from the function type and label it with the decl name
-                    var func_info = FuncInfo.toFuncInfo(DeclType, visited) orelse FuncInfo{
-                        .name = decl.name,
-                        .params = &[_]ReflectInfo{},
-                        .return_type = null,
-                    };
-                    func_info.name = decl.name;
-                    decl_type_infos[i] = ReflectInfo{ .func = func_info };
-                } else {
-                    const decl_refl_info = toReflectInfo(DeclType, visited);
-                    if (decl_refl_info) |dri| decl_type_infos[i] = dri else continue;
-                }
-            }
-            i += 1;
-        }
-        return @constCast(decl_type_infos[0..i]);
+        return @constCast(field_infos[0..field_count]);
     }
 };
 
@@ -417,22 +413,32 @@ pub const ReflectInfo = union(enum) {
 };
 
 fn toReflectInfo(comptime T: type, comptime visited: []const ReflectInfo) ?ReflectInfo {
-    // If already visited, return the visited ReflectInfo
+    // If already visited, return the visited ReflectInfo - use direct type comparison
     inline for (visited) |info| {
         switch (info) {
             .type => |ti| {
-                if (ti.hash == comptime std.hash.Wyhash.hash(0, @typeName(T))) return info;
+                if (ti.type == T) return info;
             },
             .func => |fi| {
-                if (fi.hash == comptime std.hash.Wyhash.hash(0, @typeName(T))) return info;
+                // For functions, compare names since we don't have direct type
+                if (std.mem.eql(u8, fi.name, @typeName(T))) return info;
             },
         }
     }
     const type_info = @typeInfo(T);
 
+    // Handle opaque types (like anyopaque) - return null as they can't be reflected
+    if (type_info == .@"opaque") {
+        return null;
+    }
+
     // pointer/optional/array/error_union and primitive wrappers just delegate
     if (type_info == .pointer) {
         const Child = type_info.pointer.child;
+        // Handle pointer to opaque (like *anyopaque)
+        if (@typeInfo(Child) == .@"opaque") {
+            return null;
+        }
         return toReflectInfo(Child, visited);
     } else if (type_info == .optional) {
         const Child = type_info.optional.child;
@@ -466,6 +472,131 @@ fn toReflectInfo(comptime T: type, comptime visited: []const ReflectInfo) ?Refle
     }
 
     return null;
+}
+
+/// Mode for filtering decl names
+const DeclNameMode = enum {
+    types_only,
+    funcs_only,
+    all,
+};
+
+/// Lazily get names of declarations without processing them.
+/// This avoids the comptime explosion by just collecting names.
+fn lazyGetDeclNames(comptime T: type, comptime mode: DeclNameMode) []const []const u8 {
+    const type_info = @typeInfo(T);
+    const decls = getDecls(type_info);
+    if (decls.len == 0) {
+        return &[_][]const u8{};
+    }
+
+    var names: [decls.len][]const u8 = undefined;
+    var count: usize = 0;
+
+    inline for (decls) |decl| {
+        const DeclType = @TypeOf(@field(T, decl.name));
+        const decl_type_info = @typeInfo(DeclType);
+        const is_func = decl_type_info == .@"fn";
+
+        const include = switch (mode) {
+            .types_only => !is_func,
+            .funcs_only => is_func,
+            .all => true,
+        };
+
+        if (include) {
+            names[count] = decl.name;
+            count += 1;
+        }
+    }
+
+    return names[0..count];
+}
+
+/// Lazily look up a single decl (type constant) by name.
+/// Only processes the requested decl, avoiding comptime explosion.
+fn lazyGetDecl(comptime T: type, comptime decl_name: []const u8) ?TypeInfo {
+    if (!@hasDecl(T, decl_name)) {
+        return null;
+    }
+
+    const DeclType = @TypeOf(@field(T, decl_name));
+    const decl_type_info = @typeInfo(DeclType);
+
+    // Only return TypeInfo for non-functions (type constants)
+    if (decl_type_info == .@"fn") {
+        return null;
+    }
+
+    // For type constants, we need to get the actual type value
+    if (DeclType == type) {
+        const actual_type = @field(T, decl_name);
+        return TypeInfo.from(actual_type);
+    }
+
+    // For struct/enum/union instances, return their type info
+    if (decl_type_info == .@"struct" or decl_type_info == .@"enum" or decl_type_info == .@"union") {
+        return TypeInfo.from(DeclType);
+    }
+
+    return null;
+}
+
+/// Lazily look up a single function by name.
+/// Only processes the requested function, avoiding comptime explosion.
+fn lazyGetFunc(comptime T: type, comptime func_name: []const u8) ?FuncInfo {
+    if (!@hasDecl(T, func_name)) {
+        return null;
+    }
+
+    const DeclType = @TypeOf(@field(T, func_name));
+    const decl_type_info = @typeInfo(DeclType);
+
+    if (decl_type_info != .@"fn") {
+        return null;
+    }
+
+    // Check for unsupported parameter types
+    inline for (decl_type_info.@"fn".params) |param| {
+        if (param.type) |pt| {
+            const pt_info = @typeInfo(pt);
+            if (pt_info == .@"opaque") {
+                return null;
+            }
+            if (pt_info == .pointer and @typeInfo(pt_info.pointer.child) == .@"opaque") {
+                return null;
+            }
+        } else {
+            // anytype parameter - can't reflect
+            return null;
+        }
+    }
+
+    // Build FuncInfo for this specific function
+    var param_infos: [decl_type_info.@"fn".params.len]ReflectInfo = undefined;
+    var valid_params: usize = 0;
+
+    inline for (decl_type_info.@"fn".params) |param| {
+        const param_type = param.type.?;
+        if (toReflectInfo(param_type, &[_]ReflectInfo{})) |info| {
+            param_infos[valid_params] = info;
+            valid_params += 1;
+        } else {
+            return null;
+        }
+    }
+
+    const return_type_info = if (decl_type_info.@"fn".return_type) |ret_type|
+        toReflectInfo(ret_type, &[_]ReflectInfo{})
+    else
+        null;
+
+    return FuncInfo{
+        .hash = comptimeHash(std.fmt.comptimePrint("{s}{s}", .{ @typeName(T), func_name })),
+        .name = func_name,
+        .params = param_infos[0..valid_params],
+        .return_type = return_type_info,
+    };
 }
 
 pub fn getTypeInfo(comptime T: type) TypeInfo {
@@ -1128,7 +1259,9 @@ test "reflect - function type" {
     }
 }
 
-test "reflect - fromMethod and decls" {
+test "reflect - TypeInfo with lazy decl/func access" {
+    // Decls and funcs are now accessed lazily to avoid comptime branch quota
+    // explosion when processing complex external types (like raylib).
     const S = struct {
         const Inner = struct { a: u32 };
 
@@ -1148,42 +1281,39 @@ test "reflect - fromMethod and decls" {
     inline for (ti.fields) |field| {
         std.debug.print("\t- Name: {s} Offset: {d}, Type: {s}\n", .{ field.name, field.offset, field.type.name });
     }
-    std.debug.print("\tDecls:\n", .{});
-    inline for (ti.decls) |decl| {
-        switch (decl) {
-            .type => |dti| {
-                std.debug.print("\t- {s}\n", .{dti.toString()});
-            },
-            else => {},
-        }
-    }
-    std.debug.print("\tFuncs:\n", .{});
-    inline for (ti.funcs) |func| {
-        // debug: print raw stored name and its length so we can see what's present
-        std.debug.print("\t- {s}\n", .{func.toString()});
-    }
 
-    // Ensure the method appears in the TypeInfo.funcs list
-    try std.testing.expect(ti.getFunc("add") != null);
+    // Verify basic type info
+    try std.testing.expect(ti.hash != 0);
+    try std.testing.expectEqual(@as(usize, 1), ti.size);
+    try std.testing.expectEqual(@as(usize, 1), ti.fields.len);
+    try std.testing.expectEqualStrings("field", ti.fields[0].name);
 
-    const fi = FuncInfo.fromMethod(&ti, "add") orelse unreachable;
-    try std.testing.expectEqualStrings("add", fi.name);
-    try std.testing.expectEqual(@as(usize, 1), fi.params.len);
-
-    var saw_param = false;
-    inline for (fi.params) |p| {
-        switch (p) {
-            .type => |pti| {
-                if (std.mem.eql(u8, pti.name, @typeName(i32))) saw_param = true;
-            },
-            else => {},
-        }
+    // Test lazy function access - use comptime block for iteration
+    std.debug.print("\tFunc names: ", .{});
+    const func_names = comptime ti.getFuncNames();
+    inline for (func_names) |name| {
+        std.debug.print("{s} ", .{name});
     }
-    try std.testing.expect(saw_param);
+    std.debug.print("\n", .{});
 
-    try std.testing.expect(fi.return_type != null);
-    switch (fi.return_type.?) {
-        .type => |rti| try std.testing.expectEqualStrings(@typeName(i32), rti.name),
-        else => try std.testing.expect(false),
+    const add_func = comptime ti.getFunc("add") orelse {
+        @compileError("Failed to get 'add' function");
+    };
+    try std.testing.expectEqualStrings("add", add_func.name);
+    try std.testing.expectEqual(@as(usize, 1), add_func.params.len);
+    std.debug.print("\tFunc 'add': {s}\n", .{add_func.toString()});
+
+    // Test lazy decl access
+    std.debug.print("\tDecl names: ", .{});
+    const decl_names = comptime ti.getDeclNames();
+    inline for (decl_names) |name| {
+        std.debug.print("{s} ", .{name});
     }
+    std.debug.print("\n", .{});
+
+    // Check hasDecl - needs comptime
+    try std.testing.expect(comptime ti.hasDecl("add"));
+    try std.testing.expect(comptime ti.hasDecl("I"));
+    try std.testing.expect(comptime ti.hasDecl("Inner"));
+    try std.testing.expect(comptime !ti.hasDecl("nonexistent"));
 }
