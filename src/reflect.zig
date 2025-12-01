@@ -1279,7 +1279,9 @@ test "reflect - TypeInfo with lazy decl/func access" {
     std.debug.print("\tHash: {x}\n", .{ti.hash});
     std.debug.print("\tFields:\n", .{});
     inline for (ti.fields) |field| {
-        std.debug.print("\t- Name: {s} Offset: {d}, Type: {s}\n", .{ field.name, field.offset, field.type.name });
+        std.debug.print("\t- Name: {s}\n", .{field.name});
+        std.debug.print("\t- Offset: {d}\n", .{field.offset});
+        std.debug.print("\t- Type: {s}\n", .{field.type.name});
     }
 
     // Verify basic type info
@@ -1304,10 +1306,19 @@ test "reflect - TypeInfo with lazy decl/func access" {
     std.debug.print("\tFunc 'add': {s}\n", .{add_func.toString()});
 
     // Test lazy decl access
-    std.debug.print("\tDecl names: ", .{});
+    std.debug.print("\tDecls:\n", .{});
     const decl_names = comptime ti.getDeclNames();
     inline for (decl_names) |name| {
-        std.debug.print("{s} ", .{name});
+        const decl = comptime ti.getDecl(name) orelse unreachable;
+        std.debug.print("\t- Name: {s}\n", .{name});
+        std.debug.print("\t- Type: {s}\n", .{@typeName(decl.type)});
+        std.debug.print("\t- Hash: {x}\n", .{decl.hash});
+        std.debug.print("\t- Size: {d}\n", .{decl.size});
+        std.debug.print("\t- Fields: {d}\n", .{decl.fields.len});
+        inline for (decl.fields) |field| {
+            std.debug.print("\t\t- Field Name: {s}\n", .{field.name});
+            std.debug.print("\t\t- Field Type: {s}\n", .{field.type.name});
+        }
     }
     std.debug.print("\n", .{});
 
