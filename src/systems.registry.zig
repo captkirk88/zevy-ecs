@@ -66,7 +66,7 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
 
         fn analyze(comptime ParamType: type) ?type {
             inline for (registered_params) |SystemParam| {
-                if (!reflect.verifyFuncArgs(SystemParam, "analyze", &[_]type{type})) {
+                if (!comptime reflect.hasFuncWithArgs(SystemParam, "analyze", &[_]type{type})) {
                     @compileError("Each param must be a struct with 'analyze' functions: " ++ @typeName(SystemParam));
                 }
                 const result = SystemParam.analyze(ParamType);
@@ -83,7 +83,7 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
                     return try SystemParam.apply(ecs_instance, param);
                 }
             }
-            @compileError(std.fmt.comptimePrint("No registered SystemParam can handle type: {s}", .{@typeName(ParamType)}));
+            return errors.SystemParamError.UnknownSystemParam;
         }
 
         pub fn deinit(ecs_instance: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {

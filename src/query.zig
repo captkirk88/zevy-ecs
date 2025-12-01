@@ -147,6 +147,26 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             @panic("Query.entity() called when no archetype is available. Ensure next() returned a non-null result before calling entity().");
         }
 
+        /// Returns true if the query has no matching entities
+        pub fn hasNext(self: *const @This()) bool {
+            // If we have a current archetype with entities remaining, not empty
+            if (self.current_archetype) |arch| {
+                if (self.entity_index < arch.entities.items.len) {
+                    return true;
+                }
+            }
+            // Check if there are any more matching archetypes with entities
+            // We need to peek ahead without modifying state, so we iterate a copy
+            var temp_iter = self.arch_iter;
+            while (temp_iter.next()) |entry| {
+                const arch = entry.value_ptr.*;
+                if (@constCast(self).archetypeMatches(arch.signature) and arch.entities.items.len > 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         fn archetypeMatches(_: *@This(), signature: archetype_mod.ArchetypeSignature) bool {
             // Check all required include types are present
             inline for (include_info.@"struct".fields) |field| {

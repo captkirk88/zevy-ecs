@@ -146,13 +146,11 @@ pub fn main() !void {
 }
 
 fn movementSystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(
         struct { pos: Position, vel: Velocity }, // Include components
         .{}, // No exclusions
     ),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         item.pos.x += item.vel.dx;
         item.pos.y += item.vel.dy;
@@ -279,20 +277,18 @@ var entity_query = manager.query(
 
 ### Systems
 
-Systems are functions that operate on entities and resources. They use a parameter injection system for automatic dependency resolution.
+Systems are functions that operate on entities and resources. They use a parameter injection system for automatic dependency resolution. All parameters are automatically injected.
 
 ```zig
 const DeltaTime = struct { value: f32 };
 
-// System function - parameters are automatically resolved
+// System function - all parameters are automatically resolved
 fn movementSystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(
         struct { pos: Position, vel: Velocity },
         struct {},
     ),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         item.pos.x += item.vel.dx;
         item.pos.y += item.vel.dy;
@@ -301,17 +297,35 @@ fn movementSystem(
 
 // System with resources
 fn damageSystem(
-    manager: *zevy_ecs.Manager,
     dt: zevy_ecs.Res(DeltaTime),
     query: zevy_ecs.Query(
         struct { health: Health },
         struct {},
     ),
 ) void {
-    _ = manager;
+    _ = dt;
     while (query.next()) |item| {
         if (item.health.current > 0) {
             item.health.current -= 1;
+        }
+    }
+}
+
+// System with Commands for deferred operations
+fn spawnSystem(
+    commands: *zevy_ecs.Commands,
+    query: zevy_ecs.Query(
+        struct { spawner: Spawner },
+        struct {},
+    ),
+) !void {
+    while (query.next()) |item| {
+        if (item.spawner.should_spawn) {
+            // Deferred entity creation - entity created when deinit() is called
+            var entity_cmds = try commands.create();
+            defer entity_cmds.deinit();
+            _ = try entity_cmds.add(Position, .{ .x = 0, .y = 0 });
+            _ = try entity_cmds.add(Velocity, .{ .dx = 1.0, .dy = 0.0 });
         }
     }
 }
@@ -375,9 +389,9 @@ In Release builds, `debug_info` is `void` and has zero runtime overhead.
 
 ### System Parameters
 
-Systems can request various parameters that are automatically injected:
+Systems can request various parameters that are automatically injected. All parameters are optional and resolved at compile time:
 
-- **`*Manager`**: Reference to the ECS manager (required first parameter)
+- **`*Commands`**: Deferred command buffer for entity/component/resource operations (executed after system completes)
 - **`Query(Include, Exclude)`**: Query entities with specific components or **`Single`** to get a single entity with specific components
 - **`Res(T)`**: Access to a global resource of type T
 - **`Local(T)`**: Per-system persistent local state
@@ -389,7 +403,10 @@ Systems can request various parameters that are automatically injected:
 - **`OnRemoved(T)`**: Iterate over entities from which component T was removed since the last system run
 - **`*Relations`**: Access to the RelationManager for entity relationships
 
-- More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
+> [!NOTE]
+> Direct `*Manager` access is available via `commands.manager`, *compatibility for now*, when using `*Commands`. For immediate operations during system execution, use `commands.manager` methods directly. For deferred entity creation, use `commands.create()` which returns an `EntityCommands` with a `PendingEntity` - call `entity_cmds.flush()` to create the entity and apply queued components. For deferred operations on existing entities, use `Commands` methods like `addComponent`, `removeComponent`, `destroyEntity`, etc.
+
+More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
 
 ### Resources
 
@@ -440,10 +457,8 @@ const CollisionEvent = struct {
 
 // System that writes events
 fn collisionDetectionSystem(
-    manager: *zevy_ecs.Manager,
     writer: zevy_ecs.EventWriter(CollisionEvent), // will add EventStore resource for CollisionEvent if not present
 ) void {
-    _ = manager;
     // Emit event
     writer.write(.{
         .entity_a = .{ .id = 1, .generation = 0 },
@@ -453,10 +468,8 @@ fn collisionDetectionSystem(
 
 // System that reads events
 fn collisionResponseSystem(
-    manager: *zevy_ecs.Manager,
     reader: zevy_ecs.EventReader(CollisionEvent), // will add EventStore resource for CollisionEvent if not present
 ) void {
-    _ = manager;
     while (reader.read()) |event| {
         std.debug.print("Collision between {d} and {d}\n",
             .{ event.data.entity_a.id, event.data.entity_b.id });
@@ -492,10 +505,8 @@ const Position = struct { x: f32, y: f32 };
 
 // System that reacts to Position components being added
 fn onPositionAddedSystem(
-    manager: *zevy_ecs.Manager,
     added: zevy_ecs.OnAdded(Position),
 ) void {
-    _ = manager;
     for (added.iter()) |item| {
         std.debug.print("Entity {d} gained Position at ({d}, {d})\n",
             .{ item.entity.id, item.comp.x, item.comp.y });
@@ -504,10 +515,8 @@ fn onPositionAddedSystem(
 
 // System that reacts to Position components being removed
 fn onPositionRemovedSystem(
-    manager: *zevy_ecs.Manager,
     removed: zevy_ecs.OnRemoved(Position),
 ) void {
-    _ = manager;
     for (removed.iter()) |entity| {
         std.debug.print("Entity {d} lost Position component\n", .{entity.id});
     }
@@ -515,12 +524,9 @@ fn onPositionRemovedSystem(
 
 // Both can be used together
 fn positionChangeSystem(
-    manager: *zevy_ecs.Manager,
     added: zevy_ecs.OnAdded(Position),
     removed: zevy_ecs.OnRemoved(Position),
 ) void {
-    _ = manager;
-
     // Track new entities with Position
     for (added.iter()) |item| {
         std.debug.print("Added: {d}\n", .{item.entity.id});
@@ -596,22 +602,24 @@ const SocketData = struct {
 // 2. Via RelationManager API - explicitly manages relations
 
 fn setupHierarchy(
-    ecs: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
+    relations: *zevy_ecs.Relations,
 ) !void {
-    // RelationManager is automatically available as a resource
-    const relations = ecs.getResource(zevy_ecs.relations.RelationManager).?;
+    const ecs = commands.manager;
 
-    // Create entities
-    const parent = ecs.create(.{Transform{}});
-    const child1 = ecs.create(.{Transform{}});
-    const child2 = ecs.create(.{Transform{}});
+    // Create entities using deferred creation
+    var parent_cmds = try commands.create();
+    _ = try parent_cmds.add(Transform, .{});
+    parent_cmds.flush();
+    const parent = parent_cmds.getEntity();
 
-    // Method 1: Add relation component directly (auto-syncs to index for indexed types)
-    try ecs.addComponent(child1, zevy_ecs.relations.Relation(Child),
-        zevy_ecs.relations.Relation(Child).init(parent, .{}));
+    var child_cmds = try commands.create();
+    _ = try child1_cmds.add(Transform, .{});
+    child1_cmds.flush();
+    const child = child1_cmds.getEntity();
 
-    // Method 2: Use RelationManager API
-    try relations.add(ecs, child2, parent, Child);
+    // Use RelationManager API
+    try relations.add(ecs, child, parent, Child);
 
     // Query children of parent
     const children = relations.getChildren(parent, Child);
@@ -620,17 +628,17 @@ fn setupHierarchy(
     }
 
     // Get parent of child
-    if (try relations.getParent(ecs, child1, Child)) |p| {
+    if (try relations.getParent(ecs, child, Child)) |p| {
         std.debug.print("Parent: {d}\n", .{p.id});
     }
 
     // Check if relation exists
-    if (try relations.has(ecs, child1, parent, Child)) {
+    if (try relations.has(ecs, child, parent, Child)) {
         std.debug.print("Child1 has parent relation\n", .{});
     }
 
     // Remove relation
-    try relations.remove(ecs, child1, parent, Child);
+    try relations.remove(ecs, child, parent, Child);
 }
 
 pub fn main() !void {
@@ -648,12 +656,21 @@ pub fn main() !void {
 
 ```zig
 fn attachWeapon(
-    ecs: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
+    relations: *zevy_ecs.Relations,
 ) !void {
-    const relations = ecs.getResource(zevy_ecs.relations.RelationManager).?;
+    const ecs = commands.manager;
 
-    const character = ecs.create(.{Transform{}});
-    const weapon = ecs.create(.{Transform{}});
+    // Create entities using deferred creation
+    var char_cmds = try commands.create();
+    _ = try char_cmds.add(Transform, .{});
+    char_cmds.flush();
+    const character = char_cmds.getEntity();
+
+    var weapon_cmds = try commands.create();
+    _ = try weapon_cmds.add(Transform, .{});
+    weapon_cmds.flush();
+    const weapon = weapon_cmds.getEntity();
 
     // Method 1: Add relation with custom data using RelationManager API
     try relations.addWithData(
@@ -681,14 +698,31 @@ fn attachWeapon(
 ```zig
 // Entity can own multiple items
 fn setupInventory(
-    ecs: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
+    relations: *zevy_ecs.Relations,
 ) !void {
-    const relations = ecs.getResource(zevy_ecs.relations.RelationManager).?;
+    const ecs = commands.manager;
 
-    const player = ecs.create(.{Transform{}});
-    const sword = ecs.create(.{Transform{}});
-    const shield = ecs.create(.{Transform{}});
-    const potion = ecs.create(.{Transform{}});
+    // Create entities using deferred creation
+    var player_cmds = try commands.create();
+    _ = try player_cmds.add(Transform, .{});
+    player_cmds.flush();
+    const player = player_cmds.getEntity();
+
+    var sword_cmds = try commands.create();
+    _ = try sword_cmds.add(Transform, .{});
+    sword_cmds.flush();
+    const sword = sword_cmds.getEntity();
+
+    var shield_cmds = try commands.create();
+    _ = try shield_cmds.add(Transform, .{});
+    shield_cmds.flush();
+    const shield = shield_cmds.getEntity();
+
+    var potion_cmds = try commands.create();
+    _ = try potion_cmds.add(Transform, .{});
+    potion_cmds.flush();
+    const potion = potion_cmds.getEntity();
 
     // Add non-exclusive relations (entity can have multiple)
     try relations.add(ecs, player, sword, Owns);
@@ -708,11 +742,9 @@ fn setupInventory(
 ```zig
 // Systems with injected arguments
 fn damageSystemWithMultiplier(
-    manager: *zevy_ecs.Manager,
     multiplier: f32,
     query: zevy_ecs.Query(struct { health: Health }, .{}),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         item.health.current = @intFromFloat(
             @as(f32, @floatFromInt(item.health.current)) * multiplier
@@ -765,6 +797,11 @@ const CustomComplexParam = struct {
             .res = res_value,
             .local = local_ptr,
         };
+    }
+
+    //Optional but required if you have to clean up
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
+        ...
     }
 };
 
@@ -1054,10 +1091,8 @@ pub fn main() !void {
 }
 
 fn movementSystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         item.pos.x += item.vel.dx;
         item.pos.y += item.vel.dy;
@@ -1065,10 +1100,8 @@ fn movementSystem(
 }
 
 fn renderSystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(struct { pos: Position }, .{}),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         std.debug.print("Render at ({d}, {d})\n", .{ item.pos.x, item.pos.y });
     }
@@ -1120,28 +1153,21 @@ pub fn main() !void {
 }
 
 fn physicsSystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         item.vel.dy += 9.8; // gravity
     }
 }
 
 fn aiSystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(struct { pos: Position }, .{}),
 ) void {
-    _ = manager;
     // AI logic here
     _ = query;
 }
 
-fn customSystem(
-    manager: *zevy_ecs.Manager,
-) void {
-    _ = manager;
+fn customSystem() void {
     // Custom logic here
 }
 ```
@@ -1188,11 +1214,9 @@ pub fn main() !void {
 }
 
 fn menuSystem(
-    manager: *zevy_ecs.Manager,
     state: zevy_ecs.State(GameState),
     next: *zevy_ecs.NextState(GameState),
 ) void {
-    _ = manager;
     if (state.isActive(.MainMenu)) {
         // Handle menu input
         // Transition to playing when user presses start
@@ -1201,10 +1225,8 @@ fn menuSystem(
 }
 
 fn gameplaySystem(
-    manager: *zevy_ecs.Manager,
     query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
 ) void {
-    _ = manager;
     while (query.next()) |item| {
         item.pos.x += item.vel.dx;
         item.pos.y += item.vel.dy;
@@ -1247,18 +1269,14 @@ pub fn main() !void {
 }
 
 fn inputSystem(
-    manager: *zevy_ecs.Manager,
     writer: zevy_ecs.EventWriter(InputEvent),
 ) void {
-    _ = manager;
     writer.write(.{ .key = 32, .pressed = true }); // Space key pressed
 }
 
 fn inputHandlerSystem(
-    manager: *zevy_ecs.Manager,
     reader: zevy_ecs.EventReader(InputEvent),
 ) void {
-    _ = manager;
     while (reader.read()) |event| {
         std.debug.print("Key {d} pressed: {}\n", .{ event.data.key, event.data.pressed });
         event.handled = true;

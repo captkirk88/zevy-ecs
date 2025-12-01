@@ -594,3 +594,24 @@ test "Query - component with multiple pointer types" {
     try std.testing.expect(float_val == 12.34);
     try std.testing.expect(bool_val == false);
 }
+
+test "Query - hasNext" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    for (0..3) |i| {
+        const pos = Position{ .x = @floatFromInt(i), .y = 0.0 };
+        _ = manager.create(.{pos});
+    }
+
+    var q = manager.query(struct { pos: Position }, struct {});
+    var count: usize = 0;
+
+    while (q.hasNext()) {
+        const item = q.next().?;
+        try std.testing.expect(item.pos.x >= 0.0);
+        count += 1;
+    }
+
+    try std.testing.expect(count == 3);
+}

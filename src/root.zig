@@ -5,6 +5,7 @@ const qry = @import("query.zig");
 const world = @import("world.zig");
 const sys = @import("systems.zig");
 const params = @import("systems.params.zig");
+pub const commands = @import("commands.zig");
 const registry = @import("systems.registry.zig");
 const scheduler = @import("scheduler.zig");
 const sparse = @import("sparse_set.zig");
@@ -41,7 +42,8 @@ pub const DefaultParamRegistry = registry.DefaultParamRegistry;
 pub const MergedSystemParamRegistry = registry.MergedSystemParamRegistry;
 /// Query parameter type for accessing entities with specific components
 pub const Query = qry.Query;
-
+/// Commands parameter type for issuing commands to modify the ECS world
+pub const Commands = commands.Commands;
 /// Resource parameter type for accessing resources
 pub const Res = params.Res;
 /// Local parameter type for per-system-instance local state

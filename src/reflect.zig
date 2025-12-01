@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const Unknown = ReflectInfo.Unknown;
+
 /// Simple comptime-friendly FNV-1a hash that doesn't require branch quota increases.
 /// Used for type identification throughout the reflection system.
 fn comptimeHash(comptime name: []const u8) u64 {
@@ -390,6 +392,8 @@ pub const ReflectInfo = union(enum) {
     } };
 
     /// Create ReflectInfo from any type with cycle detection
+    ///
+    /// *Must be called at comptime.*
     pub fn from(comptime T: type) ?ReflectInfo {
         return toReflectInfo(T, &[_]ReflectInfo{});
     }
@@ -411,6 +415,13 @@ pub const ReflectInfo = union(enum) {
                     else => return false,
                 }
             },
+        }
+    }
+
+    pub fn toString(self: *const ReflectInfo) []const u8 {
+        switch (self.*) {
+            .type => |til| return til.toString(),
+            .func => |fil| return fil.toString(),
         }
     }
 

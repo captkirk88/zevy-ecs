@@ -634,7 +634,7 @@ test "Scheduler assign outside scope" {
     const out_value = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
-        pub fn run(_: *ecs_mod.Manager, out: params.Res(bool)) void {
+        pub fn run(out: params.Res(bool)) void {
             std.debug.print("Test system executed\n", .{});
             out.ptr.* = true;
         }
@@ -706,7 +706,7 @@ test "Custom stage types with hash-based IDs" {
 
     // Add systems to custom stages
     const test_sys = struct {
-        pub fn run(_: *ecs_mod.Manager) void {}
+        pub fn run() void {}
     }.run;
 
     scheduler.addSystem(&ecs, Stage(CustomStages.Physics), test_sys, registry.DefaultParamRegistry);

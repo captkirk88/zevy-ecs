@@ -196,7 +196,6 @@ test "States parameter in system" {
     const params = @import("systems.params.zig");
     const test_system = struct {
         pub fn run(
-            _: *ecs_mod.Manager,
             game_state: params.State(GameState),
             next_state: *params.NextState(GameState),
         ) anyerror!void {
@@ -255,28 +254,28 @@ test "OnEnter and OnExit systems" {
     // Create OnEnter system for Menu state
     const params = @import("systems.params.zig");
     const menu_enter_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(MenuEntered)) void {
+        pub fn run(flag: params.Res(MenuEntered)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     // Create OnExit system for Menu state
     const menu_exit_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(MenuExited)) void {
+        pub fn run(flag: params.Res(MenuExited)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     // Create OnEnter system for Playing state
     const playing_enter_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PlayingEntered)) void {
+        pub fn run(flag: params.Res(PlayingEntered)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     // Create OnExit system for Playing state
     const playing_exit_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PlayingExited)) void {
+        pub fn run(flag: params.Res(PlayingExited)) void {
             flag.ptr.value = true;
         }
     }.run;
@@ -359,19 +358,19 @@ test "InState systems" {
     // Create InState systems for each state
     const params = @import("systems.params.zig");
     const menu_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(MenuSystemRan)) void {
+        pub fn run(flag: params.Res(MenuSystemRan)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     const playing_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PlayingSystemRan)) void {
+        pub fn run(flag: params.Res(PlayingSystemRan)) void {
             flag.ptr.value = true;
         }
     }.run;
 
     const paused_system = struct {
-        pub fn run(_: *ecs_mod.Manager, flag: params.Res(PausedSystemRan)) void {
+        pub fn run(flag: params.Res(PausedSystemRan)) void {
             flag.ptr.value = true;
         }
     }.run;

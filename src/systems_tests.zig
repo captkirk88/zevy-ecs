@@ -16,6 +16,7 @@ const registry = @import("systems.registry.zig");
 const DefaultRegistry = registry.DefaultParamRegistry;
 const events = @import("events.zig");
 const Query = @import("query.zig").Query;
+const Commands = @import("commands.zig").Commands;
 const relations = @import("relations.zig");
 
 // Test components
@@ -35,13 +36,13 @@ const DeltaTime = struct {
 };
 
 // Basic system functions
-fn simpleSystem(_: *Manager) void {}
+fn simpleSystem() void {}
 
-fn resourceSystem(_: *Manager, res: Res(DeltaTime)) void {
+fn resourceSystem(res: Res(DeltaTime)) void {
     std.testing.expect(res.ptr.value == 0.016) catch unreachable;
 }
 
-fn querySystem(_: *Manager, query: Query(struct { pos: Position }, struct {})) void {
+fn querySystem(query: Query(struct { pos: Position }, struct {})) void {
     var count: usize = 0;
     while (query.next()) |_| {
         count += 1;
@@ -49,14 +50,14 @@ fn querySystem(_: *Manager, query: Query(struct { pos: Position }, struct {})) v
     std.testing.expect(count == 5) catch unreachable;
 }
 
-fn multiParamSystem(_: *Manager, res: Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity }, struct {})) void {
+fn multiParamSystem(res: Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity }, struct {})) void {
     while (query.next()) |item| {
         item.pos.x += item.vel.dx * res.ptr.value;
         item.pos.y += item.vel.dy * res.ptr.value;
     }
 }
 
-fn localSystem(_: *Manager, local: *Local(u32)) void {
+fn localSystem(local: *Local(u32)) void {
     if (!local.isSet()) {
         local.set(0);
     }
@@ -64,13 +65,13 @@ fn localSystem(_: *Manager, local: *Local(u32)) void {
     local.set(val + 1);
 }
 
-fn eventWriterSystem(_: *Manager, writer: EventWriter(u32)) void {
+fn eventWriterSystem(writer: EventWriter(u32)) void {
     var mut_writer = writer;
     mut_writer.write(1);
     mut_writer.write(2);
 }
 
-fn eventReaderSystem(_: *Manager, reader: EventReader(u32)) void {
+fn eventReaderSystem(reader: EventReader(u32)) void {
     var count: usize = 0;
     while (reader.read()) |event| {
         _ = event;
@@ -79,29 +80,29 @@ fn eventReaderSystem(_: *Manager, reader: EventReader(u32)) void {
     std.testing.expect(count == 2) catch unreachable;
 }
 
-fn systemWithArgs(_: *Manager, multiplier: i32, offset: i32) void {
+fn systemWithArgs(multiplier: i32, offset: i32) void {
     const result = multiplier * 2 + offset;
     std.testing.expect(result == 14) catch unreachable; // 5 * 2 + 4 = 14
 }
 
-fn producer(_: *Manager) u32 {
+fn producer() u32 {
     return 42;
 }
 
-fn consumer(_: *Manager, value: u32) void {
+fn consumer(value: u32) void {
     std.testing.expect(value == 42) catch unreachable;
 }
 
-fn predicateTrue(_: *Manager) bool {
+fn predicateTrue() bool {
     return true;
 }
 
-fn conditionalSystem(_: *Manager) void {}
+fn conditionalSystem() void {}
 
 const GameState = enum { menu, playing, paused };
 
 fn actualFuncSystem(
-    _: *Manager,
+    commands: *Commands,
     res: Res(DeltaTime),
     local: *Local(u32),
     query: Query(struct { pos: Position }, .{Velocity}),
@@ -112,6 +113,7 @@ fn actualFuncSystem(
     on_removed: params.OnRemoved(Position),
     relation_mgr: *params.Relations,
 ) void {
+    _ = commands;
     _ = res;
     _ = local;
     _ = query;
@@ -123,23 +125,23 @@ fn actualFuncSystem(
     _ = relation_mgr;
 }
 
-fn mutateRes(_: *Manager, res: Res(DeltaTime)) void {
+fn mutateRes(res: Res(DeltaTime)) void {
     res.ptr.value = 2.0;
 }
 
-fn checkRes(_: *Manager, res: Res(DeltaTime)) void {
+fn checkRes(res: Res(DeltaTime)) void {
     std.testing.expect(res.ptr.value == 2.0) catch unreachable;
 }
 
-fn errorSys(_: *Manager) !void {
+fn errorSys() !void {
     return error.TestError;
 }
 
-fn returnSys(_: *Manager) i32 {
+fn returnSys() i32 {
     return 123; // Would return 123 if systems supported it
 }
 
-fn onAddedRemovedSystem(_: *Manager, added: params.OnAdded(Position), removed: params.OnRemoved(Position)) anyerror!void {
+fn onAddedRemovedSystem(added: params.OnAdded(Position), removed: params.OnRemoved(Position)) anyerror!void {
     var added_count: usize = 0;
     for (added.iter()) |item| {
         _ = item;
@@ -474,7 +476,7 @@ test "System with injected args has correct debug name" {
     defer manager.deinit();
 
     const TestSystem = struct {
-        pub fn run(_: *Manager, _: i32, _: []const u8) void {}
+        pub fn run(_: i32, _: []const u8) void {}
     }.run;
 
     const system = ToSystemWithArgs(TestSystem, .{ 42, "test" }, DefaultRegistry);
@@ -508,21 +510,22 @@ test "SystemDebugInfo contains parameter information" {
         std.debug.print("Number of params: {}\n", .{system.debug_info.params.len});
 
         for (system.debug_info.params, 0..) |param, i| {
-            std.debug.print("  Param {}: type={s}\n", .{ i, param.type_name });
+            std.debug.print("  Param {}: type={s}\n", .{ i, param.name });
         }
 
-        // Should have 9 params (not counting the Manager)
-        try std.testing.expect(system.debug_info.params.len == 9);
+        // Should have 10 params (including Commands)
+        try std.testing.expect(system.debug_info.params.len == 10);
 
         // Verify param types
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[0].type_name, "Res") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[1].type_name, "Local") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[2].type_name, "Query") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[3].type_name, "Single") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[4].type_name, "EventReader") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[5].type_name, "EventWriter") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[6].type_name, "OnAdded") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[7].type_name, "OnRemoved") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[8].type_name, "RelationManager") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[0].name, "Commands") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[1].name, "Res") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[2].name, "Local") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[3].name, "Query") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[4].name, "Single") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[5].name, "EventReader") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[6].name, "EventWriter") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[7].name, "OnAdded") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[8].name, "OnRemoved") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[9].name, "RelationManager") != null);
     }
 }

@@ -4,14 +4,15 @@ const ecs_mod = @import("ecs.zig");
 const world = @import("world.zig");
 const events = @import("events.zig");
 const registry = @import("systems.registry.zig");
+const params = @import("systems.params.zig");
 const scheduler_mod = @import("scheduler.zig");
+const Commands = @import("commands.zig").Commands;
 const reflect = @import("reflect.zig");
 
 const is_debug = builtin.mode == .Debug;
 
-/// Debug information for a single system parameter (only available in debug builds)
 pub const ParamDebugInfo = struct {
-    type_name: []const u8,
+    name: []const u8,
 };
 
 /// Debug information for a system (only available in debug builds)
@@ -164,13 +165,11 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
         @compileError("ParamRegistry must have an 'apply' function with signature: fn (*ecs_mod.Manager, type) type");
     }
     const log = std.log.scoped(.zevy_ecs);
-    const system_name = @typeName(system_type);
-    log.debug("Creating trampoline for system: {s}", .{system_name});
+    log.debug("Creating trampoline for system: {s}", .{@typeName(system_type)});
     return &struct {
-        pub const debug_system_name = system_name;
         pub fn trampoline(ecs: *ecs_mod.Manager, ctx: ?*anyopaque) anyerror!ReturnType {
             if (is_debug) {
-                log.debug("Running system: {s}", .{debug_system_name});
+                log.debug("Running system: {s}", .{@typeName(@TypeOf(system_fn))});
             }
             if (ctx == null) return error.SystemContextNull;
 
@@ -185,22 +184,19 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
 
             const fn_info = info.@"fn";
             const param_count = fn_info.params.len;
-            if (param_count == 0 or fn_info.params[0].type != *ecs_mod.Manager) {
-                @compileError("System function must have *Manager as first parameter: " ++ @typeName(system_type));
-            }
 
             // Get the number of injected args
             const args_info = @typeInfo(Args);
             const injected_arg_count = if (args_info == .@"struct") args_info.@"struct".fields.len else 0;
 
-            // Ensure the function expects the injected args after ECS
-            if (param_count < 1 + injected_arg_count) {
+            // Ensure the function expects the injected args
+            if (param_count < injected_arg_count) {
                 @compileError("System function does not have enough parameters for injected arguments: " ++ @typeName(system_type));
             }
 
-            // Build tuple type for registry-resolved params (skip ECS and injected args)
+            // Build tuple type for registry-resolved params
             comptime var param_types: []const type = &[_]type{};
-            inline for (fn_info.params[1 + injected_arg_count ..]) |param| {
+            inline for (fn_info.params[injected_arg_count..]) |param| {
                 const ParamType = param.type.?;
                 // All system params are now passed by value, not by pointer
                 param_types = param_types ++ &[_]type{ParamType};
@@ -210,7 +206,7 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             // Build resolved args by calling apply for each param
             const resolved_args: ResolvedArgsTuple = blk: {
                 var args: ResolvedArgsTuple = undefined;
-                inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
+                inline for (fn_info.params[injected_arg_count..], 0..) |param, i| {
                     const ParamType = param.type.?;
                     args[i] = try ParamRegistry.apply(ecs, ParamType);
                 }
@@ -221,16 +217,29 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             const return_type_info = comptime @typeInfo(return_type);
             const is_error_union = comptime return_type_info == .error_union;
 
-            // Build args tuple with mutable resolved args
-            const all_args_tuple = .{ecs} ++ context.args ++ resolved_args;
+            // Build args tuple with injected args first, then resolved args
+            // Injected args are provided by ToSystemWithArgs and come first in the function signature
+            const all_args_tuple = context.args ++ resolved_args;
 
             // Deallocate any system param resources after the system finishes.
             // We need to call deinit for each resolved argument type if it provides a deinit implementation.
             // This must be done in a defer that wraps the actual system call to ensure cleanup happens AFTER execution.
             defer {
-                inline for (fn_info.params[1 + injected_arg_count ..], 0..) |param, i| {
+                inline for (fn_info.params[injected_arg_count..], 0..) |param, i| {
                     const ParamType = param.type.?;
-                    const resolved_ptr: *anyopaque = @ptrCast(@alignCast(@constCast(&resolved_args[i])));
+                    // For pointer types (like *Commands), we need to pass the pointer value itself,
+                    // not a pointer to the pointer. The resolved_args[i] already contains the pointer.
+                    const resolved_ptr: *anyopaque = blk: {
+                        const param_type_info = @typeInfo(ParamType);
+                        if (param_type_info == .pointer) {
+                            // ParamType is already a pointer (e.g., *Commands), so resolved_args[i] is the pointer value
+                            // We cast the pointer value directly to *anyopaque
+                            break :blk @ptrCast(resolved_args[i]);
+                        } else {
+                            // For non-pointer types, take address of the value
+                            break :blk @ptrCast(@alignCast(@constCast(&resolved_args[i])));
+                        }
+                    };
                     ParamRegistry.deinit(ecs, resolved_ptr, ParamType);
                 }
             }
@@ -242,6 +251,12 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             }
         }
     }.trampoline;
+}
+
+inline fn describeSystem(comptime system_fn: anytype) []const u8 {
+    const type_info = reflect.ReflectInfo.from(@TypeOf(system_fn)) orelse reflect.ReflectInfo.Unknown;
+
+    return type_info.toString();
 }
 
 inline fn expandArgs(
@@ -360,43 +375,49 @@ pub fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: ty
 
     const debug_info = if (is_debug) blk: {
         const fn_info = @typeInfo(@TypeOf(system_fn)).@"fn";
+        const param_count = fn_info.params.len;
 
-        // Build param debug info for all params except the first (ECS manager)
-        comptime var param_list: []const ParamDebugInfo = &[_]ParamDebugInfo{};
-        inline for (fn_info.params[1..]) |param| {
-            const param_type = param.type.?;
-            // Check if the type has a debugInfo decl (which should be a const string) and use that, otherwise use @typeName
-            // TODO use new reflect.ReflectInfo
-            const type_name: []const u8 = blk2: {
-                const type_info = @typeInfo(param_type);
-                // Only check for debugInfo on struct/union/enum types
-                const can_have_decl = type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum";
-                if (can_have_decl and comptime reflect.hasFunc(param_type, "debugInfo")) {
-                    break :blk2 comptime param_type.debugInfo();
-                }
-                break :blk2 @typeName(param_type);
-            };
-            param_list = param_list ++ &[_]ParamDebugInfo{.{
-                .type_name = type_name,
-            }};
-        }
+        const param_list = comptime blk_param: {
+            var arr: [param_count]ParamDebugInfo = undefined;
+            for (fn_info.params[0..], 0..) |param, i| {
+                const param_type = param.type.?;
+                // Check if the type has a debugInfo decl (which should be a const string) and use that, otherwise use @typeName
+                const type_name: ParamDebugInfo = blk2: {
+                    const type_info = @typeInfo(param_type);
+                    // Only check for debugInfo on struct/union/enum types
+                    const can_have_decl = type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum";
+                    if (can_have_decl and reflect.hasFunc(param_type, "debugInfo")) {
+                        break :blk2 .{ .name = param_type.debugInfo() };
+                    } else {
+                        break :blk2 .{ .name = @typeName(param_type) };
+                    }
+                };
+                arr[i] = type_name;
+            }
+            break :blk_param arr;
+        };
 
         // Build clean function signature from param debug info instead of raw types
-        comptime var signature_str: []const u8 = "fn(*Manager";
-        inline for (param_list) |param_info| {
-            signature_str = signature_str ++ ", " ++ param_info.type_name;
-        }
-        signature_str = signature_str ++ ")";
-
-        // Add return type
-        const return_type = fn_info.return_type orelse void;
-        if (return_type != void) {
-            signature_str = signature_str ++ " " ++ @typeName(return_type);
-        }
+        const signature_str = comptime blk_sig: {
+            var sig: []const u8 = "fn(";
+            var first = true;
+            for (param_list) |param_info| {
+                if (!first) sig = sig ++ ", ";
+                first = false;
+                sig = sig ++ param_info.name;
+            }
+            sig = sig ++ ")";
+            // Add return type
+            const return_type = fn_info.return_type orelse void;
+            if (return_type != void) {
+                sig = sig ++ " " ++ @typeName(return_type);
+            }
+            break :blk_sig sig;
+        };
 
         break :blk SystemDebugInfo{
             .signature = signature_str,
-            .params = param_list,
+            .params = &param_list,
         };
     } else {};
 
@@ -443,15 +464,18 @@ pub fn ToSystemReturnType(comptime system_fn: anytype) type {
 /// const pipedSystem = ToSystem(pipe(produceData, processData, DefaultRegistry), DefaultRegistry);
 /// ```
 pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamRegistry: type) System(void) {
+    // Get return type of first function to pass to second
+    //const FirstReturnType = ToSystemReturnType(first);
+
     const f = struct {
-        pub fn combined(ecs: *ecs_mod.Manager) !void {
+        pub fn combined(commands: *Commands) !void {
             // Run first system and get its output
             const first_system = ToSystem(first, ParamRegistry);
-            const first_result = try first_system.run(ecs, first_system.ctx);
+            const first_result = try first_system.run(commands.manager, first_system.ctx);
 
             // Create second system with the first system's output as an injected argument
             const second_system = ToSystemWithArgs(second, .{first_result}, ParamRegistry);
-            _ = try second_system.run(ecs, second_system.ctx);
+            _ = try second_system.run(commands.manager, second_system.ctx);
         }
     }.combined;
     return ToSystem(f, ParamRegistry);
@@ -462,14 +486,14 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 ///
 /// Example:
 /// ```zig
-/// fn shouldRunSystem(ecs: *zevy_ecs.Manager, query: Query(.{pos: Position, vel: Velocity},.{})) bool {
+/// fn shouldRunSystem(query: Query(.{pos: Position, vel: Velocity},.{})) bool {
 ///     // Check some condition, e.g., if there are entities with a specific component
-///     return query.count() > 0;
+///     return query.hasNext();
 /// }
 ///
-/// fn updatePositions(ecs: *zevy_ecs.Manager) void {
+/// fn updatePositions(commands: *Commands) void {
 ///     // System logic to update positions
-///     var query = ecs.query(.{pos: Position, vel: Velocity}, .{});
+///     var query = commands.query(.{pos: Position, vel: Velocity}, .{});
 ///     while (query.next()) |q| {
 ///         // Update position based on velocity
 ///         q.pos.*.x += q.vel.*.dx;
@@ -480,14 +504,17 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 /// // Create a conditional system that only runs updatePositions if shouldRunSystem returns true
 /// const conditionalSystem = run_if(shouldRunSystem, updatePositions, DefaultRegistry);
 /// ```
-pub fn runIf(comptime predicate: anytype, comptime system: anytype, ParamRegistry: type) System(void) {
+pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime ParamRegistry: type) System(void) {
+    if (ToSystemReturnType(predicate) != bool) {
+        @compileError("Predicate must return boolean" ++ @typeName(predicate));
+    }
     return pipe(
         predicate,
         struct {
-            pub fn run(ecs: *ecs_mod.Manager, cond: bool) !void {
+            pub fn run(cond: bool, commands: *Commands) !void {
                 if (cond) {
-                    const sys = ecs.createSystem(system, ParamRegistry);
-                    _ = try sys.run(ecs, sys.ctx);
+                    const sys = commands.manager.createSystem(system, ParamRegistry);
+                    _ = try sys.run(commands.manager, sys.ctx);
                 }
             }
         }.run,

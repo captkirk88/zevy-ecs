@@ -1,5 +1,6 @@
 ### What to do...
 
+- [ ] Test packed struct components.  Should work already...
 - [ ] Seperate reflect.zig into separate repo for general purpose reflection utilities
 - [ ] Explore threading when Zig's threading model is more mature
   - Specifically the newer std.Io APIs

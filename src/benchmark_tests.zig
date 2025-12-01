@@ -5,6 +5,7 @@ const root = @import("root.zig");
 const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
 const Entity = ecs.Entity;
+const Commands = root.Commands;
 const Query = root.Query;
 const relations = @import("relations.zig");
 const RelationManager = relations.RelationManager;
@@ -82,8 +83,7 @@ fn batchCreateEntities(manager: *Manager, count: usize, allocator: std.mem.Alloc
 
 // Benchmark 2: Mixed System Operations
 // System 1: Movement - Update positions based on velocity
-fn systemMovement(e: *Manager, query: Query(MovementQueryInclude, .{})) void {
-    _ = e;
+fn systemMovement(query: Query(MovementQueryInclude, .{})) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const vel: *Velocity = item.vel;
@@ -94,8 +94,7 @@ fn systemMovement(e: *Manager, query: Query(MovementQueryInclude, .{})) void {
 }
 
 // System 2: Health Regeneration - Regenerate health over time
-fn systemHealthRegen(e: *Manager, query: Query(.{Health}, .{})) void {
-    _ = e;
+fn systemHealthRegen(query: Query(.{Health}, .{})) void {
     while (query.next()) |item| {
         const health: *Health = item[0];
         if (health.current < health.max) {
@@ -105,8 +104,7 @@ fn systemHealthRegen(e: *Manager, query: Query(.{Health}, .{})) void {
 }
 
 // System 3: Damage Application - Apply damage to entities with armor
-fn systemDamageWithArmor(e: *Manager, query: Query(.{ Health, Damage, Armor }, struct {})) void {
-    _ = e;
+fn systemDamageWithArmor(query: Query(.{ Health, Damage, Armor }, struct {})) void {
     while (query.next()) |item| {
         const health: *Health = item[0];
         const armor: *Armor = item[2];
@@ -121,7 +119,7 @@ fn systemDamageWithArmor(e: *Manager, query: Query(.{ Health, Damage, Armor }, s
 }
 
 // System 4: Damage Application - Apply damage to entities without armor
-fn systemDamageNoArmor(_: *Manager, query: Query(DamageNoArmorQueryInclude, DamageNoArmorQueryExclude)) void {
+fn systemDamageNoArmor(query: Query(DamageNoArmorQueryInclude, DamageNoArmorQueryExclude)) void {
     while (query.next()) |item| {
         const health: *Health = item.health;
         const damage: *Damage = item.damage;
@@ -136,7 +134,7 @@ fn systemDamageNoArmor(_: *Manager, query: Query(DamageNoArmorQueryInclude, Dama
 // System 5: Team Collision - Check collisions within same team
 
 // System 5: Team Collision - Check collisions within same team
-fn systemTeamCollision(_: *Manager, query: Query(TeamCollisionQueryInclude, .{})) void {
+fn systemTeamCollision(query: Query(TeamCollisionQueryInclude, .{})) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const team: *Team = item.team;
@@ -148,7 +146,7 @@ fn systemTeamCollision(_: *Manager, query: Query(TeamCollisionQueryInclude, .{})
 }
 
 // System 6: Target Tracking - Update target positions
-fn systemTargetTracking(_: *Manager, query: Query(TargetTrackingQueryInclude, .{})) void {
+fn systemTargetTracking(query: Query(TargetTrackingQueryInclude, .{})) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const target: *Target = item.target;
@@ -161,7 +159,7 @@ fn systemTargetTracking(_: *Manager, query: Query(TargetTrackingQueryInclude, .{
 }
 
 // System 7: Velocity Damping - Apply friction/damping to velocity
-fn systemVelocityDamping(_: *Manager, query: Query(VelocityDampingQueryInclude, .{})) void {
+fn systemVelocityDamping(query: Query(VelocityDampingQueryInclude, .{})) void {
     while (query.next()) |item| {
         const vel: *Velocity = item.vel;
         vel.dx *= 0.99;
@@ -378,7 +376,7 @@ fn setupSceneGraph(manager: *Manager, rel: *root.Relations, count: usize) !std.A
 
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
-    manager: *Manager,
+    commands: *Commands,
     rel: *root.Relations,
     query: Query(.{ Transform, relations.Relation(Child) }, .{}),
 ) void {
@@ -393,7 +391,7 @@ fn systemUpdateTransforms(
         var parent_world_z: f32 = 0;
 
         const parent_entity = child_relation.target;
-        if (manager.getComponent(parent_entity, Transform) catch null) |parent_transform| {
+        if (commands.manager.getComponent(parent_entity, Transform) catch null) |parent_transform| {
             parent_world_x = parent_transform.world_x;
             parent_world_y = parent_transform.world_y;
             parent_world_z = parent_transform.world_z;

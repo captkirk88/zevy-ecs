@@ -617,7 +617,7 @@ test "removeSystem removes cached system" {
 
     // Define a test system that increments the counter
     const test_system = struct {
-        pub fn run(_: *Manager, res: params.Res(TestCounter)) void {
+        pub fn run(res: params.Res(TestCounter)) void {
             res.ptr.count += 1;
         }
     }.run;
