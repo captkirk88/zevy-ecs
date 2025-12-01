@@ -382,6 +382,12 @@ pub const TypeInfo = struct {
 pub const ReflectInfo = union(enum) {
     type: TypeInfo,
     func: FuncInfo,
+    pub const Unknown = ReflectInfo{ .type = TypeInfo{
+        .hash = 0,
+        .size = 0,
+        .type = void,
+        .name = "unknown",
+    } };
 
     /// Create ReflectInfo from any type with cycle detection
     pub fn from(comptime T: type) ?ReflectInfo {

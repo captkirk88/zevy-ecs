@@ -8,6 +8,8 @@ const params = @import("systems.params.zig");
 const state = @import("state.zig");
 const relations = @import("relations.zig");
 const errors = @import("errors.zig");
+const serialize = @import("serialize.zig");
+const reflect = @import("reflect.zig");
 
 /// Local: Provides per-system-function persistent storage, accessible only to the declaring system.
 /// Value persists across system invocations (lifetime: ECS instance or until explicitly cleared).
@@ -696,6 +698,250 @@ pub const OnRemovedSystemParam = struct {
     }
 };
 
+/// Command represents a deferred operation to be executed later.
+const Command = struct {
+    execute: *const fn (data: *anyopaque, manager: *ecs.Manager) void,
+    deinit: *const fn (data: *anyopaque, allocator: std.mem.Allocator) void,
+    data: *anyopaque,
+};
+
+/// Commands provides a way to queue deferred operations on the ECS.
+/// Operations are executed when flush() is called, typically after system execution.
+pub const Commands = struct {
+    allocator: std.mem.Allocator,
+    commands: std.ArrayList(Command),
+
+    pub fn init(allocator: std.mem.Allocator) !Commands {
+        return .{
+            .allocator = allocator,
+            .commands = try std.ArrayList(Command).initCapacity(allocator, 0),
+        };
+    }
+
+    pub fn deinit(self: *Commands) void {
+        for (self.commands.items) |cmd| {
+            cmd.deinit(cmd.data, self.allocator);
+        }
+        self.commands.deinit(self.allocator);
+    }
+
+    /// Queue adding a component to an entity.
+    pub fn addComponent(self: *Commands, ent: ecs.Entity, comptime T: type, value: T) !void {
+        const Closure = struct {
+            ent: ecs.Entity,
+            value: T,
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                manager.addComponent(closure.ent, T, closure.value) catch |err| {
+                    log.err("Failed to add component: {}", .{err});
+                };
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{ .ent = ent, .value = value };
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Queue removing a component from an entity.
+    pub fn removeComponent(self: *Commands, ent: ecs.Entity, comptime T: type) !void {
+        const Closure = struct {
+            ent: ecs.Entity,
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                manager.removeComponent(closure.ent, T) catch |err| {
+                    log.err("Failed to remove component: {}", .{err});
+                };
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{ .ent = ent };
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Queue destroying an entity.
+    pub fn destroyEntity(self: *Commands, ent: ecs.Entity) !void {
+        const Closure = struct {
+            ent: ecs.Entity,
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                manager.destroy(closure.ent) catch |err| {
+                    log.err("Failed to destroy entity: {}", .{err});
+                };
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{ .ent = ent };
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Queue adding a resource.
+    pub fn addResource(self: *Commands, comptime T: type, value: T) !void {
+        const Closure = struct {
+            value: T,
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                _ = manager.addResource(T, closure.value) catch |err| {
+                    const resTypeInfo = (comptime reflect.getInfo(T) orelse reflect.ReflectInfo.Unknown).type;
+                    log.err("Failed to add resource for type {s}: {}", .{ resTypeInfo.name, err });
+                };
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{ .value = value };
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Queue removing a resource.
+    pub fn removeResource(self: *Commands, comptime T: type) !void {
+        const Closure = struct {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                _ = data;
+                manager.removeResource(T);
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{};
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Queue adding a relation between two entities.
+    pub fn addRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) !void {
+        const Closure = struct {
+            entity1: ecs.Entity,
+            entity2: ecs.Entity,
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                const rel_mgr = manager.getResource(relations.RelationManager) orelse {
+                    log.err("RelationManager not found", .{});
+                    return;
+                };
+                rel_mgr.add(manager, closure.entity1, closure.entity2, RelationType) catch |err| {
+                    log.err("Failed to add relation: {}", .{err});
+                };
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{ .entity1 = entity1, .entity2 = entity2 };
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Queue removing a relation between two entities.
+    pub fn removeRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) !void {
+        const Closure = struct {
+            entity1: ecs.Entity,
+            entity2: ecs.Entity,
+            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                const rel_mgr = manager.getResource(relations.RelationManager) orelse {
+                    log.err("RelationManager not found", .{});
+                    return;
+                };
+                rel_mgr.remove(manager, closure.entity1, closure.entity2, RelationType) catch |err| {
+                    log.err("Failed to remove relation: {}", .{err});
+                };
+            }
+            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+                const closure = @as(*@This(), @ptrCast(@alignCast(data)));
+                allocator.destroy(closure);
+            }
+        };
+        const closure = try self.allocator.create(Closure);
+        closure.* = .{ .entity1 = entity1, .entity2 = entity2 };
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+    }
+
+    /// Get EntityCommands for entity-specific operations.
+    pub fn entity(self: *Commands, e: ecs.Entity) EntityCommands {
+        return EntityCommands{ .commands = self, .entity = e };
+    }
+
+    /// Execute all queued commands on the manager.
+    pub fn flush(self: *Commands, manager: *ecs.Manager) void {
+        for (self.commands.items) |cmd| {
+            cmd.execute(cmd.data, manager);
+        }
+        // Clear and free data
+        for (self.commands.items) |cmd| {
+            cmd.deinit(cmd.data, self.allocator);
+        }
+        self.commands.clearRetainingCapacity();
+    }
+};
+
+/// EntityCommands provides entity-specific deferred operations.
+pub const EntityCommands = struct {
+    commands: *Commands,
+    entity: ecs.Entity,
+
+    /// Queue adding a component to this entity.
+    pub fn add(self: EntityCommands, comptime T: type, value: T) !void {
+        try self.commands.addComponent(self.entity, T, value);
+    }
+
+    /// Queue removing a component from this entity.
+    pub fn remove(self: EntityCommands, comptime T: type) !void {
+        try self.commands.removeComponent(self.entity, T);
+    }
+
+    /// Queue destroying this entity.
+    pub fn destroy(self: EntityCommands) !void {
+        try self.commands.destroyEntity(self.entity);
+    }
+};
+
+/// Commands SystemParam analyzer and applier
+pub const CommandsSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const type_info = @typeInfo(T);
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            return analyze(Child);
+        }
+        if (T == Commands) {
+            return T;
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Commands {
+        if (e.getResource(Commands)) |cmds| {
+            return cmds;
+        }
+        const cmds = try Commands.init(e.allocator);
+        return try e.addResource(Commands, cmds);
+    }
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = T;
+        const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
+        commands.flush(e);
+    }
+};
+
 test "ResourceSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
@@ -808,4 +1054,64 @@ test "SingleSystemParam basic" {
 
     try std.testing.expectEqual(single.item.pos.*.x, 1.0);
     try std.testing.expectEqual(single.item.pos.*.y, 2.0);
+}
+
+test "CommandsSystemParam advanced" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    const commands = try CommandsSystemParam.apply(&manager, Commands);
+
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { dx: f32, dy: f32 };
+    const entity = manager.create(.{});
+
+    // Manually add a component to test removal
+    try manager.addComponent(entity, Position, Position{ .x = 1.0, .y = 2.0 });
+
+    // Queue operations
+    try commands.addComponent(entity, Velocity, Velocity{ .dx = 0.1, .dy = 0.2 }); // Add velocity
+    try commands.removeComponent(entity, Position); // Remove position
+    try commands.destroyEntity(entity); // Destroy entity
+
+    // Test EntityCommands
+    const entity2 = manager.create(.{});
+    const ent_cmds = commands.entity(entity2);
+    try ent_cmds.add(Position, Position{ .x = 5.0, .y = 6.0 }); // Add position via EntityCommands
+
+    // Resource operations
+    const TestResource = struct { value: i32 };
+    try commands.addResource(TestResource, TestResource{ .value = 42 }); // Add resource
+    try commands.removeResource(TestResource); // Remove resource
+
+    // Relation operations
+    const Child = relations.Child;
+    const entity3 = manager.create(.{});
+    try commands.addRelation(entity2, entity3, Child); // Add relation
+    try commands.removeRelation(entity2, entity3, Child); // Remove relation
+
+    // Flush the commands
+    commands.flush(&manager);
+
+    // Check entity was destroyed (can't get components)
+    const pos_after = manager.getComponent(entity, Position);
+    try std.testing.expectError(error.EntityNotAlive, pos_after);
+    const vel_after = manager.getComponent(entity, Velocity);
+    try std.testing.expectError(error.EntityNotAlive, vel_after);
+
+    // Check entity2 has position added via EntityCommands
+    const pos2_opt = try manager.getComponent(entity2, Position);
+    try std.testing.expect(pos2_opt != null);
+    const pos2 = pos2_opt.?;
+    try std.testing.expect(pos2.*.x == 5.0);
+    try std.testing.expect(pos2.*.y == 6.0);
+
+    // Check resource was added then removed (not present)
+    const res = manager.getResource(TestResource);
+    try std.testing.expect(res == null);
+
+    // Check relation was added then removed (not present)
+    const rel_mgr = manager.getResource(relations.RelationManager).?;
+    try std.testing.expect(!(try rel_mgr.has(&manager, entity2, entity3, Child)));
 }
