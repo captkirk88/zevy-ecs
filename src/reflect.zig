@@ -52,6 +52,18 @@ pub const FieldInfo = struct {
         }
         return null;
     }
+
+    /// Check if this FieldInfo is equal to another
+    ///
+    /// *Must be called at comptime.*
+    pub fn eql(self: *const FieldInfo, other: *const FieldInfo) bool {
+        if (!std.mem.eql(u8, self.name, other.name)) return false;
+        if (self.offset != other.offset) return false;
+        if (!std.mem.eql(u8, self.type.name, other.type.name)) return false;
+        if (self.type.size != other.type.size) return false;
+        if (self.type.type != other.type.type) return false;
+        return true;
+    }
 };
 
 pub const FuncInfo = struct {
@@ -117,9 +129,25 @@ pub const FuncInfo = struct {
 
     /// Get a string representation of the function signature
     ///
-    /// Must be called at comptime or runtime
+    /// *Does not need to be called at comptime.*
     pub inline fn toString(self: *const FuncInfo) []const u8 {
         return comptime self.getStringRepresentation();
+    }
+
+    /// Check if this FuncInfo is equal to another
+    ///
+    /// *Must be called at comptime.*
+    pub fn eql(self: *const FuncInfo, other: *const FuncInfo) bool {
+        if (!std.mem.eql(u8, self.name, other.name)) return false;
+        if (self.params.len != other.params.len) return false;
+        inline for (self.params, 0..) |param, i| {
+            if (!param.eql(&other.params[i])) return false;
+        }
+        if (self.return_type) |ret| {
+            if (other.return_type == null) return false;
+            if (!ret.eql(&other.return_type.?)) return false;
+        }
+        return true;
     }
 
     fn getStringRepresentation(self: *const FuncInfo) []const u8 {
@@ -142,19 +170,6 @@ pub const FuncInfo = struct {
         } else "void";
 
         return std.fmt.comptimePrint("fn {s}({s}) -> {s}", .{ self.name, params_str, return_str });
-    }
-
-    pub fn eql(self: *const FuncInfo, other: *const FuncInfo) bool {
-        if (!std.mem.eql(u8, self.name, other.name)) return false;
-        if (self.params.len != other.params.len) return false;
-        inline for (self.params, 0..) |param, i| {
-            if (!param.eql(other.params[i])) return false;
-        }
-        if (self.return_type != other.return_type) return false;
-        if (self.return_type) |ret| {
-            if (!ret.eql(other.return_type.?)) return false;
-        }
-        return true;
     }
 
     // Helper for FuncInfo.from with cycle detection
@@ -223,9 +238,9 @@ pub const TypeInfo = struct {
     name: []const u8,
     fields: []const FieldInfo,
 
-    // Note: decls and funcs are computed lazily via getDecl/getFunc/getDeclNames/getFuncNames
-    // to avoid exponential comptime growth when processing complex external types.
-
+    /// Create `TypeInfo` from any type except opaque types (like `anyopaque`)
+    ///
+    /// *Must be called at comptime.*
     fn from(comptime T: type) TypeInfo {
         return comptime toTypeInfo(T, &[_]ReflectInfo{});
     }
@@ -271,34 +286,43 @@ pub const TypeInfo = struct {
     }
 
     /// Lazily look up a decl (type constant) by name.
-    /// This avoids comptime explosion by only processing the requested decl.
+    ///
+    /// *Does not need to be called at comptime.*
     pub fn getDecl(self: *const TypeInfo, comptime decl_name: []const u8) ?TypeInfo {
         return comptime lazyGetDecl(self.type, decl_name);
     }
 
-    /// Lazily look up a function by name.
-    /// This avoids comptime explosion by only processing the requested function.
+    /// Get a function by name.
+    ///
+    /// *Does not need to be called at comptime.*
     pub fn getFunc(self: *const TypeInfo, comptime func_name: []const u8) ?FuncInfo {
         return comptime lazyGetFunc(self.type, func_name);
     }
 
     /// Get the names of all type decls (non-function declarations).
-    /// Returns a comptime slice of decl names that can be iterated.
+    ///
+    /// *Must be called at comptime.*
     pub fn getDeclNames(self: *const TypeInfo) []const []const u8 {
         return comptime lazyGetDeclNames(self.type, .types_only);
     }
 
     /// Get the names of all function decls.
-    /// Returns a comptime slice of function names that can be iterated.
+    ///
+    /// *Must be called at comptime.*
     pub fn getFuncNames(self: *const TypeInfo) []const []const u8 {
         return comptime lazyGetDeclNames(self.type, .funcs_only);
     }
 
     /// Check if this type has a decl with the given name.
+    ///
+    /// *Must be called at comptime.*
     pub fn hasDecl(self: *const TypeInfo, comptime decl_name: []const u8) bool {
         return @hasDecl(self.type, decl_name);
     }
 
+    /// Get a string representation of the type info
+    ///
+    /// *Does not need to be called at comptime.*
     pub inline fn toString(self: *const TypeInfo) []const u8 {
         return comptime self.getStringRepresentation();
     }
@@ -312,8 +336,11 @@ pub const TypeInfo = struct {
         });
     }
 
+    /// Check if this TypeInfo is equal to another (by hash and size)
+    ///
+    /// *Must be called at comptime.*
     pub fn eql(self: *const TypeInfo, other: *const TypeInfo) bool {
-        return self.hash == other.hash and self.size == other.size and std.mem.eql(u8, self.name, other.name);
+        return self.hash == other.hash and self.size == other.size;
     }
 
     fn buildFields(comptime T: type, comptime visited: []const ReflectInfo) []const FieldInfo {
@@ -359,6 +386,26 @@ pub const ReflectInfo = union(enum) {
     /// Create ReflectInfo from any type with cycle detection
     pub fn from(comptime T: type) ?ReflectInfo {
         return toReflectInfo(T, &[_]ReflectInfo{});
+    }
+
+    /// Check if this ReflectInfo is equal to another
+    ///
+    /// *Must be called at comptime.*
+    pub fn eql(self: *const ReflectInfo, other: *const ReflectInfo) bool {
+        switch (self.*) {
+            .type => |ti1| {
+                switch (other.*) {
+                    .type => |ti2| return ti1.eql(&ti2),
+                    else => return false,
+                }
+            },
+            .func => |fi1| {
+                switch (other.*) {
+                    .func => |fi2| return fi1.eql(&fi2),
+                    else => return false,
+                }
+            },
+        }
     }
 
     fn fromInt(comptime type_info: std.builtin.Type) type {
@@ -1327,4 +1374,99 @@ test "reflect - TypeInfo with lazy decl/func access" {
     try std.testing.expect(comptime ti.hasDecl("I"));
     try std.testing.expect(comptime ti.hasDecl("Inner"));
     try std.testing.expect(comptime !ti.hasDecl("nonexistent"));
+    try std.testing.expect(ti.getFunc("add") != null);
+    try std.testing.expect(ti.getFunc("nonexistent") == null);
+    try std.testing.expect(comptime ti.getDeclNames().len == 1);
+    try std.testing.expect(comptime ti.getFuncNames().len == 1);
+    try std.testing.expect(ti.getDecl("I") != null);
+    try std.testing.expect(ti.toString().len > 0);
+}
+
+test "reflect - TypeInfo eql" {
+    const S1 = struct { a: u32, b: i32 };
+    const S2 = struct { a: u32, c: i32 }; // Different field name
+
+    const ti1 = comptime TypeInfo.from(S1);
+    const ti1_again = comptime TypeInfo.from(S1); // Same type
+    const ti2 = comptime TypeInfo.from(S2);
+
+    // eql compares hash and size - same type should be equal
+    try std.testing.expect(comptime ti1.eql(&ti1_again));
+    // Different types (even with same layout) have different hashes
+    try std.testing.expect(comptime !ti1.eql(&ti2));
+
+    // Also test with primitives
+    const ti_u32 = comptime TypeInfo.from(u32);
+    const ti_u32_again = comptime TypeInfo.from(u32);
+    const ti_i32 = comptime TypeInfo.from(i32);
+
+    try std.testing.expect(comptime ti_u32.eql(&ti_u32_again));
+    try std.testing.expect(comptime !ti_u32.eql(&ti_i32));
+}
+
+test "reflect - FuncInfo eql" {
+    const FT1 = fn (i32) i32;
+    const FT2 = fn (i32, i32) i32; // Different signature
+
+    const fi1 = comptime FuncInfo.from(FT1) orelse unreachable;
+    const fi1_again = comptime FuncInfo.from(FT1) orelse unreachable; // Same function
+    const fi2 = comptime FuncInfo.from(FT2) orelse unreachable;
+
+    try std.testing.expect(comptime fi1.eql(&fi1_again));
+    try std.testing.expect(comptime !fi1.eql(&fi2));
+}
+
+test "reflect - FieldInfo eql" {
+    const S1 = struct { a: u32, b: i32 };
+    const S2 = struct { a: u32, c: i32 }; // Different field name
+
+    const ti1 = comptime TypeInfo.from(S1);
+    const ti2 = comptime TypeInfo.from(S2);
+    const field_a1 = ti1.fields[0];
+    const field_a1_again = ti1.fields[0];
+    const field_b1 = ti1.fields[1];
+    const field_c2 = ti2.fields[1];
+
+    try std.testing.expect(comptime field_a1.eql(&field_a1_again));
+    try std.testing.expect(comptime !field_a1.eql(&field_b1));
+    try std.testing.expect(comptime !field_a1.eql(&field_c2));
+}
+
+test "reflect - ReflectInfo eql" {
+    const S = struct { a: u32, b: i32 };
+    const T = struct { a: u32, b: i32 }; // Same layout but different type
+    const FT = fn (i32) i32;
+
+    const ri_type1 = comptime ReflectInfo.from(S) orelse unreachable;
+    const ri_type1_again = comptime ReflectInfo.from(S) orelse unreachable;
+    const ri_func = comptime ReflectInfo.from(FT) orelse unreachable;
+    const ri_type2 = comptime ReflectInfo.from(T) orelse unreachable;
+
+    try std.testing.expect(comptime ri_type1.eql(&ri_type1_again));
+    try std.testing.expect(comptime !ri_type1.eql(&ri_func));
+    try std.testing.expect(comptime !ri_type1.eql(&ri_type2));
+}
+
+test "reflect - PackedStruct TypeInfo" {
+    const PackedStruct = packed struct {
+        a: u8,
+        b: u32,
+    };
+
+    const ti = comptime TypeInfo.from(PackedStruct);
+
+    std.debug.print("PackedStruct TypeInfo: {s}\n", .{ti.name});
+    std.debug.print("\tHash: {x}\n", .{ti.hash});
+    std.debug.print("\tSize: {d}\n", .{ti.size});
+    std.debug.print("\tFields:\n", .{});
+    inline for (ti.fields) |field| {
+        std.debug.print("\t- Name: {s}\n", .{field.name});
+        std.debug.print("\t- Offset: {d}\n", .{field.offset});
+        std.debug.print("\t- Type: {s}\n", .{field.type.name});
+    }
+    // Packed struct is backed by integer type, @sizeOf returns padded size (8 bytes for u40 backing)
+    try std.testing.expectEqual(@as(usize, @sizeOf(PackedStruct)), ti.size);
+    try std.testing.expectEqual(@as(usize, 2), ti.fields.len);
+    try std.testing.expectEqualStrings("a", ti.fields[0].name);
+    try std.testing.expectEqualStrings("b", ti.fields[1].name);
 }
