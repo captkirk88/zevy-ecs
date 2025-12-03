@@ -165,6 +165,23 @@ fn startupSystem(
     std.debug.print("📊 Max connections: {d}\n", .{config.ptr.max_connections});
 }
 
+/// System to count all incoming requests
+fn requestCountingSystem(
+    stats: zevy_ecs.Res(ServerStats),
+    query: zevy_ecs.Query(
+        struct {
+            request: Request,
+        },
+        .{},
+    ),
+) void {
+    var count: usize = 0;
+    while (query.next()) |_| {
+        count += 1;
+    }
+    stats.ptr.total_requests = @intCast(count);
+}
+
 /// System to route incoming requests to appropriate handlers
 fn routingSystem(
     commands: *zevy_ecs.Commands,
@@ -190,6 +207,14 @@ fn routingSystem(
                 .entity = item.entity,
                 .path = item.request.path,
             });
+        } else {
+            // No route matched - add 404 response
+            commands.addComponent(item.entity, Response, .{
+                .status = 404,
+                .content_type = "text/plain",
+                .body = "Not Found",
+                .sent = false,
+            }) catch {};
         }
     }
 }
@@ -383,8 +408,7 @@ fn responseSendingSystem(
                 duration,
             });
 
-            // Update stats
-            stats.ptr.total_requests += 1;
+            // Update success/failure stats (total_requests is counted by requestCountingSystem)
             if (item.response.status < 400) {
                 stats.ptr.successful_requests += 1;
             } else {
@@ -521,6 +545,13 @@ pub fn main() !void {
         &manager,
         zevy_ecs.Stage(zevy_ecs.Stages.Startup),
         startupSystem,
+        zevy_ecs.DefaultParamRegistry,
+    );
+
+    scheduler.addSystem(
+        &manager,
+        zevy_ecs.Stage(zevy_ecs.Stages.First),
+        requestCountingSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
