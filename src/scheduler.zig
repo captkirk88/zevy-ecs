@@ -546,13 +546,13 @@ test "Scheduler registerEventType" {
     };
 
     // Verify a cleanup system was added to the Last stage
-    const stage_info = scheduler.getStageInfo(std.testing.allocator);
-    defer (@constCast(&stage_info)).deinit(std.testing.allocator);
+    var stage_info = scheduler.getStageInfo(std.testing.allocator);
+    defer stage_info.deinit(std.testing.allocator);
 
     // Find the Last stage
     var found_last_stage = false;
     for (stage_info.items) |info| {
-        if (info.stage == Stage(Stages.PostUpdate) + 1) {
+        if (info.stage == Stage(Stages.Last)) {
             std.testing.expect(info.system_count >= 1) catch {
                 std.debug.print("Expected at least one system in Last stage, found {d}\n", .{info.system_count});
                 return error.UnexpectedSystemCount;
