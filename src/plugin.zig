@@ -347,3 +347,55 @@ test "PluginManager multiple FnPlugin instances" {
     try std.testing.expectEqual(@as(i32, 111), manager.getResource(i32).?.*);
     try std.testing.expectEqual(@as(usize, 3), plugin_manager.plugins.items.len);
 }
+
+test "Plugin with deinit for proper memory cleanup" {
+    // Resource to track cleanup state
+    const CleanupTracker = struct {
+        cleanup_called: bool = false,
+    };
+
+    const TestPluginWithDeinit = struct {
+        const Self = @This();
+
+        // Plugin owns allocated memory that must be freed
+        allocated_data: []u8,
+
+        pub fn build(self: *Self, manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            // Allocate some data during build
+            self.allocated_data = try manager.allocator.alloc(u8, 64);
+            @memset(self.allocated_data, 0xAB);
+
+            // Add a resource to verify build ran
+            _ = try manager.addResource(CleanupTracker, .{});
+        }
+
+        pub fn deinit(self: *Self, manager: *zevy_ecs.Manager) void {
+            // Mark that cleanup was called
+            if (manager.getResource(CleanupTracker)) |tracker| {
+                tracker.cleanup_called = true;
+            }
+
+            // Free the allocated data
+            manager.allocator.free(self.allocated_data);
+        }
+    };
+
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var plugin_manager = PluginManager.init(std.testing.allocator);
+
+    // Add and build the plugin
+    try plugin_manager.add(TestPluginWithDeinit, .{ .allocated_data = &.{} });
+    try plugin_manager.build(&manager);
+
+    // Verify build ran
+    const tracker = manager.getResource(CleanupTracker).?;
+    try std.testing.expect(!tracker.cleanup_called);
+
+    // Deinit the plugin manager - this should call the plugin's deinit
+    plugin_manager.deinit(&manager);
+
+    // Verify deinit was called (tracker is still valid since manager hasn't been deinited)
+    try std.testing.expect(tracker.cleanup_called);
+}

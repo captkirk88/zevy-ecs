@@ -88,7 +88,7 @@ exe.root_module.addImport("zevy_ecs", zevy_ecs.module("zevy_ecs"));
 exe.root_module.addImport("zevy_ecs_benchmark", zevy_ecs.module("benchmark"));
 
 // Optional: If you want to use the plugin system
-exe.root_module.addImport("zevy_ecs_plugin", zevy_ecs.module("plugins"));
+exe.root_module.addImport("zevy_ecs_plugins", zevy_ecs.module("plugins")); // Would recommend calling it something easier to work with.
 ```
 
 ### Basic Usage
@@ -974,7 +974,7 @@ const PhysicsPlugin = struct {
 
 // Or use FnPlugin for simple stateless plugins
 const InputPlugin = zevy_plugin.FnPlugin("Input", struct {
-    fn build(manager: *zevy_ecs.Manager) !void {
+    fn build(manager: *zevy_ecs.Manager, plugins: *zevy_ecs.PluginManager) !void {
         // Setup input event handling using Scheduler
         const InputEvent = struct { key: u32 };
         const scheduler = manager.getResource(zevy_ecs.Scheduler) orelse return error.SchedulerNotFound;
@@ -1021,7 +1021,7 @@ pub const RenderPlugin = struct {
     width: u32,
     height: u32,
 
-    pub fn build(self: *@This(), manager: *zevy_ecs.Manager) !void {
+    pub fn build(self: *@This(), manager: *zevy_ecs.Manager, plugins: *zevy_ecs.PluginManager) !void {
         // Add window config resource
         const WindowConfig = struct { width: u32, height: u32 };
         _ = try manager.addResource(WindowConfig, .{
@@ -1033,10 +1033,10 @@ pub const RenderPlugin = struct {
         // Cache systems, setup render resources, etc.
     }
 
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *@This(), manager: *zevy_ecs.Manager) void {
         // Optional: cleanup plugin-specific resources
         _ = self;
-        _ = allocator;
+        _ = manager; // Use manager.allocator or store a custom allocator as a field in the plugin.
     }
 };
 ```
