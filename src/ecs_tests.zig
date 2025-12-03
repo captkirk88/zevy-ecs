@@ -4,12 +4,12 @@ const Manager = ecs.Manager;
 const Entity = ecs.Entity;
 
 // Test components
-const Position = struct {
+const Position = packed struct {
     x: f32,
     y: f32,
 };
 
-const Velocity = struct {
+const Velocity = packed struct {
     dx: f32,
     dy: f32,
 };
@@ -24,7 +24,7 @@ const Name = struct {
 };
 
 // Test resource
-const GameConfig = struct {
+const GameConfig = packed struct {
     difficulty: u8,
     max_players: u32,
 };
