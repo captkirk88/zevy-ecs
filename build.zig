@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    _ = b.addModule("plugins", .{
+    const plugin_mod = b.addModule("plugins", .{
         .root_source_file = b.path("src/plugin.zig"),
         .target = target,
         .optimize = optimize,
@@ -25,12 +25,16 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+
     const tests = b.addTest(.{
         .root_module = mod,
     });
+    const plugin_tests = b.addTest(.{ .root_module = plugin_mod });
 
     const run_tests = b.addRunArtifact(tests);
+    const run_plugin_tests = b.addRunArtifact(plugin_tests);
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_plugin_tests.step);
 }

@@ -723,10 +723,15 @@ fn getDecls(comptime type_info: std.builtin.Type) []const std.builtin.Type.Decla
     return &[_]std.builtin.Type.Declaration{};
 }
 
+/// Check if a struct has a function with the given name
 pub fn hasFunc(comptime T: type, comptime func_name: []const u8) bool {
     return hasFuncWithArgs(T, func_name, null);
 }
 
+/// Check if a struct has a function with the given name and argument types.
+///
+/// If arg_types is null, only the function name is checked.
+/// If function is a method of `T` you do not need to include the self reference.
 pub fn hasFuncWithArgs(comptime T: type, comptime func_name: []const u8, comptime arg_types: ?[]const type) bool {
     const type_info = @typeInfo(T);
     if (type_info == .pointer) {
@@ -740,8 +745,11 @@ pub fn hasFuncWithArgs(comptime T: type, comptime func_name: []const u8, comptim
         if (fn_type != .@"fn") return false;
 
         if (arg_types) |at| {
-            // Check if first parameter is self (has type T)
-            const has_self_param = fn_type.@"fn".params.len > 0 and fn_type.@"fn".params[0].type == T;
+            // Check if first parameter is self (has type T, *T, or *const T)
+            const has_self_param = fn_type.@"fn".params.len > 0 and
+                (fn_type.@"fn".params[0].type == T or
+                    fn_type.@"fn".params[0].type == *T or
+                    fn_type.@"fn".params[0].type == *const T);
 
             // If it has self, skip it when checking arg_types; otherwise check all params
             const start_idx = if (has_self_param) 1 else 0;
@@ -789,17 +797,20 @@ pub fn hasField(comptime T: type, field_name: []const u8) bool {
     return false;
 }
 
+/// Get the type of a field by name if that field exists, otherwise `null`.
 pub fn getField(comptime T: type, field_name: []const u8) ?type {
     const type_info = @typeInfo(T);
     if (type_info == .pointer) {
         const Child = type_info.pointer.child;
         return getField(Child, field_name);
     }
-    const fields = blk: {
-        if (type_info == .@"struct") break :blk type_info.@"struct".fields;
-        if (type_info == .@"enum") break :blk type_info.@"enum".fields;
-        if (type_info == .@"union") break :blk type_info.@"union".fields;
-        return false;
+    const fields = blk: switch (type_info) {
+        .@"struct" => |info| break :blk info.fields,
+        .@"enum" => |info| break :blk info.fields,
+        .@"union" => |info| break :blk info.fields,
+        .pointer => |info| return getField(info.pointer.child),
+        .optional => |info| return getField(info.optional.child),
+        else => return &[_]std.builtin.Type.Field{},
     };
     inline for (fields) |field| {
         if (std.mem.eql(u8, field.name, field_name)) {
@@ -809,6 +820,7 @@ pub fn getField(comptime T: type, field_name: []const u8) ?type {
     return null;
 }
 
+///
 pub fn getFields(comptime T: type) []const []const u8 {
     return std.meta.fieldNames(T);
 }

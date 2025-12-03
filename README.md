@@ -963,11 +963,12 @@ const zevy_plugin = @import("zevy_ecs_plugin");
 const PhysicsPlugin = struct {
     gravity: f32,
 
-    pub fn build(self: *@This(), manager: *zevy_ecs.Manager) !void {
+    pub fn build(self: *@This(), manager: *zevy_ecs.Manager, plugins: *zevy_ecs.PluginManager) !void {
         // Add resources
         _ = try manager.addResource(f32, self.gravity);
 
         // Register systems, setup state, etc.
+        // check if required plugins are loaded
     }
 };
 

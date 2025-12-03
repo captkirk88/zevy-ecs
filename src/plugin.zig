@@ -67,7 +67,7 @@ pub const PluginManager = struct {
     /// Add a plugin instance to the manager.
     pub fn add(self: *PluginManager, comptime T: type, instance: T) error{ OutOfMemory, PluginAlreadyExists }!void {
         // Compile-time verification
-        if (!comptime isPlugin(T)) {
+        if (!comptime zevy_ecs.reflect.hasFuncWithArgs(T, "build", &[_]type{ *zevy_ecs.Manager, *PluginManager })) {
             @compileError(std.fmt.comptimePrint("Plugin '{s}' does not implement plugin interface (must have: pub fn build(self: *T, manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) !void)", .{@typeName(T)}));
         }
 
@@ -81,7 +81,7 @@ pub const PluginManager = struct {
 
         // Check if plugin already exists
         if (self.plugin_hashes.contains(hash)) {
-            return error.PluginAlreadyExists; // Plugin already added, skip
+            return error.PluginAlreadyExists;
         }
 
         // Allocate and store the plugin instance
@@ -166,18 +166,6 @@ pub const PluginManager = struct {
     pub fn has(self: *const PluginManager, comptime T: type) bool {
         const hash = comptime std.hash.Wyhash.hash(0, @typeName(T));
         return self.plugin_hashes.contains(hash);
-    }
-
-    inline fn isPlugin(comptime T: type) bool {
-        if (!@hasDecl(T, "build")) return false;
-
-        const build_fn = @TypeOf(T.build);
-        const build_info = @typeInfo(build_fn);
-
-        if (build_info != .@"fn") return false;
-
-        // Verify it's a function that can be called
-        return true;
     }
 };
 
@@ -298,11 +286,7 @@ test "Function plugin creation" {
 test "PluginManager prevents duplicate plugins" {
     const TestPlugin = struct {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
-            const res = manager.getResource(i32) orelse {
-                _ = try manager.addResource(i32, 0);
-                return;
-            };
-            res.* += 1;
+            _ = try manager.addResource(i32, 42);
         }
     };
 
@@ -312,14 +296,17 @@ test "PluginManager prevents duplicate plugins" {
     var plugin_manager = PluginManager.init(std.testing.allocator);
     defer plugin_manager.deinit(&manager);
 
-    // Add the same plugin type multiple times
+    // First add should succeed
     try plugin_manager.add(TestPlugin, .{});
-    try plugin_manager.add(TestPlugin, .{});
-    try plugin_manager.add(TestPlugin, .{});
+
+    // Subsequent adds of the same plugin type should return PluginAlreadyExists
+    try std.testing.expectError(error.PluginAlreadyExists, plugin_manager.add(TestPlugin, .{}));
+    try std.testing.expectError(error.PluginAlreadyExists, plugin_manager.add(TestPlugin, .{}));
+
     try plugin_manager.build(&manager);
 
-    // Should only have been built once
-    try std.testing.expectEqual(@as(i32, 0), manager.getResource(i32).?.*);
+    // Should only have been added and built once
+    try std.testing.expectEqual(@as(i32, 42), manager.getResource(i32).?.*);
     try std.testing.expectEqual(@as(usize, 1), plugin_manager.plugins.items.len);
 }
 
