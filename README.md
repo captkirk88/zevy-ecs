@@ -404,7 +404,7 @@ Systems can request various parameters that are automatically injected. All para
 - **`*Relations`**: Access to the RelationManager for entity relationships
 
 > [!NOTE]
-> Direct `*Manager` access is available via `commands.manager`, *compatibility for now*, when using `*Commands`. For immediate operations during system execution, use `commands.manager` methods directly. For deferred entity creation, use `commands.create()` which returns an `EntityCommands` with a `PendingEntity` - call `entity_cmds.flush()` to create the entity and apply queued components. For deferred operations on existing entities, use `Commands` methods like `addComponent`, `removeComponent`, `destroyEntity`, etc.
+> Direct `*Manager` access is available via `commands.manager`, _compatibility for now_, when using `*Commands`. For immediate operations during system execution, use `commands.manager` methods directly. For deferred entity creation, use `commands.create()` which returns an `EntityCommands` with a `PendingEntity` - call `entity_cmds.flush()` to create the entity and apply queued components. For deferred operations on existing entities, use `Commands` methods like `addComponent`, `removeComponent`, `destroyEntity`, etc.
 
 More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
 
@@ -474,7 +474,6 @@ fn collisionResponseSystem(
         std.debug.print("Collision between {d} and {d}\n",
             .{ event.data.entity_a.id, event.data.entity_b.id });
             event.handled = true; // Mark handled if this event type won't be processed again in another system
-            // Note: Alternatively, you can call reader.markHandled() after processing all events
     }
 }
 

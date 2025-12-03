@@ -128,6 +128,8 @@ pub fn EventReader(comptime T: type) type {
         }
 
         /// Mark the last read event as handled
+        ///
+        /// *Deprecated and not really useful*
         pub fn markHandled(self: *Self) void {
             var mut_self: *Self = @constCast(self);
             if (mut_self.iterator) |*it| {
