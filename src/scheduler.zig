@@ -54,16 +54,18 @@ const STAGE_GAP: StageId = 100_000;
 /// scheduler.addSystem(Stage(MyStages.EarlyGame), my_system);
 /// ```
 pub const Stages = struct {
-    /// Predefined stages (0 - 999,999)
+    /// Minimum stage. PreStartup uses same priority as Min.
     pub const Min = struct {
         pub const priority: StageId = 0;
     };
+    /// Initialization stage.
     pub const PreStartup = struct {
         pub const priority: StageId = Min.priority;
     };
     pub const Startup = struct {
         pub const priority: StageId = STAGE_GAP / 100; // 1,000
     };
+    /// First stage to be ran in the beginning of a update/draw/logic loop.
     pub const First = struct {
         pub const priority: StageId = STAGE_GAP; // 100,000
     };
@@ -86,24 +88,30 @@ pub const Stages = struct {
         pub const priority: StageId = 7 * STAGE_GAP; // 700,000
     };
 
+    /// Last stage to be ran in a update/draw/logic loop.
     pub const Last = struct {
         pub const priority: StageId = 8 * STAGE_GAP; // 800,000
     };
 
-    // State management stages (1,000,000 - 1,999,999)
+    /// Internal use for States
     pub const StateTransition = struct {
         pub const priority: StageId = 1_000_000;
     };
+    /// Internal use for States
     pub const StateOnExit = struct {
         pub const priority: StageId = StateTransition.priority + STAGE_GAP;
     };
+    /// Internal use for States
     pub const StateOnEnter = struct {
         pub const priority: StageId = StateOnExit.priority + STAGE_GAP;
     };
+    /// Internal use for States
     pub const StateUpdate = struct {
         pub const priority: StageId = StateOnEnter.priority + STAGE_GAP;
     };
 
+    /// Exit stage, final stage to run.
+    /// Range Exit -> Max.
     pub const Exit = struct {
         pub const priority: StageId = std.math.maxInt(i32) - STAGE_GAP;
     };
@@ -262,7 +270,7 @@ pub const Scheduler = struct {
     /// Register an event with the scheduler
     /// This creates an EventStore resource and adds a cleanup system at the Last stage
     pub fn registerEvent(self: *Scheduler, ecs: *ecs_mod.Manager, comptime T: type, comptime ParamRegistry: type) ecs_mod.errors!void {
-        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.PostUpdate) + 1, ParamRegistry);
+        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.Last), ParamRegistry);
     }
 
     /// Register an event with cleanup at a specific stage
@@ -281,10 +289,11 @@ pub const Scheduler = struct {
             return err;
         };
 
-        // Create cleanup system that discards handled events (consumes them)
+        // Create cleanup system that discards handled and unhandled events (consumes them)
         const cleanup_system = struct {
             pub fn cleanup(_: *ecs_mod.Manager, store_res: params.Res(events.EventStore(T))) void {
                 store_res.ptr.discardHandled();
+                store_res.ptr.discardUnhandled();
             }
         }.cleanup;
 

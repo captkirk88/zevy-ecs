@@ -27,6 +27,7 @@ pub fn EventStore(comptime T: type) type {
                 return wrapper;
             }
 
+            /// *Deprecated, just set the Event.handled field to true.*
             pub fn markHandled(self: *Iterator) void {
                 if (self.index > 0 and self.index <= self.store.len) {
                     const actual_index = self.store.getActualIndex(self.index - 1);
@@ -182,6 +183,41 @@ pub fn EventStore(comptime T: type) type {
                 // self.head = self.getActualIndex(0);
                 // self.tail = self.getActualIndex(self.len);
 
+                // After compacting, events are now contiguous starting at head
+                // tail points to the next position after the last event
+                self.tail = (self.head + self.len) % self.capacity;
+            }
+        }
+
+        /// Discard all unhandled events, keeping only handled ones
+        /// This is useful when you want to preserve events that have been processed
+        /// and remove events that haven't been handled yet
+        pub fn discardUnhandled(self: *Self) void {
+            if (self.len == 0) return;
+
+            var write_index: usize = 0;
+            var read_index: usize = 0;
+
+            // Iterate through all events and keep only handled ones
+            while (read_index < self.len) {
+                const actual_read_idx = self.getActualIndex(read_index);
+                if (self.events.items[actual_read_idx].handled) {
+                    // Move handled event to the write position
+                    if (write_index != read_index) {
+                        const actual_write_idx = self.getActualIndex(write_index);
+                        self.events.items[actual_write_idx] = self.events.items[actual_read_idx];
+                    }
+                    write_index += 1;
+                }
+                read_index += 1;
+            }
+
+            // Update the queue state
+            self.len = write_index;
+            if (self.len == 0) {
+                self.head = 0;
+                self.tail = 0;
+            } else {
                 // After compacting, events are now contiguous starting at head
                 // tail points to the next position after the last event
                 self.tail = (self.head + self.len) % self.capacity;
@@ -414,6 +450,59 @@ test "EventStore mark handled and discard handled" {
     try std.testing.expect(has_3);
 }
 
+test "EventStore discard unhandled events" {
+    const allocator = std.testing.allocator;
+
+    var store = EventStore(u8).init(allocator, 4);
+    defer store.deinit();
+
+    // Add some events
+    store.push(1);
+    store.push(2);
+    store.push(3);
+    store.push(4);
+
+    try std.testing.expectEqual(@as(usize, 4), store.count());
+
+    // Mark some events as handled during iteration
+    var iter = store.iterator();
+    var handled_count: usize = 0;
+    while (iter.next()) |wrapper| {
+        if (wrapper.data == 2 or wrapper.data == 4) {
+            wrapper.handled = true;
+            handled_count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), handled_count);
+
+    // Discard unhandled events (keeps only handled ones)
+    store.discardUnhandled();
+
+    // Should only have 2 events left (the handled ones: 2 and 4)
+    try std.testing.expectEqual(@as(usize, 2), store.count());
+
+    // Verify the remaining events are the handled ones
+    var remaining_values = try std.ArrayList(u8).initCapacity(allocator, 0);
+    defer remaining_values.deinit(allocator);
+
+    iter.reset();
+    while (iter.next()) |wrapper| {
+        try remaining_values.append(allocator, wrapper.data);
+        try std.testing.expect(wrapper.handled);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), remaining_values.items.len);
+    // The order might be different due to the discard operation, so just check they exist
+    var has_2 = false;
+    var has_4 = false;
+    for (remaining_values.items) |val| {
+        if (val == 2) has_2 = true;
+        if (val == 4) has_4 = true;
+    }
+    try std.testing.expect(has_2);
+    try std.testing.expect(has_4);
+}
+
 test "EventReader and EventWriter usage" {
     const allocator = std.testing.allocator;
 
@@ -479,7 +568,7 @@ test "EventReader and EventWriter usage" {
     iter.reset();
     while (iter.next()) |wrapper| {
         if (wrapper.data == 200) {
-            iter.markHandled();
+            wrapper.handled = true;
         }
     }
 

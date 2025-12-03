@@ -127,17 +127,7 @@ pub fn EventReader(comptime T: type) type {
             return null;
         }
 
-        /// Mark the last read event as handled
-        ///
-        /// *Deprecated and not really useful*
-        pub fn markHandled(self: *Self) void {
-            var mut_self: *Self = @constCast(self);
-            if (mut_self.iterator) |*it| {
-                it.markHandled();
-            }
-        }
-
-        /// Reset the read position to the beginning
+        /// Reset the read position to the beginning.
         pub fn reset(self: *Self) void {
             var mut_self: *Self = @constCast(self);
             mut_self.iterator = mut_self.event_store.iterator();
