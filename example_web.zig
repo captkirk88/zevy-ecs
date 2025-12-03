@@ -209,10 +209,12 @@ fn routingSystem(
             });
         } else {
             // No route matched - add 404 response
+            const body_text = std.fmt.allocPrint(commands.allocator, "404 Not Found: The requested path '{s}' is gone...", .{item.request.path}) catch "404 Not Found";
+
             commands.addComponent(item.entity, Response, .{
                 .status = 404,
                 .content_type = "text/plain",
-                .body = "Not Found",
+                .body = body_text,
                 .sent = false,
             }) catch {};
         }
@@ -644,7 +646,7 @@ pub fn main() !void {
                 .method = "GET",
                 .path = "/api/protected/user",
                 .headers = "User-Agent: Mozilla/5.0; Cookie: session_id=sess_12345",
-                .body = "",
+                .body = "Me hacker!!",
                 .timestamp = std.time.milliTimestamp(),
             },
         });
@@ -657,7 +659,7 @@ pub fn main() !void {
                 .method = "GET",
                 .path = "/api/protected/data",
                 .headers = "User-Agent: Mozilla/5.0",
-                .body = "",
+                .body = "Ur data R belong 2 Us",
                 .timestamp = std.time.milliTimestamp(),
             },
         });
