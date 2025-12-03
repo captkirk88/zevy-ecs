@@ -159,17 +159,15 @@ const ServerState = enum {
 
 /// Startup system to initialize server resources
 fn startupSystem(
-    manager: *zevy_ecs.Manager,
     config: zevy_ecs.Res(ServerConfig),
 ) !void {
-    _ = manager;
     std.debug.print("🚀 Server starting on {s}:{d}\n", .{ config.ptr.host, config.ptr.port });
     std.debug.print("📊 Max connections: {d}\n", .{config.ptr.max_connections});
 }
 
 /// System to route incoming requests to appropriate handlers
 fn routingSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     routes: zevy_ecs.Res(RouteRegistry),
     query: zevy_ecs.Query(
         struct {
@@ -183,7 +181,7 @@ fn routingSystem(
     while (query.next()) |item| {
         if (routes.ptr.match(item.request.path)) |handler| {
             // Add route match component
-            _ = manager.addComponent(item.entity, RouteMatch, .{
+            commands.addComponent(item.entity, RouteMatch, .{
                 .handler_name = handler,
             }) catch continue;
 
@@ -198,7 +196,7 @@ fn routingSystem(
 
 /// Authentication middleware system
 fn authenticationSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     sessions: zevy_ecs.Res(SessionStore),
     time: zevy_ecs.Res(CurrentTime),
     query: zevy_ecs.Query(
@@ -226,7 +224,7 @@ fn authenticationSystem(
 
                     if (session.user_id) |user_id| {
                         // Add auth token component
-                        _ = manager.addComponent(item.entity, AuthToken, .{
+                        commands.addComponent(item.entity, AuthToken, .{
                             .token = session.id,
                             .user_id = user_id,
                             .expires_at = session.created_at + 3600000, // 1 hour
@@ -247,7 +245,7 @@ fn authenticationSystem(
 
 /// Rate limiting middleware system
 fn rateLimitingSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     time: zevy_ecs.Res(CurrentTime),
     query: zevy_ecs.Query(
         struct {
@@ -259,7 +257,7 @@ fn rateLimitingSystem(
 ) void {
     while (query.next()) |item| {
         // Try to get existing rate limit component or create new one
-        const rate_limit = manager.getComponent(item.entity, RateLimit) catch null;
+        const rate_limit = commands.getComponent(item.entity, RateLimit) catch null;
 
         if (rate_limit) |rl| {
             const window_elapsed = time.ptr.timestamp - rl.window_start;
@@ -273,7 +271,7 @@ fn rateLimitingSystem(
 
                 if (rl.requests_count > rl.max_requests) {
                     // Rate limit exceeded - set response
-                    _ = manager.addComponent(item.entity, Response, .{
+                    commands.addComponent(item.entity, Response, .{
                         .status = 429,
                         .content_type = "text/plain",
                         .body = "Rate limit exceeded",
@@ -283,7 +281,7 @@ fn rateLimitingSystem(
             }
         } else {
             // First request from this source
-            _ = manager.addComponent(item.entity, RateLimit, .{
+            commands.addComponent(item.entity, RateLimit, .{
                 .requests_count = 1,
                 .window_start = time.ptr.timestamp,
                 .max_requests = 100,
@@ -295,7 +293,7 @@ fn rateLimitingSystem(
 
 /// Request handler system for home page
 fn homeHandlerSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     query: zevy_ecs.Query(
         struct {
             entity: zevy_ecs.Entity,
@@ -319,7 +317,7 @@ fn homeHandlerSystem(
                 \\</html>
             ;
 
-            _ = manager.addComponent(item.entity, Response, .{
+            commands.addComponent(item.entity, Response, .{
                 .status = 200,
                 .content_type = "text/html",
                 .body = body_text,
@@ -331,7 +329,7 @@ fn homeHandlerSystem(
 
 /// API handler system for user data
 fn apiUserHandlerSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     query: zevy_ecs.Query(
         struct {
             entity: zevy_ecs.Entity,
@@ -344,11 +342,11 @@ fn apiUserHandlerSystem(
 ) void {
     while (query.next()) |item| {
         if (std.mem.eql(u8, item.route.handler_name, "api_user")) {
-            const body_text = std.fmt.allocPrint(manager.allocator,
+            const body_text = std.fmt.allocPrint(commands.allocator,
                 \\{{"user_id": {d}, "authenticated": true, "token": "{s}"}}
             , .{ item.auth.user_id, item.auth.token }) catch "{}";
 
-            _ = manager.addComponent(item.entity, Response, .{
+            commands.addComponent(item.entity, Response, .{
                 .status = 200,
                 .content_type = "application/json",
                 .body = body_text,
@@ -360,7 +358,7 @@ fn apiUserHandlerSystem(
 
 /// Response sending system
 fn responseSendingSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     stats: zevy_ecs.Res(ServerStats),
     time: zevy_ecs.Res(CurrentTime),
     query: zevy_ecs.Query(
@@ -404,14 +402,14 @@ fn responseSendingSystem(
             });
 
             // Clean up request entity after sending
-            manager.destroy(item.entity) catch {};
+            commands.destroyEntity(item.entity) catch {};
         }
     }
 }
 
 /// System to handle authentication failures
 fn authFailureHandlerSystem(
-    manager: *zevy_ecs.Manager,
+    commands: *zevy_ecs.Commands,
     reader: zevy_ecs.EventReader(AuthFailedEvent),
 ) void {
     while (reader.read()) |event| {
@@ -421,11 +419,11 @@ fn authFailureHandlerSystem(
         });
 
         // Add 401 response
-        const body_text = std.fmt.allocPrint(manager.allocator,
+        const body_text = std.fmt.allocPrint(commands.allocator,
             \\{{"error": "Unauthorized", "reason": "{s}"}}
         , .{event.data.reason}) catch "{}";
 
-        _ = manager.addComponent(event.data.entity, Response, .{
+        _ = commands.addComponent(event.data.entity, Response, .{
             .status = 401,
             .content_type = "application/json",
             .body = body_text,
@@ -438,7 +436,6 @@ fn authFailureHandlerSystem(
 
 /// Stats display system
 fn statsDisplaySystem(
-    _: *zevy_ecs.Manager,
     stats: zevy_ecs.Res(ServerStats),
 ) void {
     std.debug.print("\n📊 Server Stats:\n", .{});
@@ -455,7 +452,6 @@ fn statsDisplaySystem(
 
 /// Cleanup system for expired sessions
 fn sessionCleanupSystem(
-    _: *zevy_ecs.Manager,
     sessions: zevy_ecs.Res(SessionStore),
     time: zevy_ecs.Res(CurrentTime),
 ) void {
@@ -512,9 +508,9 @@ pub fn main() !void {
     _ = try manager.addResource(CurrentTime, .{ .timestamp = std.time.milliTimestamp() });
 
     // Register events
-    try scheduler.registerEvent(&manager, RequestEvent);
-    try scheduler.registerEvent(&manager, ResponseSentEvent);
-    try scheduler.registerEvent(&manager, AuthFailedEvent);
+    try scheduler.registerEvent(&manager, RequestEvent, zevy_ecs.DefaultParamRegistry);
+    try scheduler.registerEvent(&manager, ResponseSentEvent, zevy_ecs.DefaultParamRegistry);
+    try scheduler.registerEvent(&manager, AuthFailedEvent, zevy_ecs.DefaultParamRegistry);
 
     // Register state
     try scheduler.registerState(&manager, ServerState);
@@ -640,7 +636,7 @@ pub fn main() !void {
     try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
 
     // Display stats
-    statsDisplaySystem(&manager, .{ .ptr = manager.getResource(ServerStats).? });
+    statsDisplaySystem(.{ .ptr = manager.getResource(ServerStats).? });
 
     // Shutdown
     try scheduler.transitionTo(&manager, ServerState, .ShuttingDown);

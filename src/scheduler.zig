@@ -291,7 +291,7 @@ pub const Scheduler = struct {
 
         // Create cleanup system that discards handled and unhandled events (consumes them)
         const cleanup_system = struct {
-            pub fn cleanup(_: *ecs_mod.Manager, store_res: params.Res(events.EventStore(T))) void {
+            pub fn cleanup(store_res: params.Res(events.EventStore(T))) void {
                 store_res.ptr.discardHandled();
                 store_res.ptr.discardUnhandled();
             }

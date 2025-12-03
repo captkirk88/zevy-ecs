@@ -31,6 +31,7 @@ pub const PendingEntity = struct {
 /// Commands provides a way to queue deferred operations on the ECS.
 /// Operations are executed when flush() is called, typically after system execution.
 pub const Commands = struct {
+    /// Same allocator passed into ecs Manager.
     allocator: std.mem.Allocator,
     manager: *ecs.Manager,
     commands: std.ArrayList(Command),
@@ -83,6 +84,13 @@ pub const Commands = struct {
         const closure = try self.allocator.create(Closure);
         closure.* = .{ .ent = ent, .value = value };
         try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit_cmd, .data = closure });
+    }
+
+    /// Get a component from an existing entity.
+    ///
+    /// **This executes immediately, call `flush()` before calling this.**
+    pub fn getComponent(self: *Commands, ent: ecs.Entity, comptime T: type) error{EntityNotAlive}!?*T {
+        return self.manager.getComponent(ent, T);
     }
 
     /// Queue removing a component from an existing entity.

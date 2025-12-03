@@ -164,13 +164,8 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
     if (!comptime reflect.hasFuncWithArgs(ParamRegistry, "apply", &[_]type{ *ecs_mod.Manager, type })) {
         @compileError("ParamRegistry must have an 'apply' function with signature: fn (*ecs_mod.Manager, type) type");
     }
-    const log = std.log.scoped(.zevy_ecs);
-    log.debug("Creating trampoline for system: {s}", .{@typeName(system_type)});
     return &struct {
         pub fn trampoline(ecs: *ecs_mod.Manager, ctx: ?*anyopaque) anyerror!ReturnType {
-            if (is_debug) {
-                log.debug("Running system: {s}", .{@typeName(@TypeOf(system_fn))});
-            }
             if (ctx == null) return error.SystemContextNull;
 
             const ContextType = SystemWithArgsContext(Args);
