@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const archetype_storage = @import("archetype_storage.zig");
 const archetype_mod = @import("archetype.zig");
 const Entity = @import("ecs.zig").Entity;
-const reflect = @import("reflect.zig");
+const reflect = @import("zevy_reflect");
 
 /// Check if a type is optional (?T) and return the child type if so
 fn isOptionalType(comptime T: type) bool {

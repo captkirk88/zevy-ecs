@@ -1,5 +1,5 @@
 const std = @import("std");
-const reflect = @import("reflect.zig");
+const reflect = @import("zevy_reflect");
 const ecs = @import("ecs.zig");
 
 /// Represents a component instance with its type information and data

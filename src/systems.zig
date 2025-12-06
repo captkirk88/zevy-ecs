@@ -7,7 +7,7 @@ const registry = @import("systems.registry.zig");
 const params = @import("systems.params.zig");
 const scheduler_mod = @import("scheduler.zig");
 const Commands = @import("commands.zig").Commands;
-const reflect = @import("reflect.zig");
+const reflect = @import("zevy_reflect");
 
 const is_debug = builtin.mode == .Debug;
 

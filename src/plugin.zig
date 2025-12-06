@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const zevy_ecs = @import("zevy_ecs");
+const reflect = @import("zevy_reflect");
 
 /// Check if a type implements the plugin interface at compile time.
 /// A plugin must have a `build` method with signature:
@@ -67,7 +68,7 @@ pub const PluginManager = struct {
     /// Add a plugin instance to the manager.
     pub fn add(self: *PluginManager, comptime T: type, instance: T) error{ OutOfMemory, PluginAlreadyExists }!void {
         // Compile-time verification
-        if (!comptime zevy_ecs.reflect.hasFuncWithArgs(T, "build", &[_]type{ *zevy_ecs.Manager, *PluginManager })) {
+        if (!comptime reflect.hasFuncWithArgs(T, "build", &[_]type{ *zevy_ecs.Manager, *PluginManager })) {
             @compileError(std.fmt.comptimePrint("Plugin '{s}' does not implement plugin interface (must have: pub fn build(self: *T, manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) !void)", .{@typeName(T)}));
         }
 

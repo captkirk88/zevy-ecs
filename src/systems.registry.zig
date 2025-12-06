@@ -1,8 +1,8 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
-const reflect = @import("reflect.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
+const reflect = @import("zevy_reflect");
 
 const errors = @import("errors.zig");
 

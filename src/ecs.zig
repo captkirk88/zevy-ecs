@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const reflect = @import("reflect.zig");
+const reflect = @import("zevy_reflect");
 const world = @import("world.zig");
 const World = world.World;
 const serialize = @import("serialize.zig");
@@ -395,15 +395,15 @@ pub const Manager = struct {
     /// Get a mutable pointer to a resource of type T, adding it with default_value if it doesn't exist.
     /// The default_value will be deinitialized if the resource already exists and has a deinit method.
     ///
-    /// ### Warning
-    /// Initialization of `default_value` requiring a allocator must use `zevy_ecs.Manager.allocator` for proper memory management if `deinit` requires the allocator used to initialize.
-    pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T) error{OutOfMemory}!*T {
+    /// If no allocator is specified, defaults to the `Manager`'s allocator.
+    pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T, allocator: ?std.mem.Allocator) error{OutOfMemory}!*T {
         if (self.getResource(T)) |res| {
             if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator})) {
-                default_value.deinit(self.allocator);
-            } else if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{})) {
-                default_value.deinit();
+                @constCast(&default_value).deinit(allocator orelse self.allocator);
+            } else if (comptime reflect.hasFunc(T, "deinit")) {
+                @constCast(&default_value).deinit();
             }
+            // Warning: If T requires deinitialization method but calls it something other than deinit, you will get leaks.
             return res;
         } else {
             return self.addResource(T, default_value) catch |err| switch (err) {
@@ -765,7 +765,7 @@ test "getOrAddResource" {
         value: u32,
     };
 
-    _ = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }) catch unreachable;
+    _ = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }, null) catch unreachable;
 
     try std.testing.expect(ecs.hasResource(MyResource));
 }

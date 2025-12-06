@@ -1,19 +1,31 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const reflect_dep = b.lazyDependency("zevy_reflect", .{
+        .target = target,
+        .optimize = optimize,
+    }) orelse return error.ZevyReflectDependencyNotFound;
+    const reflect_mod = reflect_dep.module("zevy_reflect");
 
     const mod = b.addModule("zevy_ecs", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zevy_reflect", .module = reflect_mod },
+        },
     });
 
     _ = b.addModule("benchmark", .{
         .root_source_file = b.path("src/benchmark.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zevy_reflect", .module = reflect_mod },
+        },
     });
 
     const plugin_mod = b.addModule("plugins", .{
@@ -22,9 +34,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zevy_ecs", .module = mod },
+            .{ .name = "zevy_reflect", .module = reflect_mod },
         },
     });
-
 
     const tests = b.addTest(.{
         .root_module = mod,

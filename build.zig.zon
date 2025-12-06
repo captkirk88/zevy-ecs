@@ -7,7 +7,12 @@
 
     .minimum_zig_version = "0.15.1",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .zevy_reflect = .{
+            .url = "git+https://github.com/captkirk88/zevy-reflect#e92be3991320b249dc692c2441041ad002605887",
+            .hash = "zevy_reflect-0.0.1-8SzYxkTAAADe3roYg_Axq3LJDlPn5K-tLv6EUyYntZ9S",
+        },
+    },
 
     .paths = .{
         "build.zig",

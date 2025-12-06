@@ -6,6 +6,8 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 
 [![][license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
 
+[![Zig Version](https://img.shields.io/badge/zig-0.15.1+-blue.svg)](https://ziglang.org/)
+
 ## Features
 
 - **Archetype-based storage**: Efficiently groups entities with the same component combinations for cache-friendly iteration
@@ -58,13 +60,6 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 - [Projects](#projects)
 
 ## Quick Start
-
-### Requirements
-
-- Zig 0.15.1
-
-> [!NOTE]
-> Zig 0.15.2 compatible but not required.
 
 ### Installation
 
