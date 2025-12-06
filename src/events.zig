@@ -25,14 +25,6 @@ pub fn EventStore(comptime T: type) type {
                 return wrapper;
             }
 
-            /// *Deprecated, just set the Event.handled field to true.*
-            pub fn markHandled(self: *Iterator) void {
-                if (self.index > 0 and self.index <= self.store.len) {
-                    const actual_index = self.store.getActualIndex(self.index - 1);
-                    self.store.events.items[actual_index].handled = true;
-                }
-            }
-
             pub fn reset(self: *Iterator) void {
                 self.index = 0;
             }
@@ -394,7 +386,7 @@ test "EventStore mark handled and discard handled" {
     var handled_count: usize = 0;
     while (iter.next()) |wrapper| {
         if (wrapper.data == 2 or wrapper.data == 4) {
-            iter.markHandled();
+            wrapper.handled = true;
             handled_count += 1;
         }
     }
