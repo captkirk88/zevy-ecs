@@ -5,8 +5,6 @@ const archetype_mod = @import("archetype.zig");
 const Entity = @import("ecs.zig").Entity;
 const reflect = @import("reflect.zig");
 
-const log = std.log.scoped(.zevy_ecs);
-
 /// Check if a type is optional (?T) and return the child type if so
 fn isOptionalType(comptime T: type) bool {
     const info = @typeInfo(T);
@@ -81,9 +79,9 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
 
         pub const IncludeTypesParam = IncludeTypes;
         pub const ExcludeTypesParam = ExcludeTypes;
-        pub const IncludeTypesTupleType = blk: {
+        pub const IncludeTypesTupleType = ret: {
             const is_tuple = include_info.@"struct".is_tuple;
-            const fields = blk2: {
+            const fields = blk: {
                 var f: [include_info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
                 for (include_info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
@@ -115,9 +113,9 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                         .alignment = @alignOf(field_type),
                     };
                 }
-                break :blk2 f;
+                break :blk f;
             };
-            break :blk @Type(.{ .@"struct" = .{
+            break :ret @Type(.{ .@"struct" = .{
                 .layout = .auto,
                 .fields = &fields,
                 .decls = &[_]std.builtin.Type.Declaration{},
@@ -144,7 +142,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             if (self.current_archetype) |arch| {
                 return arch.entities.items[self.entity_index];
             }
-            @panic("Query.entity() called when no archetype is available. Ensure next() returned a non-null result before calling entity().");
+            @panic("Query.entity() called when no archetype is available. Ensure next() returned a non-null result before calling entity() or check with hasNext().");
         }
 
         /// Returns true if the query has no matching entities

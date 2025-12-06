@@ -249,27 +249,7 @@ pub const RelationManager = struct {
         parent: Entity,
         comptime Kind: type,
     ) !void {
-        const config = comptime Relation(Kind).config;
-
-        // Handle exclusive relations (replace existing)
-        if (config.exclusive) {
-            // Remove existing relation of this type if any
-            if (try manager.getComponent(child, Relation(Kind))) |existing| {
-                try self.remove(manager, child, existing.target, Kind);
-            }
-        }
-
-        // For non-exclusive indexed relations, only use index (no component)
-        // For non-indexed or exclusive relations, add component
-        if (!config.indexed or config.exclusive) {
-            try manager.addComponent(child, Relation(Kind), .{ .target = parent, .data = .{} });
-        }
-
-        // Add to index if this type is configured as indexed
-        if (config.indexed) {
-            const index = try self.getOrCreateIndex(Kind);
-            try index.add(child, parent);
-        }
+        try self.addWithData(manager, child, parent, Kind, .{});
     }
 
     /// Add relation with custom data

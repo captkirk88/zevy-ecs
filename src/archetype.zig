@@ -4,8 +4,6 @@ const errors = @import("errors.zig");
 const TypeInfo = @import("world.zig").TypeInfo;
 const Entity = @import("ecs.zig").Entity;
 
-const log = std.log.scoped(.zevy_ecs);
-
 /// Represents a unique set of component types (an archetype signature)
 pub const ArchetypeSignature = struct {
     // Sorted array of component type hashes
@@ -41,8 +39,7 @@ pub const Archetype = struct {
             .allocator = allocator,
             .signature = signature,
             .entities = (std.ArrayList(Entity).initCapacity(allocator, initial_capacity) catch |err| {
-                log.err("Failed to allocate entities list for archetype with capacity {d}: {s}", .{ initial_capacity, @errorName(err) });
-                @panic("Failed to allocate");
+                std.debug.panic("Failed to allocate entities list for archetype with capacity {d}: {s}", .{ initial_capacity, @errorName(err) });
             }),
             .component_arrays = try allocator.alloc(std.ArrayList(u8), component_sizes.len),
             .component_sizes = try allocator.alloc(usize, component_sizes.len),
@@ -50,8 +47,7 @@ pub const Archetype = struct {
         for (component_sizes, 0..) |size, i| {
             const byte_capacity = initial_capacity * size;
             archetype.component_arrays[i] = (std.ArrayList(u8).initCapacity(allocator, byte_capacity) catch |err| {
-                log.err("Failed to allocate component array for archetype (component {d}, capacity {d} bytes): {s}", .{ i, byte_capacity, @errorName(err) });
-                @panic("Failed to allocate");
+                std.debug.panic("Failed to allocate component array for archetype (component {d}, capacity {d} bytes): {s}", .{ i, byte_capacity, @errorName(err) });
             });
             archetype.component_sizes[i] = size;
         }

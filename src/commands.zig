@@ -2,13 +2,12 @@ const std = @import("std");
 const ecs = @import("ecs.zig");
 const relations_mod = @import("relations.zig");
 const reflect = @import("reflect.zig");
-
-const log = std.log.scoped(.zevy_ecs);
+const errors = @import("errors.zig");
 
 /// Command represents a deferred operation to be executed later.
 const Command = struct {
-    execute: *const fn (data: *anyopaque, manager: *ecs.Manager) void,
-    deinit: *const fn (data: *anyopaque, allocator: std.mem.Allocator) void,
+    execute: *const fn (data: *anyopaque, manager: *ecs.Manager) anyerror!void,
+    deinit: *const fn (data: *anyopaque, manager: *ecs.Manager) anyerror!void,
     data: *anyopaque,
 };
 
@@ -19,12 +18,7 @@ pub const PendingEntity = struct {
 
     /// Get the actual entity. Panics if flush() has not been called yet.
     pub fn get(self: *const PendingEntity) ecs.Entity {
-        return self.entity orelse @panic("PendingEntity.get() called before flush() - entity has not been created yet");
-    }
-
-    /// Check if the entity has been created.
-    pub fn isCreated(self: *const PendingEntity) bool {
-        return self.entity != null;
+        return self.entity orelse @panic("get() called before flush() - entity has not been created yet");
     }
 };
 
@@ -36,7 +30,7 @@ pub const Commands = struct {
     manager: *ecs.Manager,
     commands: std.ArrayList(Command),
 
-    pub fn init(allocator: std.mem.Allocator, manager: *ecs.Manager) !Commands {
+    pub fn init(allocator: std.mem.Allocator, manager: *ecs.Manager) error{OutOfMemory}!Commands {
         return .{
             .allocator = allocator,
             .manager = manager,
@@ -46,7 +40,7 @@ pub const Commands = struct {
 
     pub fn deinit(self: *Commands) void {
         for (self.commands.items) |cmd| {
-            cmd.deinit(cmd.data, self.allocator);
+            cmd.deinit(cmd.data, self.manager) catch |err| @panic(@errorName(err));
         }
         self.commands.deinit(self.allocator);
     }
@@ -61,24 +55,22 @@ pub const Commands = struct {
     }
 
     /// Get EntityCommands for an existing entity.
-    pub fn entity(self: *Commands, e: ecs.Entity) EntityCommands {
-        return EntityCommands.initWithEntity(self, e);
+    pub fn entity(self: *Commands, e: ecs.Entity) !EntityCommands {
+        return try EntityCommands.initWithEntity(self, e);
     }
 
     /// Queue adding a component to an existing entity.
-    pub fn addComponent(self: *Commands, ent: ecs.Entity, comptime T: type, value: T) !void {
+    pub fn addComponent(self: *Commands, ent: ecs.Entity, comptime T: type, value: T) error{OutOfMemory}!void {
         const Closure = struct {
             ent: ecs.Entity,
             value: T,
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                manager.addComponent(closure.ent, T, closure.value) catch |err| {
-                    log.err("Failed to add component: {}", .{err});
-                };
+                try manager.addComponent(closure.ent, T, closure.value);
             }
-            fn deinit_cmd(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
@@ -94,18 +86,16 @@ pub const Commands = struct {
     }
 
     /// Queue removing a component from an existing entity.
-    pub fn removeComponent(self: *Commands, ent: ecs.Entity, comptime T: type) !void {
+    pub fn removeComponent(self: *Commands, ent: ecs.Entity, comptime T: type) error{OutOfMemory}!void {
         const Closure = struct {
             ent: ecs.Entity,
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                manager.removeComponent(closure.ent, T) catch |err| {
-                    log.err("Failed to remove component: {}", .{err});
-                };
+                try manager.removeComponent(closure.ent, T);
             }
-            fn deinit_cmd(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
@@ -114,18 +104,16 @@ pub const Commands = struct {
     }
 
     /// Queue destroying an existing entity.
-    pub fn destroyEntity(self: *Commands, ent: ecs.Entity) !void {
+    pub fn destroyEntity(self: *Commands, ent: ecs.Entity) error{OutOfMemory}!void {
         const Closure = struct {
             ent: ecs.Entity,
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                manager.destroy(closure.ent) catch |err| {
-                    log.err("Failed to destroy entity: {}", .{err});
-                };
+                try manager.destroy(closure.ent);
             }
-            fn deinit_cmd(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
@@ -134,101 +122,92 @@ pub const Commands = struct {
     }
 
     /// Queue adding a resource.
-    pub fn addResource(self: *Commands, comptime T: type, value: T) !void {
+    pub fn addResource(self: *Commands, comptime T: type, value: T) error{OutOfMemory}!void {
         const Closure = struct {
             value: T,
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                _ = manager.addResource(T, closure.value) catch |err| {
-                    const resTypeInfo = (comptime reflect.getInfo(T) orelse reflect.ReflectInfo.Unknown).type;
-                    log.err("Failed to add resource for type {s}: {}", .{ resTypeInfo.name, err });
-                };
+                _ = try manager.addResource(T, closure.value);
             }
-            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
         closure.* = .{ .value = value };
-        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit_cmd, .data = closure });
     }
 
     /// Queue removing a resource.
-    pub fn removeResource(self: *Commands, comptime T: type) !void {
+    pub fn removeResource(self: *Commands, comptime T: type) error{OutOfMemory}!void {
         const Closure = struct {
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 _ = data;
                 manager.removeResource(T);
             }
-            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
         closure.* = .{};
-        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+        try self.commands.append(self.allocator, .{
+            .execute = Closure.execute,
+            .deinit = Closure.deinit_cmd,
+            .data = @ptrCast(@alignCast(closure)),
+        });
     }
 
     /// Queue adding a relation between two entities.
-    pub fn addRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) !void {
+    pub fn addRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
         const Closure = struct {
             entity1: ecs.Entity,
             entity2: ecs.Entity,
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse {
-                    log.err("RelationManager not found", .{});
-                    return;
-                };
-                rel_mgr.add(manager, closure.entity1, closure.entity2, RelationType) catch |err| {
-                    log.err("Failed to add relation: {}", .{err});
-                };
+                const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                try rel_mgr.add(manager, closure.entity1, closure.entity2, RelationType);
             }
-            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
         closure.* = .{ .entity1 = entity1, .entity2 = entity2 };
-        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit_cmd, .data = closure });
     }
 
     /// Queue removing a relation between two entities.
-    pub fn removeRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) !void {
+    pub fn removeRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
         const Closure = struct {
             entity1: ecs.Entity,
             entity2: ecs.Entity,
-            fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+            fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse {
-                    log.err("RelationManager not found", .{});
-                    return;
-                };
-                rel_mgr.remove(manager, closure.entity1, closure.entity2, RelationType) catch |err| {
-                    log.err("Failed to remove relation: {}", .{err});
-                };
+                const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                try rel_mgr.remove(manager, closure.entity1, closure.entity2, RelationType);
             }
-            fn deinit(data: *anyopaque, allocator: std.mem.Allocator) void {
+            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                allocator.destroy(closure);
+                manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
         closure.* = .{ .entity1 = entity1, .entity2 = entity2 };
-        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit, .data = closure });
+        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit_cmd, .data = closure });
     }
 
     /// Execute all queued commands on the manager.
-    pub fn flush(self: *Commands, manager: *ecs.Manager) void {
+    pub fn flush(self: *Commands, manager: *ecs.Manager) anyerror!void {
         for (self.commands.items) |cmd| {
-            cmd.execute(cmd.data, manager);
+            try cmd.execute(cmd.data, manager);
         }
         // Clear and free data
         for (self.commands.items) |cmd| {
-            cmd.deinit(cmd.data, self.allocator);
+            try cmd.deinit(cmd.data, manager);
         }
         self.commands.clearRetainingCapacity();
     }
@@ -246,7 +225,7 @@ pub const EntityCommands = struct {
     entity_commands: std.ArrayList(Command),
 
     /// Initialize EntityCommands for a pending (deferred) entity.
-    pub fn init(commands: *Commands) !EntityCommands {
+    pub fn init(commands: *Commands) error{OutOfMemory}!EntityCommands {
         const pending = try commands.allocator.create(PendingEntity);
         pending.* = .{};
         return .{
@@ -258,17 +237,17 @@ pub const EntityCommands = struct {
     }
 
     /// Initialize EntityCommands for an existing entity.
-    pub fn initWithEntity(commands: *Commands, ent: ecs.Entity) EntityCommands {
+    pub fn initWithEntity(commands: *Commands, ent: ecs.Entity) error{OutOfMemory}!EntityCommands {
         return .{
             .commands = commands,
             .pending = null,
             .existing_entity = ent,
-            .entity_commands = std.ArrayList(Command).initCapacity(commands.allocator, 0) catch unreachable,
+            .entity_commands = try std.ArrayList(Command).initCapacity(commands.allocator, 0),
         };
     }
 
     /// Queue adding a component to this entity. Returns self for chaining.
-    pub fn add(self: *EntityCommands, comptime T: type, value: T) !*EntityCommands {
+    pub fn add(self: *EntityCommands, comptime T: type, value: T) error{OutOfMemory}!*EntityCommands {
         if (self.existing_entity) |ent| {
             // For existing entities, delegate to Commands
             try self.commands.addComponent(ent, T, value);
@@ -278,16 +257,14 @@ pub const EntityCommands = struct {
             const Closure = struct {
                 pending: *PendingEntity,
                 value: T,
-                fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                     const closure = @as(*@This(), @ptrCast(@alignCast(data)));
                     const ent = closure.pending.get();
-                    manager.addComponent(ent, T, closure.value) catch |err| {
-                        log.err("Failed to add component: {}", .{err});
-                    };
+                    try manager.addComponent(ent, T, closure.value);
                 }
-                fn deinit_cmd(data: *anyopaque, allocator: std.mem.Allocator) void {
+                fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                     const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                    allocator.destroy(closure);
+                    manager.allocator.destroy(closure);
                 }
             };
             const closure = try self.commands.allocator.create(Closure);
@@ -298,7 +275,7 @@ pub const EntityCommands = struct {
     }
 
     /// Queue removing a component from this entity. Returns self for chaining.
-    pub fn remove(self: *EntityCommands, comptime T: type) !*EntityCommands {
+    pub fn remove(self: *EntityCommands, comptime T: type) anyerror!*EntityCommands {
         if (self.existing_entity) |ent| {
             // For existing entities, delegate to Commands
             try self.commands.removeComponent(ent, T);
@@ -307,16 +284,14 @@ pub const EntityCommands = struct {
             const pending_ptr = self.pending.?;
             const Closure = struct {
                 pending: *PendingEntity,
-                fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                     const closure = @as(*@This(), @ptrCast(@alignCast(data)));
                     const ent = closure.pending.get();
-                    manager.removeComponent(ent, T) catch |err| {
-                        log.err("Failed to remove component: {}", .{err});
-                    };
+                    try manager.removeComponent(ent, T);
                 }
-                fn deinit_cmd(data: *anyopaque, allocator: std.mem.Allocator) void {
+                fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                     const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                    allocator.destroy(closure);
+                    manager.allocator.destroy(closure);
                 }
             };
             const closure = try self.commands.allocator.create(Closure);
@@ -327,7 +302,7 @@ pub const EntityCommands = struct {
     }
 
     /// Queue destroying this entity. Returns self for chaining.
-    pub fn destroy(self: *EntityCommands) !*EntityCommands {
+    pub fn destroy(self: *EntityCommands) error{OutOfMemory}!*EntityCommands {
         if (self.existing_entity) |ent| {
             // For existing entities, delegate to Commands
             try self.commands.destroyEntity(ent);
@@ -336,16 +311,14 @@ pub const EntityCommands = struct {
             const pending_ptr = self.pending.?;
             const Closure = struct {
                 pending: *PendingEntity,
-                fn execute(data: *anyopaque, manager: *ecs.Manager) void {
+                fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                     const closure = @as(*@This(), @ptrCast(@alignCast(data)));
                     const ent = closure.pending.get();
-                    manager.destroy(ent) catch |err| {
-                        log.err("Failed to destroy entity: {}", .{err});
-                    };
+                    try manager.destroy(ent);
                 }
-                fn deinit_cmd(data: *anyopaque, allocator: std.mem.Allocator) void {
+                fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                     const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                    allocator.destroy(closure);
+                    manager.allocator.destroy(closure);
                 }
             };
             const closure = try self.commands.allocator.create(Closure);
@@ -373,29 +346,29 @@ pub const EntityCommands = struct {
     /// Flush this EntityCommands: create the entity (if pending) and execute all queued operations.
     /// For pending entities, this creates the entity and populates the PendingEntity.
     /// For existing entities, this flushes the parent Commands queue.
-    pub fn flush(self: *EntityCommands) void {
+    pub fn flush(self: *EntityCommands) anyerror!void {
         if (self.pending) |pending| {
             // Create the entity now
             pending.entity = self.commands.manager.createEmpty();
             // Execute all queued commands for this entity
             for (self.entity_commands.items) |cmd| {
-                cmd.execute(cmd.data, self.commands.manager);
+                try cmd.execute(cmd.data, self.commands.manager);
             }
             // Clean up command closures
             for (self.entity_commands.items) |cmd| {
-                cmd.deinit(cmd.data, self.commands.allocator);
+                try cmd.deinit(cmd.data, self.commands.manager);
             }
             self.entity_commands.clearRetainingCapacity();
         } else {
             // For existing entities, flush the parent Commands
-            self.commands.flush(self.commands.manager);
+            try self.commands.flush(self.commands.manager);
         }
     }
 
     pub fn deinit(self: *EntityCommands) void {
-        self.flush();
+        self.flush() catch |err| @panic(@errorName(err));
         for (self.entity_commands.items) |cmd| {
-            cmd.deinit(cmd.data, self.commands.allocator);
+            cmd.deinit(cmd.data, self.commands.manager) catch |err| @panic(@errorName(err));
         }
         self.entity_commands.deinit(self.commands.allocator);
         if (self.pending) |pending| {

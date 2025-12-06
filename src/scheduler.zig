@@ -280,14 +280,12 @@ pub const Scheduler = struct {
         comptime T: type,
         cleanup_stage: StageId,
         comptime ParamRegistry: type,
-    ) ecs_mod.errors!void {
+    ) error{ ResourceAlreadyExists, OutOfMemory }!void {
         // Create EventStore for this event type
-        const event_store = events.EventStore(T).init(self.allocator, 10);
+        const event_store = try events.EventStore(T).init(self.allocator, 10);
 
         // Add EventStore as a resource
-        _ = ecs.addResource(events.EventStore(T), event_store) catch |err| {
-            return err;
-        };
+        _ = try ecs.addResource(events.EventStore(T), event_store);
 
         // Create cleanup system that discards handled and unhandled events (consumes them)
         const cleanup_system = struct {

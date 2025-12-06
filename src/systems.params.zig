@@ -1,7 +1,6 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
 
-const log = std.log.scoped(.zevy_ecs);
 const events = @import("events.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
@@ -171,12 +170,8 @@ pub const EventReaderSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventReader(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
-            const store_ptr = events.EventStore(T).init(e.allocator, 16);
-            const event_store_res = e.addResource(events.EventStore(T), store_ptr) catch |err| {
-                log.err("Failed to add EventStore for type {s}: {s}", .{ @typeName(T), @errorName(err) });
-                @panic(@errorName(err));
-            };
-            return EventReader(T){ .event_store = event_store_res };
+            const store_ptr = try events.EventStore(T).init(e.allocator, 16);
+            return EventReader(T){ .event_store = try e.addResource(events.EventStore(T), store_ptr) };
         };
         return EventReader(T){ .event_store = event_store };
     }
@@ -203,7 +198,7 @@ pub fn EventWriter(comptime T: type) type {
 
         /// Add an event to the store
         pub fn write(self: Self, event: T) void {
-            self.event_store.push(event);
+            self.event_store.push(event) catch |err| @panic(@errorName(err));
         }
 
         /// Get the number of events currently in the store
@@ -235,12 +230,8 @@ pub const EventWriterSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventWriter(T) {
         const event_store = e.getResource(events.EventStore(T)) orelse {
-            const store_ptr = events.EventStore(T).init(e.allocator, 16);
-            const stored_event_store = e.addResource(events.EventStore(T), store_ptr) catch |err| {
-                log.err("Failed to add EventStore for type {s}: {s}", .{ @typeName(T), @errorName(err) });
-                @panic(@errorName(err));
-            };
-            return EventWriter(T){ .event_store = stored_event_store };
+            const store_ptr = try events.EventStore(T).init(e.allocator, 16);
+            return EventWriter(T){ .event_store = try e.addResource(events.EventStore(T), store_ptr) };
         };
         return EventWriter(T){ .event_store = event_store };
     }
@@ -308,7 +299,6 @@ pub const StateSystemParam = struct {
             return State(StateEnum){ .state_mgr = state_mgr };
         }
 
-        log.err("State manager not found for state type: {s}", .{@typeName(StateEnum)});
         return error.StateManagerNotFound;
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
@@ -364,10 +354,7 @@ pub const NextStateSystemParam = struct {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
-        const state_mgr = e.getResource(StateManagerType) orelse {
-            log.err("State manager not found for state transition: {s}", .{@typeName(StateEnum)});
-            return error.StateManagerNotFound;
-        };
+        const state_mgr = e.getResource(StateManagerType) orelse return error.StateManagerNotFound;
 
         // Get or create NextState instance for this enum type
         const NextStateType = NextState(StateEnum);
@@ -423,14 +410,8 @@ pub const ResourceSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!Res(T) {
-        const resource_ptr = e.getResource(T);
-        if (resource_ptr) |res| {
-            // Return the wrapper by value - no pointer stability issues!
-            return Res(T){ .ptr = @constCast(res) };
-        } else {
-            log.err("Resource not found: {s}", .{@typeName(T)});
-            return error.ResourceNotFound;
-        }
+        const resource_ptr = e.getResource(T) orelse return error.ResourceNotFound;
+        return Res(T){ .ptr = @constCast(resource_ptr) };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
@@ -504,13 +485,9 @@ pub const SingleSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
         var q = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
-        const first = q.next() orelse {
-            log.debug("Single parameter expected exactly one entity but found none for type: {s}", .{@typeName(T)});
-            return error.SingleFoundNoMatches;
-        };
+        const first = q.next() orelse return error.SingleFoundNoMatches;
         // Ensure there is exactly one match
         if (q.next() != null) {
-            log.debug("Single parameter expected exactly one entity but found multiple for type: {s}", .{@typeName(T)});
             return error.SingleFoundMultipleMatches;
         }
         return T{ .item = first };
@@ -545,12 +522,7 @@ pub const RelationsSystemParam = struct {
             const rel_mgr = relations_mod.RelationManager.init(e.allocator);
             return try e.addResource(relations_mod.RelationManager, rel_mgr);
         }
-        if (e.getResource(relations_mod.RelationManager)) |rel_mgr| {
-            return rel_mgr;
-        } else {
-            log.err("Relations manager not found", .{});
-            return error.RelationsManagerNotFound;
-        }
+        return e.getResource(relations_mod.RelationManager) orelse error.RelationsManagerNotFound;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
@@ -718,7 +690,7 @@ pub const CommandsSystemParam = struct {
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = T;
         const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
-        commands.flush(e);
+        commands.flush(e) catch |err| @panic(@errorName(err));
     }
 };
 
@@ -857,7 +829,7 @@ test "CommandsSystemParam advanced" {
 
     // Test EntityCommands for existing entity
     const entity2 = manager.create(.{});
-    var ent_cmds = commands.entity(entity2);
+    var ent_cmds = try commands.entity(entity2);
     _ = try ent_cmds.add(Position, Position{ .x = 5.0, .y = 6.0 }); // Add position via EntityCommands
 
     // Resource operations
@@ -872,7 +844,7 @@ test "CommandsSystemParam advanced" {
     try commands.removeRelation(entity2, entity3, Child); // Remove relation
 
     // Flush the commands
-    commands.flush(&manager);
+    try commands.flush(&manager);
 
     // Check entity was destroyed (can't get components)
     const pos_after = manager.getComponent(entity, Position);
@@ -914,20 +886,20 @@ test "Commands deferred entity creation" {
     const pending = ent_cmds.getPending().?;
 
     // Verify entity is not created yet
-    try std.testing.expect(!pending.isCreated());
+    try std.testing.expect(pending.entity == null);
 
     // Queue component additions
     _ = try ent_cmds.add(Position, Position{ .x = 10.0, .y = 20.0 });
     _ = try ent_cmds.add(Velocity, Velocity{ .dx = 1.0, .dy = 2.0 });
 
     // Entity still not created
-    try std.testing.expect(!pending.isCreated());
+    try std.testing.expect(pending.entity == null);
 
     // Flush to create entity and apply queued operations
-    ent_cmds.flush();
+    try ent_cmds.flush();
 
     // Now the entity should be created
-    try std.testing.expect(pending.isCreated());
+    try std.testing.expect(pending.entity != null);
 
     // Get the actual entity
     const entity = pending.get();

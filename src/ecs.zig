@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const reflect = @import("reflect.zig");
 const world = @import("world.zig");
 const World = world.World;
 const serialize = @import("serialize.zig");
@@ -12,7 +13,6 @@ const sys = @import("systems.zig");
 const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
 
-const log = std.log.scoped(.zevy_ecs);
 const is_debug = builtin.mode == .Debug;
 
 pub const errors = errs.ECSError;
@@ -34,6 +34,23 @@ const ResourceEntry = struct {
     alignment: std.mem.Alignment,
     deinit_fn: ?*const fn (*anyopaque, std.mem.Allocator) void,
 
+    pub fn init(
+        ptr: *anyopaque,
+        type_name: []const u8,
+        allocated: bool,
+        size: usize,
+        alignment: std.mem.Alignment,
+        deinit_fn: ?*const fn (*anyopaque, std.mem.Allocator) void,
+    ) ResourceEntry {
+        return ResourceEntry{
+            .ptr = ptr,
+            .type_name = type_name,
+            .allocated = allocated,
+            .size = size,
+            .alignment = alignment,
+            .deinit_fn = deinit_fn,
+        };
+    }
     pub fn deinit(self: *ResourceEntry, allocator: std.mem.Allocator) void {
         // Call custom deinit function if provided
         if (self.deinit_fn) |deinit_fn| {
@@ -73,8 +90,8 @@ pub const Manager = struct {
             .world = World.init(allocator),
             .resources = std.AutoHashMap(u64, ResourceEntry).init(allocator),
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
-            .component_added = events.EventStore(ComponentEvent).init(allocator, 64),
-            .component_removed = events.EventStore(ComponentEvent).init(allocator, 64),
+            .component_added = try events.EventStore(ComponentEvent).init(allocator, 64),
+            .component_removed = try events.EventStore(ComponentEvent).init(allocator, 64),
             .relations = undefined,
         };
 
@@ -251,7 +268,7 @@ pub const Manager = struct {
 
         const type_hash = hash.Wyhash.hash(0, @typeName(T));
         self.component_removed.discardHandled();
-        self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
+        try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
@@ -263,7 +280,7 @@ pub const Manager = struct {
         try self.world.removeComponent(entity, T);
 
         self.component_removed.discardHandled();
-        self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+        try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
     }
 
     /// Get a mutable pointer to a component of type T for the given entity, or an error if entity is not alive.
@@ -321,22 +338,19 @@ pub const Manager = struct {
             @compileError("addResource does not accept pointer types. Use value types only.");
         }
 
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = comptime hash.Wyhash.hash(0, @typeName(T));
         const result = try self.resources.getOrPut(type_hash);
         if (!result.found_existing) {
             const ptr = try self.allocator.create(T);
             ptr.* = value;
 
             // Check if the type has a deinit method
-            const type_info = @typeInfo(T);
-            const has_deinit = if (type_info == .@"struct") @hasDecl(T, "deinit") else false;
+            const has_deinit = comptime reflect.hasFunc(T, "deinit");
             const deinit_fn = if (has_deinit) blk: {
                 const deinit_fn_ptr = struct {
                     pub fn deinit(resource_ptr: *anyopaque, allocator: std.mem.Allocator) void {
                         const typed_ptr: *T = @ptrCast(@alignCast(resource_ptr));
-                        // Check if deinit takes an allocator parameter
-                        const deinit_info = @typeInfo(@TypeOf(T.deinit));
-                        if (deinit_info == .@"fn" and deinit_info.@"fn".params.len == 2) {
+                        if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator})) {
                             typed_ptr.deinit(allocator);
                         } else {
                             typed_ptr.deinit();
@@ -346,14 +360,14 @@ pub const Manager = struct {
                 break :blk deinit_fn_ptr;
             } else null;
 
-            try self.resources.put(type_hash, ResourceEntry{
-                .ptr = @ptrCast(@alignCast(ptr)),
-                .type_name = @typeName(T),
-                .allocated = true,
-                .size = @sizeOf(T),
-                .alignment = std.mem.Alignment.of(T),
-                .deinit_fn = deinit_fn,
-            });
+            try self.resources.put(type_hash, .init(
+                @ptrCast(@alignCast(ptr)),
+                @typeName(T),
+                true,
+                @sizeOf(T),
+                std.mem.Alignment.of(T),
+                deinit_fn,
+            ));
             return ptr;
         } else {
             return error.ResourceAlreadyExists;
@@ -385,7 +399,6 @@ pub const Manager = struct {
     /// Initialization of `default_value` requiring a allocator must use `zevy_ecs.Manager.allocator` for proper memory management if `deinit` requires the allocator used to initialize.
     pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T) error{OutOfMemory}!*T {
         if (self.getResource(T)) |res| {
-            const reflect = @import("reflect.zig");
             if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator})) {
                 default_value.deinit(self.allocator);
             } else if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{})) {
@@ -506,7 +519,6 @@ pub const Manager = struct {
     pub fn runSystem(self: *Manager, sys_handle: anytype) anyerror!@TypeOf(sys_handle).return_type {
         const ReturnType = @TypeOf(sys_handle).return_type;
         const sys_ptr = self.systems.get(sys_handle.handle) orelse {
-            log.debug("Invalid system handle: {d}", .{sys_handle.handle});
             return error.InvalidSystemHandle;
         };
         const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr));

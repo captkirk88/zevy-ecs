@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const log = std.log.scoped(.zevy_ecs);
-
 /// A generic event store that maintains events in a queue-like structure
 /// while allowing iteration without consuming events.
 /// Internally uses a ring buffer for efficient operations.
@@ -48,13 +46,10 @@ pub fn EventStore(comptime T: type) type {
         capacity: usize,
 
         /// Initialize a new EventStore with the given capacity
-        pub fn init(allocator: std.mem.Allocator, initial_capacity: usize) Self {
+        pub fn init(allocator: std.mem.Allocator, initial_capacity: usize) error{OutOfMemory}!Self {
             return Self{
                 .allocator = allocator,
-                .events = std.ArrayList(Event).initCapacity(allocator, initial_capacity) catch |err| {
-                    log.err("Failed to allocate EventStore with capacity {d}: {s}", .{ initial_capacity, @errorName(err) });
-                    @panic(@errorName(err));
-                },
+                .events = try std.ArrayList(Event).initCapacity(allocator, initial_capacity),
                 .head = 0,
                 .tail = 0,
                 .len = 0,
@@ -68,25 +63,21 @@ pub fn EventStore(comptime T: type) type {
         }
 
         /// Add an event to the store (enqueue)
-        pub fn push(self: *Self, event: T) void {
+        pub fn push(self: *Self, event: T) error{OutOfMemory}!void {
             // If we're at capacity, we need to grow
             if (self.len == self.capacity) {
                 // Calculate new capacity
                 const new_capacity = self.capacity * 2;
 
                 // Create new array with proper size
-                var new_events = std.ArrayList(Event).initCapacity(self.allocator, new_capacity) catch |err| {
-                    log.err("Failed to grow EventStore from {d} to {d}: {s}", .{ self.capacity, new_capacity, @errorName(err) });
-                    @panic(@errorName(err));
-                };
+                var new_events = try std.ArrayList(Event).initCapacity(self.allocator, new_capacity);
 
                 // Copy existing events in order
                 for (0..self.len) |i| {
                     const src_idx = self.getActualIndex(i);
                     new_events.append(self.allocator, self.events.items[src_idx]) catch |err| {
-                        log.err("Failed to copy events during EventStore growth: {s}", .{@errorName(err)});
                         new_events.deinit(self.allocator);
-                        @panic(@errorName(err));
+                        return err;
                     };
                 }
 
@@ -102,10 +93,7 @@ pub fn EventStore(comptime T: type) type {
 
             // Ensure ArrayList has space for the tail index
             while (self.events.items.len <= self.tail) {
-                self.events.append(self.allocator, undefined) catch |err| {
-                    log.err("Failed to append to EventStore during push: {s}", .{@errorName(err)});
-                    @panic(@errorName(err));
-                };
+                try self.events.append(self.allocator, undefined);
             }
 
             // Write the new event directly at the tail position
@@ -180,9 +168,6 @@ pub fn EventStore(comptime T: type) type {
                 self.head = 0;
                 self.tail = 0;
             } else {
-                // self.head = self.getActualIndex(0);
-                // self.tail = self.getActualIndex(self.len);
-
                 // After compacting, events are now contiguous starting at head
                 // tail points to the next position after the last event
                 self.tail = (self.head + self.len) % self.capacity;
@@ -234,13 +219,10 @@ pub fn EventStore(comptime T: type) type {
 
         /// Get a slice of all events in order (oldest first) without consuming
         /// Note: This creates a temporary allocation that must be freed by the caller
-        pub fn getAllEvents(self: *const Self, allocator: std.mem.Allocator) []Event {
+        pub fn getAllEvents(self: *const Self, allocator: std.mem.Allocator) error{OutOfMemory}![]Event {
             if (self.len == 0) return &[_]Event{};
 
-            var result = allocator.alloc(Event, self.len) catch |err| {
-                log.err("Failed to allocate slice for {d} events: {s}", .{ self.len, @errorName(err) });
-                @panic(@errorName(err));
-            };
+            var result = try allocator.alloc(Event, self.len);
             for (0..self.len) |i| {
                 result[i] = self.events.items[self.getActualIndex(i)];
             }
@@ -253,7 +235,7 @@ pub fn EventStore(comptime T: type) type {
         }
 
         /// Shrink the capacity to fit current usage
-        pub fn shrinkToFit(self: *Self) void {
+        pub fn shrinkToFit(self: *Self) error{OutOfMemory}!void {
             if (self.len == 0) {
                 self.events.shrinkAndFree(self.allocator, 0);
                 self.capacity = 0;
@@ -263,16 +245,12 @@ pub fn EventStore(comptime T: type) type {
             }
 
             // Create a new array with just the current events
-            var new_events = std.ArrayList(Event).initCapacity(self.allocator, self.len) catch |err| {
-                log.err("Failed to shrink EventStore: allocation failure: {s}", .{@errorName(err)});
-                @panic(@errorName(err));
-            };
+            var new_events = try std.ArrayList(Event).initCapacity(self.allocator, self.len);
             var iter = self.iterator();
             while (iter.next()) |wrapper| {
                 new_events.append(self.allocator, wrapper.*) catch |err| {
-                    log.err("Failed to shrink EventStore: append failure: {s}", .{@errorName(err)});
                     new_events.deinit(self.allocator);
-                    @panic(@errorName(err));
+                    return err;
                 };
             }
 
@@ -289,7 +267,7 @@ pub fn EventStore(comptime T: type) type {
 test "EventStore basic operations" {
     const allocator = std.testing.allocator;
 
-    var store = EventStore(i32).init(allocator, 4);
+    var store = try EventStore(i32).init(allocator, 4);
     defer store.deinit();
 
     // Test empty store
@@ -297,9 +275,9 @@ test "EventStore basic operations" {
     try std.testing.expectEqual(@as(usize, 0), store.count());
 
     // Add some events
-    store.push(1);
-    store.push(2);
-    store.push(3);
+    try store.push(1);
+    try store.push(2);
+    try store.push(3);
 
     try std.testing.expect(!store.isEmpty());
     try std.testing.expectEqual(@as(usize, 3), store.count());
@@ -348,16 +326,16 @@ test "EventStore basic operations" {
 test "EventStore capacity growth" {
     const allocator = std.testing.allocator;
 
-    var store = EventStore(u8).init(allocator, 2);
+    var store = try EventStore(u8).init(allocator, 2);
     defer store.deinit();
 
     // Fill to capacity
-    store.push(10);
-    store.push(20);
+    try store.push(10);
+    try store.push(20);
     try std.testing.expectEqual(@as(usize, 2), store.count());
 
     // Add one more - should grow capacity
-    store.push(30);
+    try store.push(30);
     try std.testing.expectEqual(@as(usize, 3), store.count());
     try std.testing.expect(store.getCapacity() >= 3);
 
@@ -375,14 +353,14 @@ test "EventStore capacity growth" {
 test "EventStore getAllEvents" {
     const allocator = std.testing.allocator;
 
-    var store = EventStore(u32).init(allocator, 3);
+    var store = try EventStore(u32).init(allocator, 3);
     defer store.deinit();
 
-    store.push(100);
-    store.push(200);
-    store.push(300);
+    try store.push(100);
+    try store.push(200);
+    try store.push(300);
 
-    const wrappers = store.getAllEvents(allocator);
+    const wrappers = try store.getAllEvents(allocator);
     defer allocator.free(wrappers);
 
     try std.testing.expectEqual(@as(usize, 3), wrappers.len);
@@ -400,14 +378,14 @@ test "EventStore getAllEvents" {
 test "EventStore mark handled and discard handled" {
     const allocator = std.testing.allocator;
 
-    var store = EventStore(u8).init(allocator, 4);
+    var store = try EventStore(u8).init(allocator, 4);
     defer store.deinit();
 
     // Add some events
-    store.push(1);
-    store.push(2);
-    store.push(3);
-    store.push(4);
+    try store.push(1);
+    try store.push(2);
+    try store.push(3);
+    try store.push(4);
 
     try std.testing.expectEqual(@as(usize, 4), store.count());
 
@@ -453,14 +431,14 @@ test "EventStore mark handled and discard handled" {
 test "EventStore discard unhandled events" {
     const allocator = std.testing.allocator;
 
-    var store = EventStore(u8).init(allocator, 4);
+    var store = try EventStore(u8).init(allocator, 4);
     defer store.deinit();
 
     // Add some events
-    store.push(1);
-    store.push(2);
-    store.push(3);
-    store.push(4);
+    try store.push(1);
+    try store.push(2);
+    try store.push(3);
+    try store.push(4);
 
     try std.testing.expectEqual(@as(usize, 4), store.count());
 
@@ -527,7 +505,7 @@ test "EventReader and EventWriter usage" {
         event_store: *EventStore(u32),
 
         pub fn write(self: *@This(), event: u32) !void {
-            self.event_store.push(event);
+            try self.event_store.push(event);
         }
 
         pub fn len(self: *@This()) usize {
@@ -536,7 +514,7 @@ test "EventReader and EventWriter usage" {
     };
 
     // Create an EventStore as a resource
-    var event_store = EventStore(u32).init(allocator, 4);
+    var event_store = try EventStore(u32).init(allocator, 4);
     defer event_store.deinit();
 
     // Simulate EventReader usage
@@ -575,7 +553,7 @@ test "EventReader and EventWriter usage" {
     // Discard handled events (consumes them)
     event_store.discardHandled();
 
-    // Should only have the unhandled events (100 and 300) remaining
+    // Should only have the unhandled events left (100 and 300)
     try std.testing.expectEqual(@as(usize, 2), reader.len());
     iter.reset();
     var found_100 = false;

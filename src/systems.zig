@@ -175,7 +175,7 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             const fn_ptr_typed: *const FnType = @ptrCast(@alignCast(context.fn_ptr));
 
             const info = comptime @typeInfo(system_type);
-            if (info != .@"fn") @compileError("System function must have Fn type info: " ++ @typeName(system_type));
+            if (info != .@"fn") @compileError("System must be a function: " ++ @typeName(system_type));
 
             const fn_info = info.@"fn";
             const param_count = fn_info.params.len;
@@ -301,12 +301,14 @@ inline fn loadArg(comptime T: type, ptr: *anyopaque) T {
     };
 }
 
+pub const MAX_SYSTEM_ARGS = 16;
+
 /// Struct to hold all system parameters for trampoline argument passing
 fn SystemParamArgs(comptime system_fn: anytype) type {
     const info = @typeInfo(@TypeOf(system_fn));
     if (info != .@"fn") @compileError("SystemParamArgs expects a function type");
     const fn_info = info.@"fn";
-    const max_params = 16;
+    const max_params = MAX_SYSTEM_ARGS;
     comptime var param_types: [max_params]type = undefined;
     comptime var param_count: usize = 0;
     inline for (fn_info.params[1..], 0..) |param, i| {
@@ -319,7 +321,7 @@ fn SystemParamArgs(comptime system_fn: anytype) type {
         count: usize,
 
         pub fn get(self: *const @This(), idx: usize) ?*anyopaque {
-            if (idx >= self.count) @panic("SystemParamArgs: index out of bounds");
+            if (idx >= self.count) std.debug.panic("SystemParamArgs.get: index out of bounds: {d} >= {d}", .{ idx, self.count });
 
             return self.args[idx];
         }

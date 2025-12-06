@@ -4,7 +4,6 @@ const reflect = @import("reflect.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
 
-const log = std.log.scoped(.zevy_ecs);
 const errors = @import("errors.zig");
 
 /// Default system parameter registry including Query, Res, Local, EventReader, EventWriter, State, and NextState

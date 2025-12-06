@@ -714,7 +714,7 @@ pub fn hasStruct(comptime T: type, struct_name: []const u8) bool {
 }
 
 fn getDecls(comptime type_info: std.builtin.Type) []const std.builtin.Type.Declaration {
-    @setEvalBranchQuota(10_000);
+    //@setEvalBranchQuota(10_000);
     if (type_info == .pointer) return getDecls(@typeInfo(type_info.pointer.child));
     if (type_info == .@"struct") return type_info.@"struct".decls;
     if (type_info == .@"enum") return type_info.@"enum".decls;
