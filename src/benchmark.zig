@@ -1,87 +1,7 @@
 const std = @import("std");
+const mem = @import("zevy_mem");
 
-// Simple counting allocator for tracking allocations
-const CountingAllocator = struct {
-    /// Returns a duplicate of this allocator, preserving the underlying allocator but resetting stats
-    pub fn duplicate(self: *const CountingAllocator) CountingAllocator {
-        return create(self.allocator);
-    }
-    allocator: std.mem.Allocator,
-    bytes_allocated: usize,
-    allocs_count: usize,
-
-    fn create(allocator: std.mem.Allocator) CountingAllocator {
-        return CountingAllocator{
-            .allocator = allocator,
-            .bytes_allocated = 0,
-            .allocs_count = 0,
-        };
-    }
-
-    pub fn init(allocator: std.mem.Allocator) CountingAllocator {
-        return create(allocator);
-    }
-
-    pub fn reset(self: *CountingAllocator) void {
-        self.bytes_allocated = 0;
-        self.allocs_count = 0;
-    }
-
-    pub fn alloc(self: *CountingAllocator, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
-        const result = self.allocator.rawAlloc(len, ptr_align, ret_addr);
-        if (result) |_| {
-            self.bytes_allocated += len;
-            self.allocs_count += 1;
-        }
-        return result;
-    }
-
-    pub fn resize(self: *CountingAllocator, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-        const old_len = buf.len;
-        const ok = self.allocator.rawResize(buf, buf_align, new_len, ret_addr);
-        if (ok and new_len > old_len) {
-            self.bytes_allocated += (new_len - old_len);
-            self.allocs_count += 1;
-        }
-        return ok;
-    }
-
-    pub fn free(self: *CountingAllocator, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
-        // Note: We don't subtract from bytes_allocated on free, as we want total allocations
-        self.allocator.rawFree(buf, buf_align, ret_addr);
-    }
-};
-
-const counting_vtable = std.mem.Allocator.VTable{
-    .alloc = alloc,
-    .resize = resize,
-    .free = free,
-    .remap = remap,
-};
-
-fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
-    const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
-    return self.alloc(len, alignment, ret_addr);
-}
-
-fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-    const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
-    return self.resize(buf, buf_align, new_len, ret_addr);
-}
-
-fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
-    const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
-    self.free(buf, buf_align, ret_addr);
-}
-
-fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-    const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
-    // For simplicity, just resize and return the same pointer if possible
-    if (self.resize(memory, alignment, new_len, ret_addr)) {
-        return @as(?[*]u8, @ptrCast(memory.ptr));
-    }
-    return null;
-}
+const CountingAllocator = mem.CountingAllocator;
 
 /// Output format for benchmark results
 pub const OutputFormat = enum {
@@ -93,7 +13,7 @@ pub const OutputFormat = enum {
 /// Simple benchmark utility for timing code execution and tracking memory usage
 pub const Benchmark = struct {
     const Self = @This();
-    allocator: std.mem.Allocator,
+    base_allocator: std.mem.Allocator,
     counting_allocator: CountingAllocator,
     results: std.ArrayList(BenchmarkResult),
 
@@ -107,40 +27,51 @@ pub const Benchmark = struct {
         avg_bytes: usize,
         bytes_per_op: usize,
         allocs_per_op: usize,
+
+        pub fn format(self: *const BenchmarkResult, writer: *std.io.Writer) []const u8 {
+            return writer.print(
+                "{s}: {d} ns total, {d} ns/op, {f} total, {f}/op, {d} allocs/op",
+                .{
+                    self.name,
+                    self.duration_ns,
+                    self.avg_ns,
+                    mem.byteSize(self.total_bytes),
+                    mem.byteSize(self.avg_bytes),
+                    self.allocs_per_op,
+                },
+            ) catch |err| {
+                "Error formatting benchmark result: " ++ @errorName(err);
+            };
+        }
     };
 
-    /// Returns a std.mem.Allocator struct mapped to this benchmark's counting allocator methods
-    ///
-    /// Use this where any allocator is need to track allocations during benchmarking
-    pub fn getCountingAllocator(self: *Self) std.mem.Allocator {
-        return std.mem.Allocator{
-            .ptr = &self.counting_allocator,
-            .vtable = &counting_vtable,
-        };
+    /// Get the counting allocator's interface used for benchmarking
+    pub fn allocator(self: *Self) std.mem.Allocator {
+        return self.counting_allocator.allocator();
     }
 
     /// Initialize a Benchmark instance with the given allocator
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(base_allocator: std.mem.Allocator) Self {
         return Self{
-            .allocator = allocator,
-            .counting_allocator = CountingAllocator.init(allocator),
-            .results = std.ArrayList(BenchmarkResult).initCapacity(allocator, 0) catch @panic("Failed to init benchmark"),
+            .base_allocator = base_allocator,
+            .counting_allocator = CountingAllocator.init(base_allocator),
+            .results = std.ArrayList(BenchmarkResult).initCapacity(base_allocator, 0) catch @panic("Failed to init benchmark"),
         };
     }
 
     pub fn deinit(self: *Self) void {
         // Free each name string before deiniting the array
         for (self.results.items) |result| {
-            self.allocator.free(result.name);
+            self.base_allocator.free(result.name);
         }
-        self.results.deinit(self.allocator);
+        self.results.deinit(self.base_allocator);
         self.counting_allocator.reset();
     }
 
     /// Run a benchmark function multiple times and record the results
     pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, args: anytype) !BenchmarkResult {
-        const name_copy = try self.allocator.dupe(u8, name);
-        errdefer self.allocator.free(name_copy);
+        const name_copy = try self.base_allocator.dupe(u8, name);
+        errdefer self.base_allocator.free(name_copy);
 
         self.counting_allocator.reset();
         const start = std.time.nanoTimestamp();
@@ -175,7 +106,7 @@ pub const Benchmark = struct {
             .bytes_per_op = per_op_bytes,
             .allocs_per_op = if (ops > 0) self.counting_allocator.allocs_count / ops else 0,
         };
-        try self.results.append(self.allocator, result);
+        try self.results.append(self.base_allocator, result);
         return result;
     }
 
@@ -202,33 +133,16 @@ pub const Benchmark = struct {
         return .{ .value = time_val, .unit = unit };
     }
 
-    /// Format memory value with appropriate unit
-    fn formatMemory(bytes: usize) struct { value: f64, unit: []const u8 } {
-        var mem_val: f64 = @floatFromInt(bytes);
-        var unit: []const u8 = "B";
-
-        if (mem_val >= 1024.0 * 1024.0) {
-            unit = "MB";
-            mem_val /= 1024.0 * 1024.0;
-        } else if (mem_val >= 1024.0) {
-            unit = "KB";
-            mem_val /= 1024.0;
-        }
-
-        return .{ .value = mem_val, .unit = unit };
-    }
-
     fn printResultPlain(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
-        const mem = formatMemory(result.avg_bytes);
+        const mem_size = mem.byteSize(result.avg_bytes);
 
         std.debug.print("{s}\n", .{result.name});
-        std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {d:>9.3} {s}/op {d}/op\n", .{
+        std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {f}/op {d}/op\n", .{
             result.ops_per_iter,
             time.value,
             time.unit,
-            mem.value,
-            mem.unit,
+            mem_size,
             result.allocs_per_op,
         });
     }
@@ -246,15 +160,14 @@ pub const Benchmark = struct {
 
     fn printResultMarkdown(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
-        const mem = formatMemory(result.avg_bytes);
+        const mem_size = mem.byteSize(result.avg_bytes);
 
-        std.debug.print("| {s} | {d} | {d:.3} {s}/op | {d:.3} {s}/op | {d}/op |\n", .{
+        std.debug.print("| {s} | {d} | {d:.3} {s}/op | {f}/op | {d}/op |\n", .{
             result.name,
             result.ops_per_iter,
             time.value,
             time.unit,
-            mem.value,
-            mem.unit,
+            mem_size,
             result.allocs_per_op,
         });
     }
@@ -297,13 +210,13 @@ pub const Benchmark = struct {
 
     fn printResultHtml(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
-        const mem = formatMemory(result.avg_bytes);
+        const mem_size = mem.byteSize(result.avg_bytes);
 
         std.debug.print("  <tr>\n", .{});
         std.debug.print("    <td>{s}</td>\n", .{result.name});
         std.debug.print("    <td>{d}</td>\n", .{result.ops_per_iter});
         std.debug.print("    <td>{d:.3} {s}/op</td>\n", .{ time.value, time.unit });
-        std.debug.print("    <td>{d:.3} {s}/op</td>\n", .{ mem.value, mem.unit });
+        std.debug.print("    <td>{f}/op</td>\n", .{mem_size});
         std.debug.print("    <td>{d}/op</td>\n", .{result.allocs_per_op});
         std.debug.print("  </tr>\n", .{});
     }

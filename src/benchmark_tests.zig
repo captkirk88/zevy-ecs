@@ -219,7 +219,7 @@ test "ECS Benchmark - Entity Creation" {
 
     Benchmark.printMarkdownHeaderWithTitle("Creation");
     for (counts) |count| {
-        var manager = try Manager.init(bench.getCountingAllocator());
+        var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
@@ -241,7 +241,7 @@ test "ECS Benchmark - Batch Entity Creation" {
 
     Benchmark.printMarkdownHeaderWithTitle("Batch Creation");
     for (counts) |count| {
-        var manager = try Manager.init(bench.getCountingAllocator());
+        var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
@@ -263,7 +263,7 @@ test "ECS Benchmark - Mixed Systems" {
 
     Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
     for (counts) |count| {
-        var manager = try Manager.init(bench.getCountingAllocator());
+        var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
         // Setup entities
@@ -422,14 +422,14 @@ test "ECS Benchmark - Scene Graph Relations" {
 
     Benchmark.printMarkdownHeaderWithTitle("Relations");
     for (counts) |count| {
-        var manager = try Manager.init(bench.getCountingAllocator());
+        var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
         // Get Relations system parameter (creates RelationManager resource automatically)
         const rel = try root.DefaultParamRegistry.apply(&manager, *root.Relations);
 
         var entities = try setupSceneGraph(&manager, rel, count);
-        defer entities.deinit(bench.getCountingAllocator());
+        defer entities.deinit(bench.allocator());
 
         // Create system that uses Query with Relation component
         const system_handle = manager.createSystemCached(systemUpdateTransforms, root.DefaultParamRegistry);

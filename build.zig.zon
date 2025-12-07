@@ -1,7 +1,7 @@
 .{
     .name = .zevy_ecs,
 
-    .version = "1.52.0",
+    .version = "1.56.0",
 
     .fingerprint = 0xf22b53cc99fd8256, // Changing this has security and trust implications.
 
@@ -11,6 +11,10 @@
         .zevy_reflect = .{
             .url = "git+https://github.com/captkirk88/zevy-reflect#e92be3991320b249dc692c2441041ad002605887",
             .hash = "zevy_reflect-0.0.1-8SzYxkTAAADe3roYg_Axq3LJDlPn5K-tLv6EUyYntZ9S",
+        },
+        .zevy_mem = .{
+            .url = "git+https://github.com/captkirk88/zevy-mem#14f8faedae86d2d62e9912d1571db5b97195599f",
+            .hash = "zevy_mem-0.0.1-jK9L0RoXAQDuGUVYLFUHn7M93NwyEY6AOzFkYt2nPerx",
         },
     },
 
