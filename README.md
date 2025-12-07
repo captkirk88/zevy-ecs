@@ -24,7 +24,6 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-  - [Requirements](#requirements)
   - [Installation](#installation)
   - [Basic Usage](#basic-usage)
 - [Core Concepts](#core-concepts)
@@ -39,7 +38,7 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 - [Advanced Features](#advanced-features)
   - [System Composition](#system-composition)
   - [Custom System Registries](#custom-system-registries)
-  - [Serialization](#component-serialization)
+  - [Serialization](#serialization)
     - [Basic Component Serialization](#basic-component-serialization)
     - [Using ComponentWriter](#using-componentwriter)
     - [Using ComponentReader](#using-componentreader)
