@@ -65,6 +65,22 @@ pub const OnRemoved = params.OnRemoved;
 /// Single parameter type — returns exactly one matching query result
 pub const Single = params.Single;
 
+/// System parameter type aliases for usage in custom system params.
+pub const system_params = struct {
+    pub const CommandsSystemParam = params.CommandsSystemParam;
+    pub const QuerySystemParam = params.QuerySystemParam;
+    pub const ResourceSystemParam = params.ResourceSystemParam;
+    pub const LocalSystemParam = params.LocalSystemParam;
+    pub const EventReaderSystemParam = params.EventReaderSystemParam;
+    pub const EventWriterSystemParam = params.EventWriterSystemParam;
+    pub const StateSystemParam = params.StateSystemParam;
+    pub const NextStateSystemParam = params.NextStateSystemParam;
+    pub const RelationsSystemParam = params.RelationsSystemParam;
+    pub const OnAddedSystemParam = params.OnAddedSystemParam;
+    pub const OnRemovedSystemParam = params.OnRemovedSystemParam;
+    pub const SingleSystemParam = params.SingleSystemParam;
+};
+
 // Data structures
 /// SparseSet - O(1) lookup/insert/remove with cache-friendly iteration
 pub const SparseSet = sparse.SparseSet;
