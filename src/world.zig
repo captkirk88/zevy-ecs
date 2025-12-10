@@ -36,7 +36,7 @@ pub const World = struct {
     /// ```zig
     /// world.add(entity, .{ Position{ .x = 0, .y = 0 }, Velocity{ .x = 1, .y = 1 } });
     /// ```
-    pub fn add(self: *World, entity: Entity, values: anytype) !void {
+    pub fn add(self: *World, entity: Entity, values: anytype) error{OutOfMemory}!void {
         const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
         comptime if (info != .@"struct" or !info.@"struct".is_tuple) @compileError(std.fmt.comptimePrint("values must be a tuple of component instances: {s}", .{@typeName(components_type)}));
@@ -137,8 +137,6 @@ pub const World = struct {
             // Free the migration signature's types after use
             self.allocator.free(signature_mig.types);
         } else {
-            // FAST: New entity - use stack allocations and avoid all heap operations
-
             if (field_count == 0) {
                 // Empty entity - special case
                 const empty_hashes = try self.allocator.alloc(u64, 0);
@@ -157,8 +155,8 @@ pub const World = struct {
                 var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
-                    const comp_info = reflect.getTypeInfo(T);
-                    hash_index_pairs[i] = .{ .hash = comp_info.hash, .index = i };
+                    const hash = reflect.typeHash(T);
+                    hash_index_pairs[i] = .{ .hash = hash, .index = i };
                 }
                 // Sort by hash
                 const lessThan = struct {
@@ -224,7 +222,7 @@ pub const World = struct {
 
     /// Add an entity from an array of ComponentInstance
     /// This is used for deserializing entities
-    pub fn addFromComponentInstances(self: *World, entity: Entity, components: []const ComponentInstance) !void {
+    pub fn addFromComponentInstances(self: *World, entity: Entity, components: []const ComponentInstance) error{OutOfMemory}!void {
         if (components.len == 0) {
             const empty_components = .{};
             try self.add(entity, empty_components);

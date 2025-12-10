@@ -176,9 +176,9 @@ pub const Manager = struct {
         const components_type = @TypeOf(components);
         if (@typeInfo(components_type) == .null) {
             const empty_components = .{};
-            self.world.add(entity, empty_components) catch @panic("Failed to add entity to archetype storage");
+            self.world.add(entity, empty_components) catch |err| std.debug.panic("Failed to add entity to archetype storage: {s}", .{@errorName(err)});
         } else {
-            self.world.add(entity, components) catch @panic("Failed to add entity to archetype storage");
+            self.world.add(entity, components) catch |err| std.debug.panic("Failed to add entity to archetype storage: {s}", .{@errorName(err)});
         }
         return entity;
     }
@@ -200,7 +200,7 @@ pub const Manager = struct {
         if (components.len == 0) {
             // Empty entity
             const empty_components = .{};
-            self.world.add(entity, empty_components) catch @panic("Failed to add empty entity to archetype storage");
+            self.world.add(entity, empty_components) catch |err| std.debug.panic("Failed to add empty entity to archetype storage: {s}", .{@errorName(err)});
             return entity;
         }
 

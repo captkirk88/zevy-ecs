@@ -67,7 +67,7 @@ pub const ArchetypeStorage = struct {
     }
 
     /// Add an entity to the archetype with the given signature and component data
-    pub fn add(self: *ArchetypeStorage, entity: Entity, signature: ArchetypeSignature, component_sizes: []const usize, component_data: [][]const u8) !void {
+    pub fn add(self: *ArchetypeStorage, entity: Entity, signature: ArchetypeSignature, component_sizes: []const usize, component_data: [][]const u8) error{OutOfMemory}!void {
         const archetype = try self.getOrCreate(signature, component_sizes);
         try archetype.addEntity(entity, component_data);
         const idx = archetype.entities.items.len - 1;

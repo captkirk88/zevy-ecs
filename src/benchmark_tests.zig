@@ -12,6 +12,8 @@ const RelationManager = relations.RelationManager;
 const Child = relations.Child;
 const Owns = relations.Owns;
 
+const mem = @import("zevy_mem");
+
 // Test components
 const Position = struct {
     x: f32,
@@ -256,8 +258,13 @@ test "ECS Benchmark - Batch Entity Creation" {
 
 test "ECS Benchmark - Mixed Systems" {
     const allocator = std.testing.allocator;
-    var bench = Benchmark.init(allocator);
-    defer bench.deinit();
+    var bench = Benchmark.initWithAllocator(
+        allocator,
+        mem.CountingAllocator.init(std.heap.page_allocator),
+    );
+    defer {
+        bench.deinit();
+    }
 
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 

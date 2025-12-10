@@ -59,6 +59,14 @@ pub const Benchmark = struct {
         };
     }
 
+    pub fn initWithAllocator(base_allocator: std.mem.Allocator, counting_allocator: CountingAllocator) Self {
+        return Self{
+            .base_allocator = base_allocator,
+            .counting_allocator = counting_allocator,
+            .results = std.ArrayList(BenchmarkResult).initCapacity(base_allocator, 0) catch @panic("Failed to init benchmark"),
+        };
+    }
+
     pub fn deinit(self: *Self) void {
         // Free each name string before deiniting the array
         for (self.results.items) |result| {

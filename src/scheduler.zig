@@ -229,9 +229,7 @@ pub const Scheduler = struct {
             for (list.items) |handle| {
                 try ecs.runSystemUntyped(void, handle);
             }
-        } else {
-            return error.StageNotFound;
-        }
+        } else return error.StageHasNoSystems;
     }
 
     pub fn runStages(self: *Scheduler, ecs: *ecs_mod.Manager, start: StageId, end: StageId) anyerror!void {
@@ -625,7 +623,7 @@ test "Scheduler runStage on non-existing stage" {
     var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
-    try std.testing.expectError(error.StageNotFound, scheduler.runStage(&ecs, 9999));
+    try std.testing.expectError(error.StageHasNoSystems, scheduler.runStage(&ecs, 9999));
 }
 
 test "Scheduler assign outside scope" {
