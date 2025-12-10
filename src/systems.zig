@@ -447,12 +447,12 @@ pub fn ToSystemReturnType(comptime system_fn: anytype) type {
 ///
 /// Example:
 /// ```zig
-/// fn produceData(commands: *zevy_ecs.Commands, query: ecs_mod.Query()) []const u8 {
+/// fn produceData(commands: *Commands, query: Query()) []const u8 {
 ///     // Logic to generate some data
 ///     return "Hello from first system";
 /// }
 ///
-/// fn processData(data: []const u8, commands: *zevy_ecs.Manager) void {
+/// fn processData(data: []const u8, commands: *Commands) void {
 ///     // Use the data from the first system
 ///     std.debug.print("Processed: {s}\n", .{data});
 /// }
