@@ -63,18 +63,6 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             return registered_params;
         }
 
-        fn analyze(comptime ParamType: type) ?type {
-            inline for (registered_params) |SystemParam| {
-                if (!comptime reflect.hasFuncWithArgs(SystemParam, "analyze", &[_]type{type})) {
-                    @compileError("Each param must be a struct with 'analyze' functions: " ++ @typeName(SystemParam));
-                }
-                const result = SystemParam.analyze(ParamType);
-                if (result) return result;
-                //}
-            }
-            return null;
-        }
-
         pub inline fn apply(ecs_instance: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
             inline for (registered_params) |SystemParam| {
                 const analyzed = SystemParam.analyze(ParamType);
