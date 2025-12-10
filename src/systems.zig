@@ -463,13 +463,15 @@ pub fn ToSystemReturnType(comptime system_fn: anytype) type {
 pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamRegistry: type) System(void) {
     // Get return type of first function to pass to second
     //const FirstReturnType = ToSystemReturnType(first);
-
     const f = struct {
-        pub fn combined(commands: *Commands) !void {
-            // Run first system and get its output
-            const first_system = ToSystem(first, ParamRegistry);
-            const first_result = try first_system.run(commands.manager, first_system.ctx);
+        pub var first_system: ?System(ToSystemReturnType(first)) = null;
 
+        pub fn combined(commands: *Commands) !void {
+            if (first_system == null) {
+                first_system = ToSystem(first, ParamRegistry);
+            }
+            // Run first system and get its output
+            const first_result = try first_system.?.run(commands.manager, first_system.?.ctx);
             // Create second system with the first system's output as an injected argument
             const second_system = ToSystemWithArgs(second, .{first_result}, ParamRegistry);
             _ = try second_system.run(commands.manager, second_system.ctx);
@@ -508,10 +510,14 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime Par
     return pipe(
         predicate,
         struct {
+            pub var system_handle: ?System(void) = null;
+
             pub fn run(cond: bool, commands: *Commands) !void {
                 if (cond) {
-                    const sys = commands.manager.createSystem(system, ParamRegistry);
-                    _ = try sys.run(commands.manager, sys.ctx);
+                    if (system_handle == null) {
+                        system_handle = ToSystem(system, ParamRegistry);
+                    }
+                    _ = try system_handle.?.run(commands.manager, system_handle.?.ctx);
                 }
             }
         }.run,
