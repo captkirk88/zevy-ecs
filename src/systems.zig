@@ -447,12 +447,12 @@ pub fn ToSystemReturnType(comptime system_fn: anytype) type {
 ///
 /// Example:
 /// ```zig
-/// fn produceData(ecs: *ecs_mod.Manager, query: ecs_mod.Query()) []const u8 {
+/// fn produceData(commands: *zevy_ecs.Commands, query: ecs_mod.Query()) []const u8 {
 ///     // Logic to generate some data
 ///     return "Hello from first system";
 /// }
 ///
-/// fn processData(ecs: *ecs_mod.Manager, data: []const u8) void {
+/// fn processData(data: []const u8, commands: *zevy_ecs.Manager) void {
 ///     // Use the data from the first system
 ///     std.debug.print("Processed: {s}\n", .{data});
 /// }
@@ -490,9 +490,8 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 ///     return query.hasNext();
 /// }
 ///
-/// fn updatePositions(commands: *Commands) void {
+/// fn updatePositions(commands: *Commands, query: Query(.{pos: Position, vel: Velocity}, .{})) void {
 ///     // System logic to update positions
-///     var query = commands.query(.{pos: Position, vel: Velocity}, .{});
 ///     while (query.next()) |q| {
 ///         // Update position based on velocity
 ///         q.pos.*.x += q.vel.*.dx;
