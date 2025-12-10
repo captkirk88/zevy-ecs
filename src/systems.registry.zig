@@ -43,11 +43,11 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
     return struct {
         pub const registered_params = RegisteredParams;
 
-        pub fn len() usize {
+        pub inline fn len() usize {
             return registered_params.len;
         }
 
-        pub fn contains(comptime ParamType: type) bool {
+        pub inline fn contains(comptime ParamType: type) bool {
             inline for (registered_params) |SystemParam| {
                 const result = SystemParam.analyze(ParamType);
                 if (result) return true;
@@ -59,7 +59,7 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             return registered_params[index];
         }
 
-        pub fn params() []const type {
+        pub inline fn params() []const type {
             return registered_params;
         }
 
@@ -75,14 +75,18 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
             return null;
         }
 
-        pub fn apply(ecs_instance: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        pub inline fn apply(ecs_instance: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
             inline for (registered_params) |SystemParam| {
                 const analyzed = SystemParam.analyze(ParamType);
                 if (analyzed) |param| {
                     return try SystemParam.apply(ecs_instance, param);
                 }
             }
-            return errors.SystemParamError.UnknownSystemParam;
+            if (@import("builtin").mode == .Debug) {
+                std.debug.panic("SystemParamRegistry: Unknown SystemParam type: {s}", .{@typeName(ParamType)});
+            } else {
+                return errors.SystemParamError.UnknownSystemParam;
+            }
         }
 
         pub fn deinit(ecs_instance: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
