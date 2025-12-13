@@ -1,4 +1,5 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
 const ecs_mod = @import("ecs.zig");
 const scheduler_mod = @import("scheduler.zig");
 const Scheduler = scheduler_mod.Scheduler;
@@ -57,7 +58,7 @@ test "Scheduler register state type" {
     try scheduler.registerState(&ecs, GameState);
 
     // Verify state type is registered
-    const type_hash = std.hash.Wyhash.hash(0, @typeName(GameState));
+    const type_hash = reflect.typeHash(GameState);
     try std.testing.expect(scheduler.states.contains(type_hash));
 }
 

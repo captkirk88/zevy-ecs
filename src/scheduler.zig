@@ -5,38 +5,74 @@ const registry = @import("systems.registry.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
 const state_mod = @import("state.zig");
+const reflect = @import("zevy_reflect");
+
+const is_debug = @import("builtin").mode == .Debug;
 
 /// Stage ID type (internal representation)
-pub const StageId = u32;
+pub const StageId = struct {
+    value: i32,
+
+    pub inline fn init(value: i32) StageId {
+        return StageId{ .value = value };
+    }
+
+    pub inline fn initDebug(value: i32, comptime _T: type) StageId {
+        // Keep API compatible but do not store slices in the struct
+        comptime {
+            // reference _T at comptime so the parameter is considered used
+            _ = reflect.getSimpleTypeName(_T);
+        }
+        return init(value);
+    }
+
+    pub fn eql(self: *const StageId, other: StageId) bool {
+        return self.value == other.value;
+    }
+
+    pub fn toString(self: StageId) []const u8 {
+        return std.fmt.comptimePrint("StageId{{ value: {d} }}", .{self.value});
+    }
+
+    pub fn add(self: StageId, offset: u32) StageId {
+        return StageId{ .value = self.value + @as(i32, @intCast(offset)) };
+    }
+
+    pub fn subtract(self: StageId, offset: u32) StageId {
+        return StageId{ .value = self.value - @as(i32, @intCast(offset)) };
+    }
+};
 
 /// Convert a stage type to its unique stage ID.
 /// Each unique type gets a consistent i32 value based on its type name hash.
 /// Predefined stages map to specific ranges for ordering, custom stages use hash-based IDs.
 pub inline fn Stage(comptime T: type) StageId {
     // Check if T has a priority field for explicit ordering
-    if (@hasDecl(T, "priority")) {
+    if (comptime reflect.getTypeInfo(T).hasDecl("priority")) {
         return T.priority;
     }
 
     // Generate hash-based ID in user custom range (2,000,000 to ~2.1B)
     // Reserve space before Last/Exit/Max stages
-    const hash = std.hash.Wyhash.hash(0, @typeName(T));
+    const hash = reflect.typeHash(T);
     const max_custom_range = std.math.maxInt(i32) - 2_000_000 - 100_000; // Leave buffer before Last
-    return @intCast(2_000_000 + (@as(u32, @truncate(hash)) % max_custom_range));
+    return StageId.init(@intCast(2_000_000 + (@as(u32, @truncate(hash)) % @as(u32, max_custom_range))));
 }
 
 /// Get a stage ID that falls within a specified range.
 pub inline fn StageInRange(comptime T: type, start: StageId, end: StageId) StageId {
     const base_stage = Stage(T);
-    if (base_stage < start or base_stage > end) {
-        const hash = std.hash.Wyhash.hash(0, @typeName(T));
-        const range_size = end - start;
-        return start + (@as(u32, @truncate(hash)) % range_size);
+    if (base_stage.value < start.value or base_stage.value > end.value) {
+        const hash = reflect.typeHash(T);
+        const range_size_i32 = end.value - start.value;
+        const offset_u32 = @as(u32, @truncate(hash)) % @as(u32, range_size_i32);
+        const offset: i32 = @intCast(offset_u32);
+        return StageId.init(start.value + offset);
     }
     return base_stage;
 }
 
-const STAGE_GAP: StageId = 100_000;
+const STAGE_GAP = 100_000;
 
 /// Predefined execution stage types.
 /// Use Stage(Stages.Update) to get the i32 value for use in scheduler.
@@ -56,67 +92,76 @@ const STAGE_GAP: StageId = 100_000;
 pub const Stages = struct {
     /// Minimum stage. PreStartup uses same priority as Min.
     pub const Min = struct {
-        pub const priority: StageId = 0;
+        pub const priority: StageId = StageId.init(0);
     };
     /// Initialization stage.
     pub const PreStartup = struct {
-        pub const priority: StageId = Min.priority;
+        pub const priority: StageId = StageId.init(Min.priority.value);
     };
     pub const Startup = struct {
-        pub const priority: StageId = STAGE_GAP / 100; // 1,000
+        // 1,000
+        pub const priority: StageId = StageId.init(STAGE_GAP / 100);
     };
     /// First stage to be ran in the beginning of a update/draw/logic loop.
     pub const First = struct {
-        pub const priority: StageId = STAGE_GAP; // 100,000
+        // 100,000
+        pub const priority: StageId = StageId.init(STAGE_GAP);
     };
     pub const PreUpdate = struct {
-        pub const priority: StageId = 2 * STAGE_GAP; // 200,000
+        // 200,000
+        pub const priority: StageId = StageId.init(2 * STAGE_GAP);
     };
     pub const Update = struct {
-        pub const priority: StageId = 3 * STAGE_GAP; // 300,000
+        // 300,000
+        pub const priority: StageId = StageId.init(3 * STAGE_GAP);
     };
     pub const PostUpdate = struct {
-        pub const priority: StageId = 4 * STAGE_GAP; // 400,000
+        // 400,000
+        pub const priority: StageId = StageId.init(4 * STAGE_GAP);
     };
     pub const PreDraw = struct {
-        pub const priority: StageId = 5 * STAGE_GAP; // 500,000
+        // 500,000
+        pub const priority: StageId = StageId.init(5 * STAGE_GAP);
     };
     pub const Draw = struct {
-        pub const priority: StageId = 6 * STAGE_GAP; // 600,000
+        // 600,000
+        pub const priority: StageId = StageId.init(6 * STAGE_GAP);
     };
     pub const PostDraw = struct {
-        pub const priority: StageId = 7 * STAGE_GAP; // 700,000
+        // 700,000
+        pub const priority: StageId = StageId.init(7 * STAGE_GAP);
     };
 
     /// Last stage to be ran in a update/draw/logic loop.
     pub const Last = struct {
-        pub const priority: StageId = 8 * STAGE_GAP; // 800,000
+        // 800,000
+        pub const priority: StageId = StageId.init(8 * STAGE_GAP);
     };
 
     /// Internal use for States
-    pub const StateTransition = struct {
-        pub const priority: StageId = 1_000_000;
+    const StateTransition = struct {
+        pub const priority: StageId = .init(1_000_000);
     };
     /// Internal use for States
-    pub const StateOnExit = struct {
-        pub const priority: StageId = StateTransition.priority + STAGE_GAP;
+    const StateOnExit = struct {
+        pub const priority: StageId = .init(StateTransition.priority.value + STAGE_GAP);
     };
     /// Internal use for States
-    pub const StateOnEnter = struct {
-        pub const priority: StageId = StateOnExit.priority + STAGE_GAP;
+    const StateOnEnter = struct {
+        pub const priority: StageId = .init(StateOnExit.priority.value + STAGE_GAP);
     };
     /// Internal use for States
-    pub const StateUpdate = struct {
-        pub const priority: StageId = StateOnEnter.priority + STAGE_GAP;
+    const StateUpdate = struct {
+        pub const priority: StageId = .init(StateOnEnter.priority.value + STAGE_GAP);
     };
 
     /// Exit stage, final stage to run.
     /// Range Exit -> Max.
     pub const Exit = struct {
-        pub const priority: StageId = std.math.maxInt(i32) - STAGE_GAP;
+        pub const priority: StageId = StageId.init(std.math.maxInt(i32) - STAGE_GAP);
     };
     pub const Max = struct {
-        pub const priority: StageId = std.math.maxInt(i32);
+        pub const priority: StageId = StageId.init(std.math.maxInt(i32));
     };
 };
 
@@ -128,7 +173,7 @@ pub const Stages = struct {
 /// Includes integrated state management for application states.
 pub const Scheduler = struct {
     allocator: std.mem.Allocator,
-    systems: std.AutoHashMap(StageId, std.ArrayList(systems.UntypedSystemHandle)),
+    systems: std.AutoHashMap(i32, std.ArrayList(systems.UntypedSystemHandle)),
     // State management - stores state enum type hash and current value
     states: std.AutoHashMap(u64, StateInfo),
     active_state: ?StateValue,
@@ -150,27 +195,27 @@ pub const Scheduler = struct {
     };
 
     /// List of all predefined stages for initialization
-    const predefined_stages = [_]StageId{
-        Stage(Stages.Min),
-        Stage(Stages.PreStartup),
-        Stage(Stages.Startup),
-        Stage(Stages.First),
-        Stage(Stages.PreUpdate),
-        Stage(Stages.Update),
-        Stage(Stages.PostUpdate),
-        Stage(Stages.PreDraw),
-        Stage(Stages.Draw),
-        Stage(Stages.PostDraw),
-        Stage(Stages.StateTransition),
-        Stage(Stages.StateOnExit),
-        Stage(Stages.StateOnEnter),
-        Stage(Stages.StateUpdate),
-        Stage(Stages.Last),
-        Stage(Stages.Max), // Exit and Max are the same value now
+    const predefined_stages = [_]i32{
+        Stage(Stages.Min).value,
+        Stage(Stages.PreStartup).value,
+        Stage(Stages.Startup).value,
+        Stage(Stages.First).value,
+        Stage(Stages.PreUpdate).value,
+        Stage(Stages.Update).value,
+        Stage(Stages.PostUpdate).value,
+        Stage(Stages.PreDraw).value,
+        Stage(Stages.Draw).value,
+        Stage(Stages.PostDraw).value,
+        Stage(Stages.StateTransition).value,
+        Stage(Stages.StateOnExit).value,
+        Stage(Stages.StateOnEnter).value,
+        Stage(Stages.StateUpdate).value,
+        Stage(Stages.Last).value,
+        Stage(Stages.Max).value, // Exit and Max are the same value now
     };
 
-    pub fn init(allocator: std.mem.Allocator) !Scheduler {
-        var _systems = std.AutoHashMap(StageId, std.ArrayList(systems.UntypedSystemHandle)).init(allocator);
+    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Scheduler {
+        var _systems = std.AutoHashMap(i32, std.ArrayList(systems.UntypedSystemHandle)).init(allocator);
         for (predefined_stages) |stage| {
             const new_list = std.ArrayList(systems.UntypedSystemHandle).initCapacity(allocator, 0) catch |err| {
                 _systems.deinit();
@@ -198,7 +243,7 @@ pub const Scheduler = struct {
     }
 
     pub fn addSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype, comptime param_registry: type) void {
-        const gop = self.systems.getOrPut(stage) catch |err| @panic(@errorName(err));
+        const gop = self.systems.getOrPut(stage.value) catch |err| @panic(@errorName(err));
         if (!gop.found_existing) {
             gop.value_ptr.* = std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
         }
@@ -213,9 +258,9 @@ pub const Scheduler = struct {
     }
 
     pub fn addStage(self: *Scheduler, stage: StageId) error{ InvalidStageBounds, StageExists, OutOfMemory }!void {
-        const gop = try self.systems.getOrPut(stage);
+        const gop = try self.systems.getOrPut(stage.value);
         if (!gop.found_existing) {
-            if (stage < Stage(Stages.Min) or stage > Stage(Stages.Max)) {
+            if (stage.value < Stage(Stages.Min).value or stage.value > Stage(Stages.Max).value) {
                 return error.InvalidStageBounds;
             }
             gop.value_ptr.* = try std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4);
@@ -224,8 +269,16 @@ pub const Scheduler = struct {
         }
     }
 
+    pub fn removeStage(self: *Scheduler, stage: StageId) error{StageHasNoSystems}!void {
+        if (self.systems.fetchRemove(stage.value)) |entry| {
+            entry.value.deinit(self.allocator);
+        } else {
+            return error.StageHasNoSystems;
+        }
+    }
+
     pub fn runStage(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) anyerror!void {
-        if (self.systems.get(stage)) |list| {
+        if (self.systems.get(stage.value)) |list| {
             for (list.items) |handle| {
                 try ecs.runSystemUntyped(void, handle);
             }
@@ -234,22 +287,23 @@ pub const Scheduler = struct {
 
     pub fn runStages(self: *Scheduler, ecs: *ecs_mod.Manager, start: StageId, end: StageId) anyerror!void {
         // Collect stages in the range and sort them
-        var stages_in_range = std.ArrayList(StageId).initCapacity(self.allocator, 0) catch |err| @panic(@errorName(err));
-        defer stages_in_range.deinit(self.allocator);
+        var stage_values = std.ArrayList(i32).initCapacity(self.allocator, 0) catch |err| @panic(@errorName(err));
+        defer stage_values.deinit(self.allocator);
 
         var it = self.systems.iterator();
         while (it.next()) |entry| {
-            if (entry.key_ptr.* >= start and entry.key_ptr.* <= end) {
-                stages_in_range.append(self.allocator, entry.key_ptr.*) catch |err| @panic(@errorName(err));
+            const k = entry.key_ptr.*;
+            if (k >= start.value and k <= end.value) {
+                stage_values.append(self.allocator, k) catch |err| @panic(@errorName(err));
             }
         }
 
-        // Sort stages by their ID (ascending order)
-        std.mem.sort(StageId, stages_in_range.items, {}, std.sort.asc(StageId));
+        // Sort stage integer IDs (ascending)
+        std.mem.sort(i32, stage_values.items, {}, std.sort.asc(i32));
 
         // Run stages in sorted order
-        for (stages_in_range.items) |stage| {
-            try self.runStage(ecs, stage);
+        for (stage_values.items) |val| {
+            try self.runStage(ecs, StageId.init(val));
         }
     }
 
@@ -258,7 +312,7 @@ pub const Scheduler = struct {
         var it = self.systems.iterator();
         while (it.next()) |entry| {
             info_list.append(allocator, .{
-                .stage = entry.key_ptr.*,
+                .stage = StageId.init(entry.key_ptr.*),
                 .system_count = entry.value_ptr.items.len,
             }) catch |err| @panic(@errorName(err));
         }
@@ -314,7 +368,7 @@ pub const Scheduler = struct {
             return error.ExpectedEnumType;
         }
 
-        const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
+        const type_hash = reflect.typeHash(StateEnum);
 
         // Check if state type is already registered
         if (self.states.contains(type_hash)) {
@@ -334,8 +388,8 @@ pub const Scheduler = struct {
 
     /// Check if a specific state value is currently active
     pub fn isInState(self: *Scheduler, comptime StateEnum: type, state: StateEnum) bool {
-        const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
-        const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
+        const type_hash = reflect.typeHash(StateEnum);
+        const value_hash = reflect.hash(@tagName(state));
 
         if (self.active_state) |active| {
             return active.enum_type_hash == type_hash and active.value_hash == value_hash;
@@ -345,7 +399,7 @@ pub const Scheduler = struct {
 
     /// Get the currently active state of a specific enum type
     pub fn getActiveState(self: *Scheduler, comptime StateEnum: type) ?StateEnum {
-        const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
+        const type_hash = reflect.typeHash(StateEnum);
 
         if (self.active_state) |active| {
             if (active.enum_type_hash == type_hash) {
@@ -376,12 +430,12 @@ pub const Scheduler = struct {
         comptime StateEnum: type,
         state: StateEnum,
     ) error{StateNotRegistered}!void {
-        const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
+        const type_hash = reflect.typeHash(StateEnum);
 
         // Verify the state enum type is registered
         if (!self.states.contains(type_hash)) return error.StateNotRegistered;
 
-        const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
+        const value_hash = reflect.hash(@tagName(state));
         const value_name = @tagName(state);
 
         // Don't transition if already in this state
@@ -395,9 +449,9 @@ pub const Scheduler = struct {
         if (self.active_state) |old_state| {
             if (old_state.enum_type_hash == type_hash) {
                 // Calculate OnExit stage for the old state
-                const old_combined_hash = std.hash.Wyhash.hash(old_state.enum_type_hash, std.mem.asBytes(&old_state.value_hash));
+                const old_combined_hash = reflect.hashWithSeed(std.mem.asBytes(&old_state.value_hash), old_state.enum_type_hash);
                 const old_stage_offset: u32 = @intCast(@as(u32, @truncate(old_combined_hash)) % 100_000);
-                const exit_stage = Stage(Stages.StateOnExit) + old_stage_offset;
+                const exit_stage = Stage(Stages.StateOnExit).add(old_stage_offset);
                 // Run the OnExit stage if it exists (don't error if it doesn't)
                 self.runStage(ecs, exit_stage) catch {};
             }
@@ -412,9 +466,9 @@ pub const Scheduler = struct {
 
         // Run OnEnter systems for the new state
         // Calculate OnEnter stage for the new state
-        const new_combined_hash = std.hash.Wyhash.hash(type_hash, std.mem.asBytes(&value_hash));
+        const new_combined_hash = reflect.hashWithSeed(std.mem.asBytes(&value_hash), type_hash);
         const new_stage_offset: u32 = @intCast(@as(u32, @truncate(new_combined_hash)) % 100_000);
-        const enter_stage = Stage(Stages.StateOnEnter) + new_stage_offset;
+        const enter_stage = Stage(Stages.StateOnEnter).add(new_stage_offset);
         // Run the OnEnter stage if it exists (don't error if it doesn't)
         self.runStage(ecs, enter_stage) catch {};
     }
@@ -427,11 +481,11 @@ pub const Scheduler = struct {
         comptime StateEnum: type,
         state: StateEnum,
     ) !void {
-        const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
-        const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
-        const combined_hash = std.hash.Wyhash.hash(type_hash, std.mem.asBytes(&value_hash));
+        const type_hash = reflect.typeHash(StateEnum);
+        const value_hash = reflect.hash(@tagName(state));
+        const combined_hash = reflect.hashWithSeed(std.mem.asBytes(&value_hash), type_hash);
         const stage_offset: u32 = @intCast(@as(u32, @truncate(combined_hash)) % 100_000);
-        const state_stage = Stage(Stages.StateUpdate) + stage_offset;
+        const state_stage = Stage(Stages.StateUpdate).add(stage_offset);
 
         // Run the InState stage if it exists (don't error if it doesn't)
         self.runStage(ecs, state_stage) catch {};
@@ -466,13 +520,13 @@ pub inline fn OnEnter(comptime state: anytype) StageId {
 
     // Generate a unique stage ID based on the enum type and value
     // Use StateOnEnter base stage + hash of type name and value name
-    const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
-    const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
-    const combined_hash = std.hash.Wyhash.hash(type_hash, std.mem.asBytes(&value_hash));
+    const type_hash = reflect.typeHash(StateEnum);
+    const value_hash = reflect.hash(@tagName(state));
+    const combined_hash = reflect.hashWithSeed(std.mem.asBytes(&value_hash), type_hash);
 
     // Map hash to a range within StateOnEnter stage area (1,200,000 - 1,299,999)
     const stage_offset: u32 = @intCast(@as(u32, @truncate(combined_hash)) % 100_000);
-    return Stage(Stages.StateOnEnter) + stage_offset;
+    return Stage(Stages.StateOnEnter).add(stage_offset);
 }
 
 /// Returns a temporary stage ID for systems that should run when exiting a specific state
@@ -486,13 +540,13 @@ pub inline fn OnExit(comptime state: anytype) StageId {
 
     // Generate a unique stage ID based on the enum type and value
     // Use StateOnExit base stage + hash of type name and value name
-    const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
-    const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
-    const combined_hash = std.hash.Wyhash.hash(type_hash, std.mem.asBytes(&value_hash));
+    const type_hash = reflect.typeHash(StateEnum);
+    const value_hash = reflect.hash(@tagName(state));
+    const combined_hash = reflect.hashWithSeed(std.mem.asBytes(&value_hash), type_hash);
 
     // Map hash to a range within StateOnExit stage area (1,100,000 - 1,199,999)
     const stage_offset: u32 = @intCast(@as(u32, @truncate(combined_hash)) % 100_000);
-    return Stage(Stages.StateOnExit) + stage_offset;
+    return Stage(Stages.StateOnExit).add(stage_offset);
 }
 
 /// Returns a temporary stage ID for systems that should run only while in a specific state
@@ -506,13 +560,13 @@ pub inline fn InState(comptime state: anytype) StageId {
 
     // Generate a unique stage ID based on the enum type and value
     // Use StateUpdate base stage + hash of type name and value name
-    const type_hash = std.hash.Wyhash.hash(0, @typeName(StateEnum));
-    const value_hash = std.hash.Wyhash.hash(0, @tagName(state));
-    const combined_hash = std.hash.Wyhash.hash(type_hash, std.mem.asBytes(&value_hash));
+    const type_hash = reflect.typeHash(StateEnum);
+    const value_hash = reflect.hash(@tagName(state));
+    const combined_hash = reflect.hashWithSeed(std.mem.asBytes(&value_hash), type_hash);
 
     // Map hash to a range within StateUpdate stage area (1,300,000 - 1,399,999)
     const stage_offset: u32 = @intCast(@as(u32, @truncate(combined_hash)) % 100_000);
-    return Stage(Stages.StateUpdate) + stage_offset;
+    return Stage(Stages.StateUpdate).add(stage_offset);
 }
 
 // Test the registerEventType functionality
@@ -548,7 +602,7 @@ test "Scheduler registerEventType" {
     // Find the Last stage
     var found_last_stage = false;
     for (stage_info.items) |info| {
-        if (info.stage == Stage(Stages.Last)) {
+        if (info.stage.eql(Stage(Stages.Last))) {
             std.testing.expect(info.system_count >= 1) catch {
                 std.debug.print("Expected at least one system in Last stage, found {d}\n", .{info.system_count});
                 return error.UnexpectedSystemCount;
@@ -571,9 +625,9 @@ test "Scheduler addStage" {
     var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
-    const custom_stage = 999;
+    const custom_stage = StageId.init(999);
     try scheduler.addStage(custom_stage);
-    try std.testing.expect(scheduler.systems.contains(custom_stage));
+    try std.testing.expect(scheduler.systems.contains(custom_stage.value));
     try std.testing.expectError(error.StageExists, scheduler.addStage(custom_stage));
 }
 
@@ -595,7 +649,7 @@ test "Scheduler getStageInfo" {
 
     // Check that all unique predefined stages are present
     // Build a set of unique stage IDs from predefined_stages
-    var unique_stages = std.AutoHashMap(StageId, void).init(allocator);
+    var unique_stages = std.AutoHashMap(i32, void).init(allocator);
     defer unique_stages.deinit();
     for (Scheduler.predefined_stages) |stage| {
         try unique_stages.put(stage, {});
@@ -606,7 +660,7 @@ test "Scheduler getStageInfo" {
     while (it.next()) |stage_ptr| {
         var found = false;
         for (info.items) |i| {
-            if (i.stage == stage_ptr.*) {
+            if (i.stage.eql(StageId.init(stage_ptr.*))) {
                 found = true;
                 break;
             }
@@ -623,7 +677,7 @@ test "Scheduler runStage on non-existing stage" {
     var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
-    try std.testing.expectError(error.StageHasNoSystems, scheduler.runStage(&ecs, 9999));
+    try std.testing.expectError(error.StageHasNoSystems, scheduler.runStage(&ecs, .init(9999)));
 }
 
 test "Scheduler assign outside scope" {
@@ -635,7 +689,7 @@ test "Scheduler assign outside scope" {
     defer scheduler.deinit();
 
     // Add a custom stage and a system to it
-    const custom_stage = 150_000; // Between First (100,000) and PreUpdate (200,000)
+    const custom_stage = StageId.init(150_000); // Between First (100,000) and PreUpdate (200,000)
     const out_value = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
@@ -664,13 +718,13 @@ test "Custom stage types with explicit priorities" {
     // Define custom stages with explicit priorities
     const CustomStages = struct {
         pub const EarlyGame = struct {
-            pub const priority: StageId = 50_000; // Between Startup and First
+            pub const priority: StageId = .initDebug(50_000, EarlyGame); // Between Startup and First
         };
         pub const LateUpdate = struct {
-            pub const priority: StageId = 350_000; // Between Update and PostUpdate
+            pub const priority: StageId = .initDebug(350_000, LateUpdate); // Between Update and PostUpdate
         };
         pub const PreCleanup = struct {
-            pub const priority: StageId = 750_000; // Between PostDraw and Last
+            pub const priority: StageId = .initDebug(750_000, PreCleanup); // Between PostDraw and Last
         };
     };
 
@@ -684,14 +738,14 @@ test "Custom stage types with explicit priorities" {
     scheduler.addSystem(&ecs, Stage(CustomStages.PreCleanup), test_sys, registry.DefaultParamRegistry);
 
     // Verify stages have correct priority values
-    try std.testing.expect(Stage(CustomStages.EarlyGame) == 50_000);
-    try std.testing.expect(Stage(CustomStages.LateUpdate) == 350_000);
-    try std.testing.expect(Stage(CustomStages.PreCleanup) == 750_000);
+    try std.testing.expect(Stage(CustomStages.EarlyGame).value == 50_000);
+    try std.testing.expect(Stage(CustomStages.LateUpdate).value == 350_000);
+    try std.testing.expect(Stage(CustomStages.PreCleanup).value == 750_000);
 
     // Verify stages were added to scheduler
-    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.EarlyGame)));
-    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.LateUpdate)));
-    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.PreCleanup)));
+    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.EarlyGame).value));
+    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.LateUpdate).value));
+    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.PreCleanup).value));
 }
 
 test "Custom stage types with hash-based IDs" {
@@ -719,47 +773,47 @@ test "Custom stage types with hash-based IDs" {
     scheduler.addSystem(&ecs, Stage(CustomStages.Networking), test_sys, registry.DefaultParamRegistry);
 
     // Verify hash-based IDs are in the correct range (2M+)
-    try std.testing.expect(Stage(CustomStages.Physics) >= 2_000_000);
-    try std.testing.expect(Stage(CustomStages.Audio) >= 2_000_000);
-    try std.testing.expect(Stage(CustomStages.Networking) >= 2_000_000);
+    try std.testing.expect(Stage(CustomStages.Physics).value >= 2_000_000);
+    try std.testing.expect(Stage(CustomStages.Audio).value >= 2_000_000);
+    try std.testing.expect(Stage(CustomStages.Networking).value >= 2_000_000);
 
     // Verify different types get different IDs
-    try std.testing.expect(Stage(CustomStages.Physics) != Stage(CustomStages.Audio));
-    try std.testing.expect(Stage(CustomStages.Audio) != Stage(CustomStages.Networking));
-    try std.testing.expect(Stage(CustomStages.Physics) != Stage(CustomStages.Networking));
+    try std.testing.expect(Stage(CustomStages.Physics).value != Stage(CustomStages.Audio).value);
+    try std.testing.expect(Stage(CustomStages.Audio).value != Stage(CustomStages.Networking).value);
+    try std.testing.expect(Stage(CustomStages.Physics).value != Stage(CustomStages.Networking).value);
 
     // Verify stages were added to scheduler
-    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Physics)));
-    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Audio)));
-    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Networking)));
+    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Physics).value));
+    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Audio).value));
+    try std.testing.expect(scheduler.systems.contains(Stage(CustomStages.Networking).value));
 }
 
 test "StageInRange returns base if in range and maps out-of-range to within range" {
 
     // Priority-based type that sits in the range
     const InRange = struct {
-        pub const priority: StageId = 150;
+        pub const priority: StageId = .initDebug(150, @This());
     };
-    try std.testing.expect(StageInRange(InRange, 100, 200) == 150);
+    try std.testing.expect(StageInRange(InRange, .init(100), .init(200)).value == 150);
 
     // Priority-based type outside the range should be mapped into it
     const OutRangePriority = struct {
-        pub const priority: StageId = 800;
+        pub const priority: StageId = .initDebug(800, @This());
     };
-    const mapped_priority = StageInRange(OutRangePriority, 100, 200);
-    try std.testing.expect(mapped_priority >= 100);
-    try std.testing.expect(mapped_priority < 200);
+    const mapped_priority = StageInRange(OutRangePriority, .init(100), .init(200));
+    try std.testing.expect(mapped_priority.value >= 100);
+    try std.testing.expect(mapped_priority.value < 200);
 
     // Non-priority (hash-based) type should also be mapped into the given range
     const HashBased = struct {};
-    const start = 2_000_000;
-    const end = 2_000_100;
+    const start = StageId.init(2_000_000);
+    const end = StageId.init(2_000_100);
     const mapped_hash = StageInRange(HashBased, start, end);
-    try std.testing.expect(mapped_hash >= start);
-    try std.testing.expect(mapped_hash < end);
+    try std.testing.expect(mapped_hash.value >= start.value);
+    try std.testing.expect(mapped_hash.value < end.value);
 
     // Sanity: start must be less than end
-    try std.testing.expect(start < end);
+    try std.testing.expect(start.value < end.value);
 }
 
 test "State management without registration throws errors" {

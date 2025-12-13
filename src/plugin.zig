@@ -70,12 +70,7 @@ pub const PluginManager = struct {
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
-        const hash = comptime reflect.typeHash(T);
-
-        // Check if plugin already exists
-        if (self.plugin_hashes.contains(hash)) {
-            return error.PluginAlreadyExists;
-        }
+        const type_hash = comptime reflect.typeHash(T);
 
         // Compile-time verification
         if (!comptime reflect.verifyFuncWithArgs(T, "build", &[_]type{ *zevy_ecs.Manager, *PluginManager }) catch false) {
@@ -88,6 +83,15 @@ pub const PluginManager = struct {
             instance.name
         else
             @typeName(T);
+
+        // Determine the lookup hash: for FnPlugin-like types that expose a `name` field
+        // we use the runtime name string hash so multiple function-plugins can coexist.
+        const key_hash: u64 = if (plugin_name_field != null and plugin_name_field == []const u8) reflect.hash(name) else type_hash;
+
+        // Check if plugin already exists
+        if (self.plugin_hashes.contains(key_hash)) {
+            return error.PluginAlreadyExists;
+        }
 
         // Allocate and store the plugin instance
         const plugin_ptr = try self.allocator.create(T);
@@ -114,10 +118,10 @@ pub const PluginManager = struct {
             .build_fn = Wrapper.buildImpl,
             .deinit_fn = Wrapper.deinitImpl,
             .name = name,
-            .hash = hash,
+            .hash = key_hash,
         });
 
-        try self.plugin_hashes.put(self.allocator, hash, {});
+        try self.plugin_hashes.put(self.allocator, key_hash, {});
     }
 
     pub fn get(self: *const PluginManager, comptime T: type) ?*T {
