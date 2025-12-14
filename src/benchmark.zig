@@ -143,7 +143,7 @@ pub const Benchmark = struct {
 
     fn printResultPlain(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
-        const mem_size = mem.byteSize(result.avg_bytes);
+        const mem_size = mem.utils.byteSize(result.avg_bytes);
 
         std.debug.print("{s}\n", .{result.name});
         std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {f}/op {d}/op\n", .{
@@ -168,7 +168,7 @@ pub const Benchmark = struct {
 
     fn printResultMarkdown(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
-        const mem_size = mem.byteSize(result.avg_bytes);
+        const mem_size = mem.utils.byteSize(result.avg_bytes);
 
         std.debug.print("| {s} | {d} | {d:.3} {s}/op | {f}/op | {d}/op |\n", .{
             result.name,
@@ -218,7 +218,7 @@ pub const Benchmark = struct {
 
     fn printResultHtml(result: BenchmarkResult) void {
         const time = formatTime(result.avg_ns);
-        const mem_size = mem.byteSize(result.avg_bytes);
+        const mem_size = mem.utils.byteSize(result.avg_bytes);
 
         std.debug.print("  <tr>\n", .{});
         std.debug.print("    <td>{s}</td>\n", .{result.name});
