@@ -18,9 +18,17 @@ const std = @import("std");
 const zevy_ecs = @import("zevy_ecs");
 const reflect = @import("zevy_reflect");
 
-/// Check if a type implements the plugin interface at compile time.
-/// A plugin must have a `build` method with signature:
-/// `pub fn build(self: *T, manager: *zevy_ecs.Manager) !void`
+pub const PluginTemplate = struct {
+    pub fn build(_: *@This(), _: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
+        unreachable;
+    }
+    pub fn deinit(_: *@This(), _: std.mem.Allocator, _: *zevy_ecs.Manager) anyerror!void {
+        unreachable;
+    }
+};
+
+pub const Plugin = reflect.templates.Template(PluginTemplate).InterfaceType;
+
 /// Manager for ECS plugins
 ///
 /// Example:
@@ -31,8 +39,8 @@ const reflect = @import("zevy_reflect");
 /// var plugin_manager = PluginManager.init(allocator);
 /// defer plugin_manager.deinit();
 ///
-/// try plugin_manager.add(InputPlugin, .{});
-/// try plugin_manager.add(TimePlugin, .{});
+/// try plugin_manager.add(InputPlugin{});
+/// try plugin_manager.add(TimePlugin{});
 ///
 /// try plugin_manager.build(&manager);
 /// ```
@@ -43,11 +51,13 @@ pub const PluginManager = struct {
 
     /// Internal storage for type-erased plugins
     const PluginEntry = struct {
-        ptr: *anyopaque,
-        build_fn: *const fn (*anyopaque, *zevy_ecs.Manager, *PluginManager) anyerror!void,
-        deinit_fn: *const fn (*anyopaque, std.mem.Allocator, *zevy_ecs.Manager) void,
+        interface: Plugin,
         name: []const u8,
         hash: u64,
+        // Pointer to the allocated plugin instance (type-erased)
+        inst_ptr: *anyopaque,
+        // Type-specific destroy function to free the allocated instance
+        destroy_fn: ?*const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void,
     };
 
     pub fn init(allocator: std.mem.Allocator) PluginManager {
@@ -59,76 +69,67 @@ pub const PluginManager = struct {
     pub fn deinit(self: *PluginManager, ecs: *zevy_ecs.Manager) void {
         // Free all allocated plugin instances using their typed deinit functions
         for (self.plugins.items) |entry| {
-            entry.deinit_fn(entry.ptr, self.allocator, ecs);
+            // First call the plugin's deinit if present
+            entry.interface.vtable.deinit(entry.interface.ptr, self.allocator, ecs) catch |err| {
+                std.debug.panic(
+                    "Failed to deinit plugin '{s}': {s}",
+                    .{ entry.name, @errorName(err) },
+                );
+            };
+
+            // Then free the concrete plugin instance memory
+            if (entry.destroy_fn) |destroy| {
+                destroy(entry.interface.ptr, self.allocator);
+            }
         }
+
         self.plugins.deinit(self.allocator);
         self.plugin_hashes.deinit(self.allocator);
     }
 
     /// Add a plugin instance to the manager.
-    pub fn add(self: *PluginManager, comptime T: type, instance: T) error{
+    pub fn add(self: *PluginManager, comptime PluginType: type, plugin: PluginType) error{
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
-        const type_hash = comptime reflect.typeHash(T);
-
-        // Compile-time verification
-        if (!comptime reflect.verifyFuncWithArgs(T, "build", &[_]type{ *zevy_ecs.Manager, *PluginManager }) catch false) {
-            @compileError(std.fmt.comptimePrint("Plugin '{s}' does not implement plugin interface (must have: pub fn build(self: *T, manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) !void)", .{@typeName(T)}));
-        }
-
-        const plugin_name_field = comptime reflect.getFieldType(T, "name");
-        // Use the name field if available (for FnPlugin), otherwise use type name
-        const name = if (plugin_name_field != null and plugin_name_field == []const u8)
-            instance.name
-        else
-            @typeName(T);
-
-        // Determine the lookup hash: for FnPlugin-like types that expose a `name` field
-        // we use the runtime name string hash so multiple function-plugins can coexist.
-        const key_hash: u64 = if (plugin_name_field != null and plugin_name_field == []const u8) reflect.hash(name) else type_hash;
-
+        const type_info = reflect.getTypeInfo(PluginType);
+        const key_hash = type_info.hash;
         // Check if plugin already exists
         if (self.plugin_hashes.contains(key_hash)) {
             return error.PluginAlreadyExists;
         }
 
-        // Allocate and store the plugin instance
-        const plugin_ptr = try self.allocator.create(T);
-        plugin_ptr.* = instance;
+        const PluginTemplateType = reflect.templates.Template(PluginTemplate);
+        PluginTemplateType.validate(PluginType);
+        const inst_ptr = try self.allocator.create(PluginType);
+        inst_ptr.* = plugin;
 
-        // Generate wrapper functions at compile time for this specific type
+        var interface: Plugin = undefined;
+        reflect.templates.Template(PluginTemplate).populate(&interface, inst_ptr);
+
         const Wrapper = struct {
-            fn buildImpl(ptr: *anyopaque, manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) !void {
-                const self_ptr: *T = @ptrCast(@alignCast(ptr));
-                return self_ptr.build(manager, plugin_manager);
-            }
-
-            fn deinitImpl(ptr: *anyopaque, allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) void {
-                const self_ptr: *T = @ptrCast(@alignCast(ptr));
-                if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{*zevy_ecs.Manager})) {
-                    self_ptr.deinit(manager);
-                }
-                allocator.destroy(self_ptr);
+            fn destroy(ptr: *anyopaque, allocator: std.mem.Allocator) void {
+                const p: *PluginType = @ptrCast(@alignCast(ptr));
+                allocator.destroy(p);
             }
         };
 
         try self.plugins.append(self.allocator, .{
-            .ptr = plugin_ptr,
-            .build_fn = Wrapper.buildImpl,
-            .deinit_fn = Wrapper.deinitImpl,
-            .name = name,
+            .interface = interface,
+            .name = type_info.name,
             .hash = key_hash,
+            .inst_ptr = @ptrCast(@alignCast(inst_ptr)),
+            .destroy_fn = &Wrapper.destroy,
         });
 
         try self.plugin_hashes.put(self.allocator, key_hash, {});
     }
 
     pub fn get(self: *const PluginManager, comptime T: type) ?*T {
-        const hash = comptime std.hash.Wyhash.hash(0, @typeName(T));
+        const hash = comptime reflect.typeHash(T);
         for (self.plugins.items) |entry| {
             if (entry.hash == hash) {
-                return @ptrCast(@alignCast(entry.ptr));
+                return @ptrCast(@alignCast(entry.interface.ptr));
             }
         }
         return null;
@@ -138,7 +139,7 @@ pub const PluginManager = struct {
     pub fn build(self: *PluginManager, manager: *zevy_ecs.Manager) !void {
         // Build all plugins
         for (self.plugins.items) |entry| {
-            entry.build_fn(entry.ptr, manager, self) catch |err| {
+            entry.interface.vtable.build(entry.interface.ptr, manager, self) catch |err| {
                 std.debug.panic(
                     "Failed to build plugin '{s}': {s}",
                     .{ entry.name, @errorName(err) },
@@ -173,42 +174,10 @@ pub const PluginManager = struct {
     }
 
     pub fn has(self: *const PluginManager, comptime T: type) bool {
-        const hash = comptime std.hash.Wyhash.hash(0, @typeName(T));
+        const hash = comptime reflect.typeHash(T);
         return self.plugin_hashes.contains(hash);
     }
 };
-
-/// Helper to create a simple function-based plugin.
-/// Useful for quick plugins that don't need state.
-///
-/// Example:
-/// ```zig
-/// const myPlugin = FnPlugin("MyPlugin", struct {
-///     fn build(manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) !void {
-///         // Setup code here
-///     }
-/// }.build);
-/// ```
-pub fn FnPlugin(
-    comptime plugin_name: []const u8,
-    comptime buildFn: fn (manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) anyerror!void,
-    comptime deinitFn: ?fn (manager: *zevy_ecs.Manager) void,
-) type {
-    return struct {
-        const Self = @This();
-        name: []const u8 = plugin_name,
-
-        pub fn build(_: *Self, manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) !void {
-            return buildFn(manager, plugin_manager);
-        }
-
-        pub fn deinit(_: *Self, manager: *zevy_ecs.Manager) void {
-            if (deinitFn) |fn_ptr| {
-                fn_ptr(manager);
-            }
-        }
-    };
-}
 
 test "Plugin basic functionality" {
     const TestPlugin = struct {
@@ -216,6 +185,12 @@ test "Plugin basic functionality" {
 
         pub fn build(_: *Self, manager: *zevy_ecs.Manager, _: *PluginManager) !void {
             _ = try manager.addResource(bool, true);
+        }
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
         }
     };
 
@@ -236,6 +211,11 @@ test "PluginManager add single plugin" {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
             _ = try manager.addResource(i32, 42);
         }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
     };
 
     var manager = try zevy_ecs.Manager.init(std.testing.allocator);
@@ -255,12 +235,22 @@ test "PluginManager add multiple plugins" {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
             _ = try manager.addResource(i32, 10);
         }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
     };
 
     const TestPlugin2 = struct {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
             const res = manager.getResource(i32).?;
             res.* = 20;
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
         }
     };
 
@@ -277,32 +267,15 @@ test "PluginManager add multiple plugins" {
     try std.testing.expectEqual(@as(i32, 20), manager.getResource(i32).?.*);
 }
 
-test "Function plugin creation" {
-    const MyRes = struct {
-        value: []const u8,
-    };
-    const MyFnPlugin = FnPlugin("TestFn", struct {
-        fn build(manager: *zevy_ecs.Manager, _: *PluginManager) !void {
-            _ = try manager.addResource(MyRes, .{ .value = "TestFn" });
-        }
-    }.build, null);
-
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
-    defer manager.deinit();
-
-    var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
-
-    try plugin_manager.add(MyFnPlugin, .{});
-    try plugin_manager.build(&manager);
-
-    try std.testing.expectEqualStrings("TestFn", manager.getResource(MyRes).?.value);
-}
-
 test "PluginManager prevents duplicate plugins" {
     const TestPlugin = struct {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
             _ = try manager.addResource(i32, 42);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
         }
     };
 
@@ -326,44 +299,6 @@ test "PluginManager prevents duplicate plugins" {
     try std.testing.expectEqual(@as(usize, 1), plugin_manager.plugins.items.len);
 }
 
-test "PluginManager multiple FnPlugin instances" {
-    const FnPlugin1 = FnPlugin("Plugin1", struct {
-        fn build(manager: *zevy_ecs.Manager, _: *PluginManager) !void {
-            _ = try manager.addResource(i32, 1);
-        }
-    }.build, null);
-
-    const FnPlugin2 = FnPlugin("Plugin2", struct {
-        fn build(manager: *zevy_ecs.Manager, _: *PluginManager) !void {
-            const res = manager.getResource(i32).?;
-            res.* += 10;
-        }
-    }.build, null);
-
-    const FnPlugin3 = FnPlugin("Plugin3", struct {
-        fn build(manager: *zevy_ecs.Manager, _: *PluginManager) !void {
-            const res = manager.getResource(i32).?;
-            res.* += 100;
-        }
-    }.build, null);
-
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
-    defer manager.deinit();
-
-    var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
-
-    // Add multiple FnPlugin instances
-    try plugin_manager.add(FnPlugin1, .{});
-    try plugin_manager.add(FnPlugin2, .{});
-    try plugin_manager.add(FnPlugin3, .{});
-    try plugin_manager.build(&manager);
-
-    // All three should have been built
-    try std.testing.expectEqual(@as(i32, 111), manager.getResource(i32).?.*);
-    try std.testing.expectEqual(@as(usize, 3), plugin_manager.plugins.items.len);
-}
-
 test "Plugin with deinit for proper memory cleanup" {
     // Resource to track cleanup state
     const CleanupTracker = struct {
@@ -385,7 +320,7 @@ test "Plugin with deinit for proper memory cleanup" {
             _ = try manager.addResource(CleanupTracker, .{});
         }
 
-        pub fn deinit(self: *Self, manager: *zevy_ecs.Manager) void {
+        pub fn deinit(self: *@This(), _: std.mem.Allocator, manager: *zevy_ecs.Manager) !void {
             // Mark that cleanup was called
             if (manager.getResource(CleanupTracker)) |tracker| {
                 tracker.cleanup_called = true;
