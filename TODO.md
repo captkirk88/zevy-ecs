@@ -1,5 +1,8 @@
 ### What to do...
 
+ - [ ] Relations doesn't remove the Relations component when all relations are removed from an entity
+   - This causes issues when trying to re-add relations later as the Relations component already exists.
+   - Also, test multiple relation kinds per entity
 - [x] Test packed struct components. Should work already...
 - [ ] Explore threading when Zig's threading model is more mature
   - Specifically the newer std.Io APIs
@@ -11,7 +14,7 @@
 
 ### What might do...
 
-- [ ] Seperate reflect.zig into separate repo for general purpose reflection utilities?
+- [x] Seperate reflect.zig into separate repo for general purpose reflection utilities?
 
 ### Will recursively do...
 

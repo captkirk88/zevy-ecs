@@ -4,7 +4,7 @@ const errs = @import("errors.zig");
 const qry = @import("query.zig");
 const world = @import("world.zig");
 const sys = @import("systems.zig");
-const params = @import("systems.params.zig");
+const params_mod = @import("systems.params.zig");
 pub const commands = @import("commands.zig");
 const registry = @import("systems.registry.zig");
 const scheduler = @import("scheduler.zig");
@@ -40,45 +40,49 @@ pub const runIf = sys.runIf;
 pub const DefaultParamRegistry = registry.DefaultParamRegistry;
 /// Merge two or more SystemParamRegistry, deduplicating types at comptime
 pub const MergedSystemParamRegistry = registry.MergedSystemParamRegistry;
-/// Query parameter type for accessing entities with specific components
-pub const Query = qry.Query;
-/// Commands parameter type for issuing commands to modify the ECS world
-pub const Commands = commands.Commands;
-/// Resource parameter type for accessing resources
-pub const Res = params.Res;
-/// Local parameter type for per-system-instance local state
-pub const Local = params.Local;
-/// EventReader parameter type for reading events
-pub const EventReader = params.EventReader;
-/// EventWriter parameter type for writing events
-pub const EventWriter = params.EventWriter;
-/// State parameter type for checking if a specific state enum value is active
-pub const State = params.State;
-/// NextState parameter type for immediate state transitions
-pub const NextState = params.NextState;
-/// Relations parameter type for managing entity relationships
-pub const Relations = params.Relations;
-/// OnAdded parameter type for reading components that were added this frame
-pub const OnAdded = params.OnAdded;
-/// OnRemoved parameter type for reading components that were removed this frame
-pub const OnRemoved = params.OnRemoved;
-/// Single parameter type — returns exactly one matching query result
-pub const Single = params.Single;
 
-/// System parameter type aliases for usage in custom system params.
-pub const system_params = struct {
-    pub const CommandsSystemParam = params.CommandsSystemParam;
-    pub const QuerySystemParam = params.QuerySystemParam;
-    pub const ResourceSystemParam = params.ResourceSystemParam;
-    pub const LocalSystemParam = params.LocalSystemParam;
-    pub const EventReaderSystemParam = params.EventReaderSystemParam;
-    pub const EventWriterSystemParam = params.EventWriterSystemParam;
-    pub const StateSystemParam = params.StateSystemParam;
-    pub const NextStateSystemParam = params.NextStateSystemParam;
-    pub const RelationsSystemParam = params.RelationsSystemParam;
-    pub const OnAddedSystemParam = params.OnAddedSystemParam;
-    pub const OnRemovedSystemParam = params.OnRemovedSystemParam;
-    pub const SingleSystemParam = params.SingleSystemParam;
+/// Common system parameter types
+pub const params = struct {
+    /// Query parameter type for accessing entities with specific components
+    pub const Query = qry.Query;
+    /// Commands parameter type for issuing commands to modify the ECS world
+    pub const Commands = commands.Commands;
+    /// Resource parameter type for accessing resources
+    pub const Res = params_mod.Res;
+    /// Local parameter type for per-system-instance local state
+    pub const Local = params_mod.Local;
+    /// EventReader parameter type for reading events
+    pub const EventReader = params_mod.EventReader;
+    /// EventWriter parameter type for writing events
+    pub const EventWriter = params_mod.EventWriter;
+    /// State parameter type for checking if a specific state enum value is active
+    pub const State = params_mod.State;
+    /// NextState parameter type for immediate state transitions
+    pub const NextState = params_mod.NextState;
+    /// Relations parameter type for managing entity relationships
+    pub const Relations = params_mod.Relations;
+    /// OnAdded parameter type for reading components that were added this frame
+    pub const OnAdded = params_mod.OnAdded;
+    /// OnRemoved parameter type for reading components that were removed this frame
+    pub const OnRemoved = params_mod.OnRemoved;
+    /// Single parameter type — returns exactly one matching query result
+    pub const Single = params_mod.Single;
+
+    /// System parameter type aliases for usage in custom system params.
+    pub const systems = struct {
+        pub const CommandsSystemParam = params_mod.CommandsSystemParam;
+        pub const QuerySystemParam = params_mod.QuerySystemParam;
+        pub const ResourceSystemParam = params_mod.ResourceSystemParam;
+        pub const LocalSystemParam = params_mod.LocalSystemParam;
+        pub const EventReaderSystemParam = params_mod.EventReaderSystemParam;
+        pub const EventWriterSystemParam = params_mod.EventWriterSystemParam;
+        pub const StateSystemParam = params_mod.StateSystemParam;
+        pub const NextStateSystemParam = params_mod.NextStateSystemParam;
+        pub const RelationsSystemParam = params_mod.RelationsSystemParam;
+        pub const OnAddedSystemParam = params_mod.OnAddedSystemParam;
+        pub const OnRemovedSystemParam = params_mod.OnRemovedSystemParam;
+        pub const SingleSystemParam = params_mod.SingleSystemParam;
+    };
 };
 
 // Data structures
@@ -89,24 +93,27 @@ pub const SparseSet = sparse.SparseSet;
 const events = @import("events.zig");
 pub const EventStore = events.EventStore;
 
-/// Scheduler is the system execution scheduler and state manager
-pub const Scheduler = scheduler.Scheduler;
-/// StageId type for identifying execution stages
-pub const StageId = scheduler.StageId;
-pub const Stage = scheduler.Stage;
-pub const StageInRange = scheduler.StageInRange;
-pub const Stages = scheduler.Stages;
-/// Returns a stage ID for systems that should run when entering a specific state
-pub const OnEnter = scheduler.OnEnter;
-/// Returns a stage ID for systems that should run when exiting a specific state
-pub const OnExit = scheduler.OnExit;
-/// Returns a stage ID for systems that should run only while in a specific state
-pub const InState = scheduler.InState;
+/// Scheduling types and functions
+pub const schedule = struct {
+    /// Scheduler is the system execution scheduler and state manager
+    pub const Scheduler = scheduler.Scheduler;
+    /// StageId type for identifying execution stages
+    pub const StageId = scheduler.StageId;
+    pub const Stage = scheduler.Stage;
+    pub const StageInRange = scheduler.StageInRange;
+    pub const Stages = scheduler.Stages;
+    /// Returns a stage ID for systems that should run when entering a specific state
+    pub const OnEnter = scheduler.OnEnter;
+    /// Returns a stage ID for systems that should run when exiting a specific state
+    pub const OnExit = scheduler.OnExit;
+    /// Returns a stage ID for systems that should run only while in a specific state
+    pub const InState = scheduler.InState;
 
-// State management types and functions
-const state = @import("state.zig");
-/// StateManager provides state management functionality for a specific enum type
-pub const StateManager = state.StateManager;
+    // State management types and functions
+    const state = @import("state.zig");
+    /// StateManager provides state management functionality for a specific enum type
+    pub const StateManager = state.StateManager;
+};
 
 // Relations
 pub const relations = @import("relations.zig");
@@ -119,7 +126,7 @@ pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");
 
 /// Panic handler that logs the panic message and exits gracefully
-pub const panic = std.debug.FullPanic(gracefulPanic);
+const panic = std.debug.FullPanic(gracefulPanic);
 
 fn gracefulPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
     _ = first_trace_addr;
@@ -145,6 +152,6 @@ test {
     std.testing.refAllDecls(@import("relations_tests.zig"));
     std.testing.refAllDecls(@import("world_tests.zig"));
     std.testing.refAllDecls(scheduler);
-    std.testing.refAllDecls(state);
+    std.testing.refAllDecls(schedule.state);
     std.testing.refAllDecls(events);
 }

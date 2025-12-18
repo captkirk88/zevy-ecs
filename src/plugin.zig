@@ -18,7 +18,7 @@ const std = @import("std");
 const zevy_ecs = @import("zevy_ecs");
 const reflect = @import("zevy_reflect");
 
-pub const PluginTemplate = struct {
+const PluginTemplate = struct {
     pub fn build(_: *@This(), _: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
         unreachable;
     }
@@ -27,7 +27,9 @@ pub const PluginTemplate = struct {
     }
 };
 
-pub const Plugin = reflect.templates.Template(PluginTemplate).InterfaceType;
+pub const PluginTemplateType = reflect.templates.Template(PluginTemplate);
+
+pub const Plugin = PluginTemplateType.InterfaceType;
 
 /// Manager for ECS plugins
 ///
@@ -99,7 +101,6 @@ pub const PluginManager = struct {
             return error.PluginAlreadyExists;
         }
 
-        const PluginTemplateType = reflect.templates.Template(PluginTemplate);
         PluginTemplateType.validate(PluginType);
         const inst_ptr = try self.allocator.create(PluginType);
         inst_ptr.* = plugin;

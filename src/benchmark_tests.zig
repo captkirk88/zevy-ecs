@@ -5,8 +5,8 @@ const root = @import("root.zig");
 const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
 const Entity = ecs.Entity;
-const Commands = root.Commands;
-const Query = root.Query;
+const Commands = root.params.Commands;
+const Query = root.params.Query;
 const relations = @import("relations.zig");
 const RelationManager = relations.RelationManager;
 const Child = relations.Child;
@@ -324,7 +324,7 @@ const Transform = struct {
 };
 
 // Setup hierarchical scene graph (game objects with parent-child relationships)
-fn setupSceneGraph(manager: *Manager, rel: *root.Relations, count: usize) !std.ArrayList(Entity) {
+fn setupSceneGraph(manager: *Manager, rel: *root.params.Relations, count: usize) !std.ArrayList(Entity) {
     const allocator = manager.allocator;
     var all_entities = try std.ArrayList(Entity).initCapacity(allocator, count);
 
@@ -384,7 +384,7 @@ fn setupSceneGraph(manager: *Manager, rel: *root.Relations, count: usize) !std.A
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
     commands: *Commands,
-    rel: *root.Relations,
+    rel: *root.params.Relations,
     query: Query(.{ Transform, relations.Relation(Child) }, .{}),
 ) void {
     // Query all entities that have Transform and a Child relation (children with parents)
@@ -433,7 +433,7 @@ test "ECS Benchmark - Scene Graph Relations" {
         defer manager.deinit();
 
         // Get Relations system parameter (creates RelationManager resource automatically)
-        const rel = try root.DefaultParamRegistry.apply(&manager, *root.Relations);
+        const rel = try root.DefaultParamRegistry.apply(&manager, *root.params.Relations);
 
         var entities = try setupSceneGraph(&manager, rel, count);
         defer entities.deinit(bench.allocator());
