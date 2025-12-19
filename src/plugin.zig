@@ -18,18 +18,18 @@ const std = @import("std");
 const zevy_ecs = @import("zevy_ecs");
 const reflect = @import("zevy_reflect");
 
-const PluginTemplate = struct {
+const PluginTemplate = reflect.templates.Template(struct {
+    pub const Name: []const u8 = "Plugin";
+
     pub fn build(_: *@This(), _: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
         unreachable;
     }
     pub fn deinit(_: *@This(), _: std.mem.Allocator, _: *zevy_ecs.Manager) anyerror!void {
         unreachable;
     }
-};
+});
 
-pub const PluginTemplateType = reflect.templates.Template(PluginTemplate);
-
-pub const Plugin = PluginTemplateType.InterfaceType;
+pub const Plugin = PluginTemplate.Interface;
 
 /// Manager for ECS plugins
 ///
@@ -56,8 +56,6 @@ pub const PluginManager = struct {
         interface: Plugin,
         name: []const u8,
         hash: u64,
-        // Pointer to the allocated plugin instance (type-erased)
-        inst_ptr: *anyopaque,
         // Type-specific destroy function to free the allocated instance
         destroy_fn: ?*const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void,
     };
@@ -78,7 +76,6 @@ pub const PluginManager = struct {
                     .{ entry.name, @errorName(err) },
                 );
             };
-
             // Then free the concrete plugin instance memory
             if (entry.destroy_fn) |destroy| {
                 destroy(entry.interface.ptr, self.allocator);
@@ -101,13 +98,11 @@ pub const PluginManager = struct {
             return error.PluginAlreadyExists;
         }
 
-        PluginTemplateType.validate(PluginType);
-        const inst_ptr = try self.allocator.create(PluginType);
-        inst_ptr.* = plugin;
-
+        PluginTemplate.validate(PluginType);
         var interface: Plugin = undefined;
-        reflect.templates.Template(PluginTemplate).populate(&interface, inst_ptr);
+        _ = try PluginTemplate.populateFromValue(&interface, self.allocator, plugin);
 
+        std.debug.print("Interface ptr type: {any}\n", .{@TypeOf(interface.ptr)});
         const Wrapper = struct {
             fn destroy(ptr: *anyopaque, allocator: std.mem.Allocator) void {
                 const p: *PluginType = @ptrCast(@alignCast(ptr));
@@ -119,7 +114,6 @@ pub const PluginManager = struct {
             .interface = interface,
             .name = type_info.name,
             .hash = key_hash,
-            .inst_ptr = @ptrCast(@alignCast(inst_ptr)),
             .destroy_fn = &Wrapper.destroy,
         });
 
