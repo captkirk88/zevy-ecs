@@ -22,23 +22,31 @@ pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
     params.CommandsSystemParam,
 });
 
+const SystemParamTemplate = reflect.Template(struct {
+    pub const Name: []const u8 = "SystemParam";
+
+    pub fn analyze(comptime T: type) ?type {
+        _ = T;
+        unreachable;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
+        _ = e;
+        unreachable;
+    }
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        _ = e;
+        _ = ptr;
+        _ = T;
+        unreachable;
+    }
+});
+
 /// SystemParam registry for runtime-extensible parameter type analysis and instantiation
 pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
     inline for (RegisteredParams) |T| {
-        comptime {
-            if (!reflect.hasFuncWithArgs(T, "analyze", &[_]type{type})) {
-                @compileError(std.fmt.comptimePrint(
-                    "Each param must be a struct with 'pub fn analyze(comptime T: type) ?type' functions: {s}",
-                    .{@typeName(T)},
-                ));
-            }
-            if (!reflect.hasFuncWithArgs(T, "apply", &[_]type{ *ecs.Manager, type })) {
-                @compileError(std.fmt.comptimePrint(
-                    "Each param must be a struct with 'pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T' functions: {s}",
-                    .{@typeName(T)},
-                ));
-            }
-        }
+        SystemParamTemplate.validate(T);
     }
     return struct {
         pub const registered_params = RegisteredParams;
@@ -153,6 +161,7 @@ test "merged SystemParamRegistry" {
         pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!T {
             return 1;
         }
+        pub fn deinit(_: *ecs.Manager, _: *anyopaque, _: type) void {}
     };
     const CustomRegistry = SystemParamRegistry(&[_]type{CustomParam});
     const merge = MergedSystemParamRegistry(.{ DefaultParamRegistry, CustomRegistry });
@@ -181,6 +190,7 @@ test "CustomSystemParam basic" {
         pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!T {
             return 123;
         }
+        pub fn deinit(_: *ecs.Manager, _: *anyopaque, _: type) void {}
     };
     const registry = SystemParamRegistry(&[_]type{CustomParam});
     const custom_val = try registry.apply(&ecs_instance, i32);
@@ -226,6 +236,12 @@ test "CustomSystemParam with Query, Res, Local fields" {
                 .res = res_value,
                 .local = local_ptr,
             };
+        }
+        pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+            _ = e;
+            _ = ptr;
+            _ = T;
+            // Custom deinit logic if needed
         }
     };
 

@@ -18,7 +18,11 @@ const std = @import("std");
 const zevy_ecs = @import("zevy_ecs");
 const reflect = @import("zevy_reflect");
 
-const PluginTemplate = reflect.templates.Template(struct {
+/// Template defining the Plugin interface
+///
+/// Call `PluginTemplate.validate(YourPluginType)` to ensure your plugin
+/// conforms to the required interface.
+pub const PluginTemplate = reflect.Template(struct {
     pub const Name: []const u8 = "Plugin";
 
     pub fn build(_: *@This(), _: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
@@ -29,7 +33,7 @@ const PluginTemplate = reflect.templates.Template(struct {
     }
 });
 
-pub const Plugin = PluginTemplate.Interface;
+const Plugin = PluginTemplate.Interface;
 
 /// Manager for ECS plugins
 ///
@@ -102,7 +106,6 @@ pub const PluginManager = struct {
         var interface: Plugin = undefined;
         _ = try PluginTemplate.populateFromValue(&interface, self.allocator, plugin);
 
-        std.debug.print("Interface ptr type: {any}\n", .{@TypeOf(interface.ptr)});
         const Wrapper = struct {
             fn destroy(ptr: *anyopaque, allocator: std.mem.Allocator) void {
                 const p: *PluginType = @ptrCast(@alignCast(ptr));
