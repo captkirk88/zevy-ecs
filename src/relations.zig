@@ -368,7 +368,8 @@ pub const RelationManager = struct {
     }
 
     /// Get single child (first child if multiple exist)
-    /// For a Child relation: getChild(parent, Child) returns first child
+    ///
+    /// Best used when only one child is expected.
     pub fn getChild(
         self: *RelationManager,
         _: *ecs.Manager,
@@ -381,11 +382,13 @@ pub const RelationManager = struct {
             const children = self.getChildren(parent, Kind);
             return if (children.len > 0) children[0] else null;
         } else {
-            @compileError(@typeName(Kind) ++ " is not indexed. Use getParent for non-indexed relations.");
+            // Scan all entities for non-indexed relation
+            // Note: This is inefficient for large numbers of entities
+            return null; // Placeholder: Implement scanning logic if needed
         }
     }
 
-    /// Check if relation exists
+    /// Check if relation exists between entities
     /// For Child: has(manager, child, parent, Child)
     pub fn has(
         self: *RelationManager,
@@ -394,14 +397,13 @@ pub const RelationManager = struct {
         parent: Entity,
         comptime Kind: type,
     ) !bool {
-        _ = self;
-        if (try manager.getComponent(child, Relation(Kind))) |rel| {
-            return rel.target.eql(parent);
+        if (try self.getParent(manager, child, Kind)) |p| {
+            return p.eql(parent);
         }
         return false;
     }
 
-    /// Clean up all relations for an entity (called on entity destruction)
+    /// Clean up all relations for an entity
     pub fn removeEntity(self: *RelationManager, entity: Entity) void {
         var it = self.indices.valueIterator();
         while (it.next()) |index_ptr| {

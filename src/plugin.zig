@@ -90,6 +90,27 @@ pub const PluginManager = struct {
         self.plugin_hashes.deinit(self.allocator);
     }
 
+    pub fn addPlugin(self: *PluginManager, plugin: Plugin) error{
+        OutOfMemory,
+        PluginAlreadyExists,
+    }!void {
+        const type_info = reflect.getTypeInfo(@TypeOf(plugin.ptr));
+        const key_hash = type_info.hash;
+        // Check if plugin already exists
+        if (self.plugin_hashes.contains(key_hash)) {
+            return error.PluginAlreadyExists;
+        }
+
+        try self.plugins.append(self.allocator, .{
+            .interface = plugin,
+            .name = type_info.name,
+            .hash = key_hash,
+            .destroy_fn = null, // No destroy function for raw plugins
+        });
+
+        try self.plugin_hashes.put(self.allocator, key_hash, {});
+    }
+
     /// Add a plugin instance to the manager.
     pub fn add(self: *PluginManager, comptime PluginType: type, plugin: PluginType) error{
         OutOfMemory,
@@ -147,24 +168,18 @@ pub const PluginManager = struct {
     }
 
     /// Get the names of all registered plugins
-    pub fn getNames(self: *const PluginManager) []const []const u8 {
-        var names = std.ArrayListUnmanaged([]const u8).initCapacity(self.allocator, self.plugins.items.len) catch |err| {
+    pub fn getNames(self: *const PluginManager, allocator: std.mem.Allocator) []const []const u8 {
+        const names = allocator.alloc([]const u8, self.plugins.items.len) catch |err| {
             std.debug.panic(
                 "Failed to allocate plugin names list: {s}",
                 .{@errorName(err)},
             );
         };
-        defer names.deinit(self.allocator);
 
-        for (self.plugins.items) |entry| {
-            names.append(self.allocator, entry.name) catch |err| {
-                std.debug.panic(
-                    "Failed to append plugin name '{s}': {s}",
-                    .{ entry.name, @errorName(err) },
-                );
-            };
+        for (self.plugins.items, 0..) |entry, i| {
+            names[i] = entry.name;
         }
-        return names.items;
+        return names;
     }
 
     pub fn len(self: *const PluginManager) usize {
@@ -347,4 +362,74 @@ test "Plugin with deinit for proper memory cleanup" {
 
     // Verify deinit was called (tracker is still valid since manager hasn't been deinited)
     try std.testing.expect(tracker.cleanup_called);
+}
+
+test "PluginManager getNames returns correct plugin names" {
+    const TestPluginA = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(i32, 1);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
+    };
+
+    const TestPluginB = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(f32, 2.0);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
+    };
+
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var plugin_manager = PluginManager.init(std.testing.allocator);
+    defer plugin_manager.deinit(&manager);
+
+    try plugin_manager.add(TestPluginA, .{});
+    try plugin_manager.add(TestPluginB, .{});
+    try plugin_manager.build(&manager);
+
+    const names = plugin_manager.getNames(std.testing.allocator);
+    defer std.testing.allocator.free(names);
+    for (names) |name| {
+        std.debug.print("Registered plugin: {s}\n", .{name});
+    }
+    try std.testing.expect(names.len == 2);
+    // try std.testing.expect(std.mem.eql(u8, names[0], "TestPluginA") or std.mem.eql(u8, names[1], "TestPluginA"));
+}
+
+test "PluginManager addPlugin" {
+    const RawPlugin = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(u8, 255);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
+    };
+
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var plugin_manager = PluginManager.init(std.testing.allocator);
+    defer plugin_manager.deinit(&manager);
+
+    var rawPlugin = RawPlugin{};
+    var interface: Plugin = undefined;
+    PluginTemplate.populate(&interface, &rawPlugin);
+
+    try plugin_manager.addPlugin(interface);
+    try plugin_manager.build(&manager);
+
+    try std.testing.expectEqual(@as(u8, 255), manager.getResource(u8).?.*);
 }

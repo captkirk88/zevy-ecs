@@ -9,6 +9,7 @@ const relations_mod = @import("relations.zig");
 const errors = @import("errors.zig");
 const serialize = @import("serialize.zig");
 const reflect = @import("reflect.zig");
+const zevy_reflect = @import("zevy_reflect");
 const commands_mod = @import("commands.zig");
 const Commands = commands_mod.Commands;
 const EntityCommands = commands_mod.EntityCommands;
@@ -574,7 +575,7 @@ pub const OnAddedSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime Component: type) anyerror!OnAdded(Component) {
-        const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
+        const event_type_hash = zevy_reflect.typeHash(Component);
         var results = try std.ArrayList(OnAdded(Component).Item).initCapacity(e.allocator, 16);
         defer results.deinit(e.allocator);
 
@@ -643,7 +644,7 @@ pub const OnRemovedSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime Component: type) anyerror!OnRemoved(Component) {
-        const event_type_hash = std.hash.Wyhash.hash(0, @typeName(Component));
+        const event_type_hash = zevy_reflect.typeHash(Component);
         var results = try std.ArrayList(ecs.Entity).initCapacity(e.allocator, 16);
         defer results.deinit(e.allocator);
 

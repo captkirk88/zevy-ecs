@@ -266,7 +266,7 @@ pub const Manager = struct {
         const tuple = .{value};
         try self.world.add(entity, tuple);
 
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = reflect.typeHash(T);
         self.component_removed.discardHandled();
         try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
     }
@@ -276,7 +276,7 @@ pub const Manager = struct {
         if (!self.isAlive(entity)) {
             return errs.ECSError.EntityNotAlive;
         }
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = reflect.typeHash(T);
         try self.world.removeComponent(entity, T);
 
         self.component_removed.discardHandled();
@@ -338,7 +338,7 @@ pub const Manager = struct {
             @compileError("addResource does not accept pointer types. Use value types only.");
         }
 
-        const type_hash = comptime hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = comptime reflect.typeHash(T);
         const result = try self.resources.getOrPut(type_hash);
         if (!result.found_existing) {
             const ptr = try self.allocator.create(T);
@@ -385,7 +385,7 @@ pub const Manager = struct {
     ///     // Resource not found
     /// }
     pub fn getResource(self: *Manager, comptime T: type) ?*T {
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = reflect.typeHash(T);
         if (self.resources.get(type_hash)) |entry| {
             return @ptrCast(@alignCast(entry.ptr));
         }
@@ -417,14 +417,14 @@ pub const Manager = struct {
 
     /// Check if a resource of type T exists.
     pub fn hasResource(self: *Manager, comptime T: type) bool {
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = reflect.typeHash(T);
         return self.resources.contains(type_hash);
     }
 
     /// Remove and deallocate a resource.
     /// Only deallocates memory if it was allocated by addResource (allocated field is true).
     pub fn removeResource(self: *Manager, comptime T: type) void {
-        const type_hash = hash.Wyhash.hash(0, @typeName(T));
+        const type_hash = reflect.typeHash(T);
 
         const res = self.resources.fetchRemove(type_hash) orelse return;
 
@@ -484,10 +484,10 @@ pub const Manager = struct {
 
         // Generate a stable hash from the function type name and parameter registry type
         // Using type names ensures stability across optimization levels
-        const fn_type_name = @typeName(@TypeOf(system_fn));
+        const FnType = @TypeOf(system_fn);
         const param_registry_name = @typeName(ParamRegistry);
-        const fn_hash = hash.Wyhash.hash(0, fn_type_name);
-        const system_hash = hash.Wyhash.hash(fn_hash, param_registry_name);
+        const fn_hash = reflect.typeHash(FnType);
+        const system_hash = reflect.hashWithSeed(param_registry_name, fn_hash);
 
         // Check if system already exists
         if (self.systems.get(system_hash)) |_| {
