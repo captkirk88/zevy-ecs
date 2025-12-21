@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) !void {
     const reflect_dep = b.lazyDependency("zevy_reflect", .{
         .target = target,
         .optimize = optimize,
+        .branch_quota = 40_000,
     }) orelse return error.ZevyReflectDependencyNotFound;
     const reflect_mod = reflect_dep.module("zevy_reflect");
 

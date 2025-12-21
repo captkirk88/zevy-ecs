@@ -146,7 +146,7 @@ pub const Commands = struct {
                 _ = data;
                 manager.removeResource(T);
             }
-            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
+            fn deinit(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
                 manager.allocator.destroy(closure);
             }
@@ -155,29 +155,33 @@ pub const Commands = struct {
         closure.* = .{};
         try self.commands.append(self.allocator, .{
             .execute = Closure.execute,
-            .deinit = Closure.deinit_cmd,
+            .deinit = Closure.deinit,
             .data = @ptrCast(@alignCast(closure)),
         });
     }
 
     /// Queue adding a relation between two entities.
-    pub fn addRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
+    pub fn addRelation(self: *Commands, child: ecs.Entity, parent: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
         const Closure = struct {
-            entity1: ecs.Entity,
-            entity2: ecs.Entity,
+            child: ecs.Entity,
+            parent: ecs.Entity,
             fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
                 const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
-                try rel_mgr.add(manager, closure.entity1, closure.entity2, RelationType);
+                try rel_mgr.add(manager, closure.child, closure.parent, RelationType);
             }
-            fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
+            fn deinit(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
                 manager.allocator.destroy(closure);
             }
         };
         const closure = try self.allocator.create(Closure);
-        closure.* = .{ .entity1 = entity1, .entity2 = entity2 };
-        try self.commands.append(self.allocator, .{ .execute = Closure.execute, .deinit = Closure.deinit_cmd, .data = closure });
+        closure.* = .{ .child = child, .parent = parent };
+        try self.commands.append(self.allocator, .{
+            .execute = Closure.execute,
+            .deinit = Closure.deinit,
+            .data = closure,
+        });
     }
 
     /// Queue removing a relation between two entities.

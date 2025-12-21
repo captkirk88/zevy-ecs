@@ -278,7 +278,6 @@ pub const Manager = struct {
         }
         const type_hash = reflect.typeHash(T);
         try self.world.removeComponent(entity, T);
-
         self.component_removed.discardHandled();
         try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
     }
@@ -286,7 +285,7 @@ pub const Manager = struct {
     /// Get a mutable pointer to a component of type T for the given entity, or an error if entity is not alive.
     pub fn getComponent(self: *Manager, entity: Entity, comptime T: type) error{EntityNotAlive}!?*T {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
-        return self.world.get(entity, T);
+        return self.world.getPtr(entity, T);
     }
 
     /// Check if an entity has a component of type T
@@ -619,6 +618,55 @@ test "Create entity using create() with null or empty" {
     std.debug.print("Counted {d} entities\n", .{count});
 }
 
+// Focused test to exercise migration/remove and check archetype invariants
+test "World migration and archetype invariants" {
+    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs.deinit();
+
+    const A = struct { a: u32 };
+    const B = struct { b: u64 };
+    const C = struct { c: u32 };
+
+    // Create entities with different component sets
+    const e1 = ecs.create(.{ A{ .a = 1 }, B{ .b = 2 } });
+    const e2 = ecs.create(.{ B{ .b = 3 }, C{ .c = 4 } });
+
+    // Sanity: verify getAllComponents
+    const comps1 = try ecs.getAllComponents(std.testing.allocator, e1);
+    defer std.testing.allocator.free(comps1);
+    try std.testing.expect(comps1.len == 2);
+
+    const comps2 = try ecs.getAllComponents(std.testing.allocator, e2);
+    defer std.testing.allocator.free(comps2);
+    try std.testing.expect(comps2.len == 2);
+
+    // Remove component A from e1, force migration
+    try ecs.removeComponent(e1, A);
+
+    // Now validate archetype invariants: for each archetype, arr_len == entities_count * comp_size
+    var it = ecs.world.archetypes.archetypes.valueIterator();
+    while (it.next()) |a_ptr| {
+        const a = a_ptr.*;
+        const ent_count = a.entities.items.len;
+        var i: usize = 0;
+        while (i < a.component_sizes.len) : (i += 1) {
+            const comp_size = a.component_sizes[i];
+            const arr_len = a.component_arrays[i].items.len;
+            try std.testing.expect(arr_len == ent_count * comp_size);
+            // Also ensure comp_size > 0
+            try std.testing.expect(comp_size > 0);
+        }
+        // For each entity in archetype, check that getAllComponents succeeds and matches counts
+        var k: usize = 0;
+        while (k < ent_count) : (k += 1) {
+            const ent = a.entities.items[k];
+            const cl = try ecs.getAllComponents(std.testing.allocator, ent);
+            defer std.testing.allocator.free(cl);
+            try std.testing.expect(cl.len >= 1);
+        }
+    }
+}
+
 test "removeSystem removes cached system" {
     var ecs = try Manager.init(std.testing.allocator);
     defer ecs.deinit();
@@ -768,4 +816,67 @@ test "getOrAddResource" {
     _ = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }, null) catch unreachable;
 
     try std.testing.expect(ecs.hasResource(MyResource));
+}
+
+// Stress test to try to surface migration/invariant issues
+test "World randomized churn stress test" {
+    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs.deinit();
+
+    const A = struct { a: u32 };
+    const B = struct { b: u64 };
+    const C = struct { c: u32 };
+
+    var rng = std.Random.DefaultPrng.init(1234);
+    var rand = rng.random();
+    const N: usize = 200;
+    var entities = try std.ArrayList(Entity).initCapacity(std.testing.allocator, N);
+    defer entities.deinit(std.testing.allocator);
+
+    // Create initial entities with random component sets
+    for (0..N) |_| {
+        const v = rand.intRangeAtMost(i32, 0, 4);
+        const ent = switch (v) {
+            0 => ecs.create(.{A{ .a = 1 }}),
+            1 => ecs.create(.{B{ .b = 2 }}),
+            2 => ecs.create(.{ A{ .a = 1 }, B{ .b = 2 } }),
+            else => ecs.create(.{C{ .c = 3 }}),
+        };
+        try entities.append(std.testing.allocator, ent);
+    }
+
+    const OPS: usize = 2000;
+    var i: usize = 0;
+    while (i < OPS) : (i += 1) {
+        const idx = rand.uintLessThan(usize, entities.items.len);
+        const ent = entities.items[idx];
+        const op = rand.uintLessThan(usize, 4);
+        switch (op) {
+            0 => _ = ecs.addComponent(ent, A, A{ .a = 5 }) catch {},
+            1 => _ = ecs.addComponent(ent, B, B{ .b = 6 }) catch {},
+            2 => _ = ecs.addComponent(ent, C, C{ .c = 7 }) catch {},
+            3 => {
+                // Randomly remove components
+                _ = ecs.removeComponent(ent, A) catch {};
+                _ = ecs.removeComponent(ent, B) catch {};
+                _ = ecs.removeComponent(ent, C) catch {};
+            },
+            else => {},
+        }
+
+        // Occasionally validate invariants
+        if ((i % 50) == 0) {
+            var it = ecs.world.archetypes.archetypes.valueIterator();
+            while (it.next()) |a_ptr| {
+                const a = a_ptr.*;
+                const ent_count = a.entities.items.len;
+                var j: usize = 0;
+                while (j < a.component_sizes.len) : (j += 1) {
+                    const comp_size = a.component_sizes[j];
+                    const arr_len = a.component_arrays[j].items.len;
+                    try std.testing.expect(arr_len == ent_count * comp_size);
+                }
+            }
+        }
+    }
 }

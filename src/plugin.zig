@@ -64,23 +64,34 @@ pub const PluginManager = struct {
         destroy_fn: ?*const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void,
     };
 
+    /// Error information for plugin deinit failures
+    pub const DeinitError = struct {
+        err: anyerror,
+        plugin: []const u8,
+    };
+
     pub fn init(allocator: std.mem.Allocator) PluginManager {
         return .{
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *PluginManager, ecs: *zevy_ecs.Manager) void {
-        // Free all allocated plugin instances using their typed deinit functions
-        for (self.plugins.items) |entry| {
-            // First call the plugin's deinit if present
+    pub fn deinit(self: *PluginManager, ecs: *zevy_ecs.Manager) ?[]const DeinitError {
+        // Deinitialize plugins in reverse registration order (LIFO).
+        // Continue deinitializing remaining plugins even if some deinit calls fail.
+        var any_error: bool = false;
+        var errors = std.ArrayList(DeinitError).initCapacity(self.allocator, self.plugins.items.len) catch |err| @panic(@errorName(err));
+        defer errors.deinit(self.allocator);
+        var i: usize = self.plugins.items.len;
+        while (i != 0) : (i -= 1) {
+            const entry = self.plugins.items[i - 1];
+            // Call deinit, but don't abort on error; log and continue.
             entry.interface.vtable.deinit(entry.interface.ptr, self.allocator, ecs) catch |err| {
-                std.debug.panic(
-                    "Failed to deinit plugin '{s}': {s}",
-                    .{ entry.name, @errorName(err) },
-                );
+                any_error = true;
+                _ = errors.append(self.allocator, .{ .err = err, .plugin = entry.name }) catch |inner_err| @panic(@errorName(inner_err));
             };
-            // Then free the concrete plugin instance memory
+
+            // Always attempt to free the concrete plugin instance memory
             if (entry.destroy_fn) |destroy| {
                 destroy(entry.interface.ptr, self.allocator);
             }
@@ -88,6 +99,8 @@ pub const PluginManager = struct {
 
         self.plugins.deinit(self.allocator);
         self.plugin_hashes.deinit(self.allocator);
+
+        return if (any_error) errors.items else null;
     }
 
     pub fn addPlugin(self: *PluginManager, plugin: Plugin) error{
@@ -103,7 +116,7 @@ pub const PluginManager = struct {
 
         try self.plugins.append(self.allocator, .{
             .interface = plugin,
-            .name = type_info.name,
+            .name = type_info.toStringEx(true),
             .hash = key_hash,
             .destroy_fn = null, // No destroy function for raw plugins
         });
@@ -125,7 +138,9 @@ pub const PluginManager = struct {
 
         PluginTemplate.validate(PluginType);
         var interface: Plugin = undefined;
-        _ = try PluginTemplate.populateFromValue(&interface, self.allocator, plugin);
+        const plugin_inst = try self.allocator.create(PluginType);
+        plugin_inst.* = plugin;
+        PluginTemplate.populate(&interface, plugin_inst);
 
         const Wrapper = struct {
             fn destroy(ptr: *anyopaque, allocator: std.mem.Allocator) void {
@@ -136,7 +151,7 @@ pub const PluginManager = struct {
 
         try self.plugins.append(self.allocator, .{
             .interface = interface,
-            .name = type_info.name,
+            .name = type_info.toStringEx(true),
             .hash = key_hash,
             .destroy_fn = &Wrapper.destroy,
         });
@@ -211,7 +226,16 @@ test "Plugin basic functionality" {
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
+    defer {
+        if (plugin_manager.deinit(&manager)) |errors| {
+            for (errors) |error_entry| {
+                std.debug.print(
+                    "Error deinitializing plugin '{s}': {s}\n",
+                    .{ error_entry.plugin, @errorName(error_entry.err) },
+                );
+            }
+        }
+    }
 
     try plugin_manager.add(TestPlugin, .{});
     try plugin_manager.build(&manager);
@@ -235,7 +259,16 @@ test "PluginManager add single plugin" {
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
+    defer {
+        if (plugin_manager.deinit(&manager)) |errors| {
+            for (errors) |error_entry| {
+                std.debug.print(
+                    "Error deinitializing plugin '{s}': {s}\n",
+                    .{ error_entry.plugin, @errorName(error_entry.err) },
+                );
+            }
+        }
+    }
 
     try plugin_manager.add(TestPlugin, .{});
     try plugin_manager.build(&manager);
@@ -271,7 +304,16 @@ test "PluginManager add multiple plugins" {
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
+    defer {
+        if (plugin_manager.deinit(&manager)) |errors| {
+            for (errors) |error_entry| {
+                std.debug.print(
+                    "Error deinitializing plugin '{s}': {s}\n",
+                    .{ error_entry.plugin, @errorName(error_entry.err) },
+                );
+            }
+        }
+    }
 
     try plugin_manager.add(TestPlugin1, .{});
     try plugin_manager.add(TestPlugin2, .{});
@@ -296,7 +338,16 @@ test "PluginManager prevents duplicate plugins" {
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
+    defer {
+        if (plugin_manager.deinit(&manager)) |errors| {
+            for (errors) |error_entry| {
+                std.debug.print(
+                    "Error deinitializing plugin '{s}': {s}\n",
+                    .{ error_entry.plugin, @errorName(error_entry.err) },
+                );
+            }
+        }
+    }
 
     // First add should succeed
     try plugin_manager.add(TestPlugin, .{});
@@ -358,12 +409,81 @@ test "Plugin with deinit for proper memory cleanup" {
     try std.testing.expect(!tracker.cleanup_called);
 
     // Deinit the plugin manager - this should call the plugin's deinit
-    plugin_manager.deinit(&manager);
+    if (plugin_manager.deinit(&manager)) |errors| {
+        for (errors) |error_entry| {
+            std.debug.print(
+                "Error deinitializing plugin '{s}': {s}\n",
+                .{ error_entry.plugin, @errorName(error_entry.err) },
+            );
+        }
+    }
 
     // Verify deinit was called (tracker is still valid since manager hasn't been deinited)
     try std.testing.expect(tracker.cleanup_called);
 }
 
+// Ensure PluginManager continues deinitializing other plugins even if one deinit errors
+test "PluginManager continues deinit on plugin error" {
+    const FailingPlugin = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(i32, 1);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) anyerror!void {
+            _ = self;
+            _ = allocator;
+            _ = manager;
+            return error.OutOfMemory;
+        }
+    };
+
+    const SuccessPlugin = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(bool, false);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) anyerror!void {
+            _ = self;
+            _ = allocator;
+            if (manager.getResource(bool)) |b| {
+                b.* = true;
+            }
+        }
+    };
+
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var plugin_manager = PluginManager.init(std.testing.allocator);
+    var deinit_done: bool = false;
+    defer {
+        if (!deinit_done) {
+            if (plugin_manager.deinit(&manager)) |errors| {
+                for (errors) |error_entry| {
+                    std.debug.print(
+                        "Error deinitializing plugin '{s}': {s}\n",
+                        .{ error_entry.plugin, @errorName(error_entry.err) },
+                    );
+                }
+            }
+        }
+    }
+
+    try plugin_manager.add(FailingPlugin, .{});
+    std.debug.print("Added FailingPlugin\n", .{});
+    // Add SuccessPlugin as a raw (stack) instance to avoid allocator pressure in tests
+    var success_inst = SuccessPlugin{};
+    var success_iface: Plugin = undefined;
+    PluginTemplate.populate(&success_iface, &success_inst);
+    try plugin_manager.addPlugin(success_iface);
+    std.debug.print("Added SuccessPlugin (raw)\n", .{});
+    std.debug.print("Plugin count after add: {d}\n", .{plugin_manager.len()});
+    try plugin_manager.build(&manager);
+
+    _ = plugin_manager.deinit(&manager);
+    deinit_done = true;
+
+    const res = manager.getResource(bool).?;
+    try std.testing.expect(res.* == true);
+}
 test "PluginManager getNames returns correct plugin names" {
     const TestPluginA = struct {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
@@ -391,7 +511,16 @@ test "PluginManager getNames returns correct plugin names" {
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
+    defer {
+        if (plugin_manager.deinit(&manager)) |errors| {
+            for (errors) |error_entry| {
+                std.debug.print(
+                    "Error deinitializing plugin '{s}': {s}\n",
+                    .{ error_entry.plugin, @errorName(error_entry.err) },
+                );
+            }
+        }
+    }
 
     try plugin_manager.add(TestPluginA, .{});
     try plugin_manager.add(TestPluginB, .{});
@@ -422,7 +551,7 @@ test "PluginManager addPlugin" {
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
-    defer plugin_manager.deinit(&manager);
+    defer _ = plugin_manager.deinit(&manager);
 
     var rawPlugin = RawPlugin{};
     var interface: Plugin = undefined;

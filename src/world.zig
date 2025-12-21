@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const errors = @import("errors.zig");
 const ArchetypeStorage = @import("archetype_storage.zig").ArchetypeStorage;
 const archetype = @import("archetype.zig");
@@ -362,7 +363,7 @@ pub const World = struct {
     }
 
     /// Get a pointer to component T for an entity, or null if not present
-    pub fn get(self: *World, entity: Entity, comptime T: type) ?*T {
+    pub fn getPtr(self: *World, entity: Entity, comptime T: type) ?*T {
         const info = reflect.getTypeInfo(T);
         if (self.archetypes.get(entity)) |entry| {
             const arch = entry.archetype;
@@ -383,9 +384,18 @@ pub const World = struct {
         return null;
     }
 
+    pub fn get(self: *World, entity: Entity, comptime T: type) ?T {
+        const ptr = self.getPtr(entity, T);
+        if (ptr) |p| {
+            return @as(T, p.*);
+        } else {
+            return null;
+        }
+    }
+
     /// Check if an entity has a component T
     pub fn has(self: *World, entity: Entity, comptime T: type) bool {
-        return self.get(entity, T) != null;
+        return self.getPtr(entity, T) != null;
     }
 
     /// Get all components for an entity as an array of ComponentInstance

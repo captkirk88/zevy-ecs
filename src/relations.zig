@@ -1,4 +1,5 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
 const ecs = @import("ecs.zig");
 const systems = @import("systems.zig");
 const Entity = ecs.Entity;
@@ -223,7 +224,7 @@ pub const RelationManager = struct {
 
     /// Get or create index for a relation type (lazy allocation)
     pub fn getOrCreateIndex(self: *RelationManager, comptime Kind: type) !*TypedRelationIndex {
-        const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
+        const type_hash = reflect.typeHash(Kind);
 
         const gop = try self.indices.getOrPut(type_hash);
         if (!gop.found_existing) {
@@ -236,7 +237,7 @@ pub const RelationManager = struct {
 
     /// Check if a relation type has an index
     pub fn hasIndex(self: *RelationManager, comptime Kind: type) bool {
-        const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
+        const type_hash = reflect.typeHash(Kind);
         return self.indices.contains(type_hash);
     }
 
@@ -248,7 +249,7 @@ pub const RelationManager = struct {
         child: Entity,
         parent: Entity,
         comptime Kind: type,
-    ) !void {
+    ) error{ ParentMismatch, EntityNotAlive, OutOfMemory }!void {
         try self.addWithData(manager, child, parent, Kind, .{});
     }
 
@@ -261,7 +262,7 @@ pub const RelationManager = struct {
         parent: Entity,
         comptime Kind: type,
         data: Kind,
-    ) !void {
+    ) error{ ParentMismatch, EntityNotAlive, OutOfMemory }!void {
         const config = comptime Relation(Kind).config;
 
         if (config.exclusive) {
@@ -279,6 +280,7 @@ pub const RelationManager = struct {
             });
         }
 
+        // Update index for indexed relations (both exclusive and non-exclusive)
         if (config.indexed) {
             const index = try self.getOrCreateIndex(Kind);
             try index.add(child, parent);
@@ -292,13 +294,21 @@ pub const RelationManager = struct {
         child: Entity,
         parent: Entity,
         comptime Kind: type,
-    ) !void {
+    ) error{ ParentMismatch, EntityNotAlive, OutOfMemory }!void {
         const config = comptime Relation(Kind).config;
 
-        try manager.removeComponent(child, Relation(Kind));
+        // Remove component if applicable
+        if (!config.indexed or config.exclusive) {
+            if (try manager.getComponent(child, Relation(Kind))) |rel_comp| {
+                if (rel_comp.target.eql(parent)) {
+                    try manager.removeComponent(child, Relation(Kind));
+                } else return error.ParentMismatch;
+            }
+        }
 
+        // Remove from index if applicable
         if (config.indexed and self.hasIndex(Kind)) {
-            const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
+            const type_hash = reflect.typeHash(Kind);
             if (self.indices.get(type_hash)) |index| {
                 index.remove(child, parent);
             }
@@ -317,7 +327,7 @@ pub const RelationManager = struct {
             @compileError(@typeName(Kind) ++ " is not indexed. Set indexed=true in relation_config.");
         }
 
-        const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
+        const type_hash = reflect.typeHash(Kind);
         if (self.indices.get(type_hash)) |index| {
             return index.getChildren(parent);
         }
@@ -340,7 +350,7 @@ pub const RelationManager = struct {
             @compileError(@typeName(Kind) ++ " is not indexed. Set indexed=true in relation_config or use query instead.");
         }
 
-        const type_hash = comptime std.hash.Wyhash.hash(0, @typeName(Kind));
+        const type_hash = reflect.typeHash(Kind);
         if (self.indices.get(type_hash)) |index| {
             return index.getParents(child);
         }

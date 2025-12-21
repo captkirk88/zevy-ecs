@@ -681,17 +681,18 @@ pub const CommandsSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Commands {
-        if (e.getResource(Commands)) |cmds| {
-            return cmds;
-        }
-        const cmds = try Commands.init(e.allocator, e);
-        return try e.addResource(Commands, cmds);
+        const commands = try Commands.init(e.allocator, e);
+        const commands_ptr = try e.allocator.create(Commands);
+        commands_ptr.* = commands;
+        return commands_ptr;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = T;
         const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
         commands.flush(e) catch |err| @panic(@errorName(err));
+        commands.deinit();
+        e.allocator.destroy(commands);
     }
 };
 
@@ -815,6 +816,7 @@ test "CommandsSystemParam advanced" {
     defer manager.deinit();
 
     const commands = try CommandsSystemParam.apply(&manager, Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
 
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
@@ -875,6 +877,7 @@ test "Commands deferred entity creation" {
     defer manager.deinit();
 
     const commands = try CommandsSystemParam.apply(&manager, Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
 
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
