@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_plugin_tests.step);
 
     if (isSelf(b)) {
-        setupExamples(b, mod, reflect_mod, target, optimize);
+        setupExamples(b, mod, "zevy_ecs", target, optimize);
     }
 }
 
@@ -73,7 +73,7 @@ fn isSelf(b: *std.Build) bool {
     }
 }
 
-fn setupExamples(b: *std.Build, mod: *std.Build.Module, reflect_mod: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
+pub fn setupExamples(b: *std.Build, mod: *std.Build.Module, mod_import_name: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
     // Examples
     const examples_step = b.step("examples", "Run all examples");
 
@@ -91,11 +91,13 @@ fn setupExamples(b: *std.Build, mod: *std.Build.Module, reflect_mod: *std.Build.
                 .root_source_file = b.path(example_path),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "zevy_ecs", .module = mod },
-                    .{ .name = "zevy_reflect", .module = reflect_mod },
-                },
             });
+
+            var iter = mod.import_table.iterator();
+            while (iter.next()) |import_entry| {
+                example_mod.addImport(import_entry.key_ptr.*, import_entry.value_ptr.*);
+            }
+            example_mod.addImport(mod_import_name, mod);
 
             const example_exe = b.addExecutable(.{
                 .name = example_name,
