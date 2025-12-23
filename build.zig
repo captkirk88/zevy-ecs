@@ -58,21 +58,21 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_plugin_tests.step);
 
-    try setupExamples(b, mod, reflect_mod, target, optimize);
+    setupExamples(b, mod, reflect_mod, target, optimize);
 }
 
-fn setupExamples(b: *std.Build, mod: *std.Build.Module, reflect_mod: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !void {
+fn setupExamples(b: *std.Build, mod: *std.Build.Module, reflect_mod: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
     // Examples
     const examples_step = b.step("examples", "Run all examples");
 
-    var examples_dir = try std.fs.openDirAbsolute(b.path("examples").getPath(b), .{ .iterate = true });
+    var examples_dir = std.fs.openDirAbsolute(b.path("examples").getPath(b), .{ .iterate = true }) catch return;
     defer examples_dir.close();
 
     var examples_iter = examples_dir.iterate();
-    while (try examples_iter.next()) |entry| {
+    while (examples_iter.next() catch null) |entry| {
         if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".zig")) {
             const example_name = std.fs.path.stem(entry.name);
-            const example_path = try std.fs.path.join(b.allocator, &.{ "examples", entry.name });
+            const example_path = std.fs.path.join(b.allocator, &.{ "examples", entry.name }) catch continue;
             defer b.allocator.free(example_path);
 
             const example_mod = b.addModule(example_name, .{
