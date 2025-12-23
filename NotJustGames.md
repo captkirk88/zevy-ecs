@@ -2,7 +2,7 @@
 
 This example demonstrates how to build a complete web server application using zevy_ecs with request handling, middleware, routing, and session management.
 
-See the full code in [example_web.zig](example_web.zig)
+See the full code in [examples/example_web.zig](examples/example_web.zig)
 
 ### Key Concepts Demonstrated
 

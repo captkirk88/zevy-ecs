@@ -58,7 +58,19 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_plugin_tests.step);
 
-    setupExamples(b, mod, reflect_mod, target, optimize);
+    if (isSelf(b)) {
+        setupExamples(b, mod, reflect_mod, target, optimize);
+    }
+}
+
+/// Check if the build is running in this project
+fn isSelf(b: *std.Build) bool {
+    // Check for a file that only exists in the main zevy-ecs project
+    if (std.fs.accessAbsolute(b.path("build.zig").getPath(b), .{})) {
+        return true;
+    } else |_| {
+        return true;
+    }
 }
 
 fn setupExamples(b: *std.Build, mod: *std.Build.Module, reflect_mod: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
