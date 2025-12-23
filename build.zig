@@ -105,6 +105,11 @@ pub fn setupExamples(b: *std.Build, mod: *std.Build.Module, mod_import_name: []c
             });
 
             const run_example = b.addRunArtifact(example_exe);
+
+            if (b.args) |args| {
+                run_example.addArgs(args);
+            }
+
             const example_step = b.step(example_name, b.fmt("Run the {s} example", .{example_name}));
             example_step.dependOn(&run_example.step);
 
