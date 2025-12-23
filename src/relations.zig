@@ -274,7 +274,7 @@ pub const RelationManager = struct {
         // For non-exclusive indexed relations, only use index (no component)
         // For non-indexed or exclusive relations, add component
         if (!config.indexed or config.exclusive) {
-            try manager.addComponent(child, Relation(Kind), .{
+            try ecs._addComponent(manager, child, Relation(Kind), .{
                 .target = parent,
                 .data = data,
             });
@@ -301,7 +301,7 @@ pub const RelationManager = struct {
         if (!config.indexed or config.exclusive) {
             if (try manager.getComponent(child, Relation(Kind))) |rel_comp| {
                 if (rel_comp.target.eql(parent)) {
-                    try manager.removeComponent(child, Relation(Kind));
+                    try ecs._removeComponent(manager, child, Relation(Kind));
                 } else return error.ParentMismatch;
             }
         }

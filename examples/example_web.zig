@@ -1,5 +1,6 @@
 const std = @import("std");
-const zevy_ecs = @import("src/root.zig");
+const zevy_ecs = @import("zevy_ecs");
+const zevy_reflect = @import("zevy_reflect");
 
 // ============================================================================
 // Components
@@ -159,16 +160,16 @@ const ServerState = enum {
 
 /// Startup system to initialize server resources
 fn startupSystem(
-    config: zevy_ecs.Res(ServerConfig),
+    config: zevy_ecs.params.Res(ServerConfig),
 ) !void {
-    std.debug.print("🚀 Server starting on {s}:{d}\n", .{ config.ptr.host, config.ptr.port });
-    std.debug.print("📊 Max connections: {d}\n", .{config.ptr.max_connections});
+    std.debug.print("Server starting on {s}:{d}\n", .{ config.ptr.host, config.ptr.port });
+    std.debug.print("Max connections: {d}\n", .{config.ptr.max_connections});
 }
 
 /// System to count all incoming requests
 fn requestCountingSystem(
-    stats: zevy_ecs.Res(ServerStats),
-    query: zevy_ecs.Query(
+    stats: zevy_ecs.params.Res(ServerStats),
+    query: zevy_ecs.params.Query(
         struct {
             request: Request,
         },
@@ -184,16 +185,16 @@ fn requestCountingSystem(
 
 /// System to route incoming requests to appropriate handlers
 fn routingSystem(
-    commands: *zevy_ecs.Commands,
-    routes: zevy_ecs.Res(RouteRegistry),
-    query: zevy_ecs.Query(
+    commands: *zevy_ecs.params.Commands,
+    routes: zevy_ecs.params.Res(RouteRegistry),
+    query: zevy_ecs.params.Query(
         struct {
             entity: zevy_ecs.Entity,
             request: Request,
         },
         .{RouteMatch},
     ),
-    writer: zevy_ecs.EventWriter(RequestEvent),
+    writer: zevy_ecs.params.EventWriter(RequestEvent),
 ) void {
     while (query.next()) |item| {
         if (routes.ptr.match(item.request.path)) |handler| {
@@ -223,10 +224,10 @@ fn routingSystem(
 
 /// Authentication middleware system
 fn authenticationSystem(
-    commands: *zevy_ecs.Commands,
-    sessions: zevy_ecs.Res(SessionStore),
-    time: zevy_ecs.Res(CurrentTime),
-    query: zevy_ecs.Query(
+    commands: *zevy_ecs.params.Commands,
+    sessions: zevy_ecs.params.Res(SessionStore),
+    time: zevy_ecs.params.Res(CurrentTime),
+    query: zevy_ecs.params.Query(
         struct {
             entity: zevy_ecs.Entity,
             request: Request,
@@ -234,7 +235,7 @@ fn authenticationSystem(
         },
         .{AuthToken},
     ),
-    auth_failed_writer: zevy_ecs.EventWriter(AuthFailedEvent),
+    auth_failed_writer: zevy_ecs.params.EventWriter(AuthFailedEvent),
 ) void {
     while (query.next()) |item| {
         // Check if route requires authentication
@@ -272,9 +273,9 @@ fn authenticationSystem(
 
 /// Rate limiting middleware system
 fn rateLimitingSystem(
-    commands: *zevy_ecs.Commands,
-    time: zevy_ecs.Res(CurrentTime),
-    query: zevy_ecs.Query(
+    commands: *zevy_ecs.params.Commands,
+    time: zevy_ecs.params.Res(CurrentTime),
+    query: zevy_ecs.params.Query(
         struct {
             entity: zevy_ecs.Entity,
             request: Request,
@@ -320,8 +321,8 @@ fn rateLimitingSystem(
 
 /// Request handler system for home page
 fn homeHandlerSystem(
-    commands: *zevy_ecs.Commands,
-    query: zevy_ecs.Query(
+    commands: *zevy_ecs.params.Commands,
+    query: zevy_ecs.params.Query(
         struct {
             entity: zevy_ecs.Entity,
             request: Request,
@@ -356,8 +357,8 @@ fn homeHandlerSystem(
 
 /// API handler system for user data
 fn apiUserHandlerSystem(
-    commands: *zevy_ecs.Commands,
-    query: zevy_ecs.Query(
+    commands: *zevy_ecs.params.Commands,
+    query: zevy_ecs.params.Query(
         struct {
             entity: zevy_ecs.Entity,
             request: Request,
@@ -385,10 +386,10 @@ fn apiUserHandlerSystem(
 
 /// Response sending system
 fn responseSendingSystem(
-    commands: *zevy_ecs.Commands,
-    stats: zevy_ecs.Res(ServerStats),
-    time: zevy_ecs.Res(CurrentTime),
-    query: zevy_ecs.Query(
+    commands: *zevy_ecs.params.Commands,
+    stats: zevy_ecs.params.Res(ServerStats),
+    time: zevy_ecs.params.Res(CurrentTime),
+    query: zevy_ecs.params.Query(
         struct {
             entity: zevy_ecs.Entity,
             request: Request,
@@ -396,14 +397,14 @@ fn responseSendingSystem(
         },
         .{},
     ),
-    writer: zevy_ecs.EventWriter(ResponseSentEvent),
+    writer: zevy_ecs.params.EventWriter(ResponseSentEvent),
 ) void {
     while (query.next()) |item| {
         if (!item.response.sent) {
             // Simulate sending response
             const duration = time.ptr.timestamp - item.request.timestamp;
 
-            std.debug.print("📤 {s} {s} -> {d} ({d}ms)\n", .{
+            std.debug.print("{s} {s} -> {d} ({d}ms)\n", .{
                 item.request.method,
                 item.request.path,
                 item.response.status,
@@ -435,11 +436,11 @@ fn responseSendingSystem(
 
 /// System to handle authentication failures
 fn authFailureHandlerSystem(
-    commands: *zevy_ecs.Commands,
-    reader: zevy_ecs.EventReader(AuthFailedEvent),
+    commands: *zevy_ecs.params.Commands,
+    reader: zevy_ecs.params.EventReader(AuthFailedEvent),
 ) void {
     while (reader.read()) |event| {
-        std.debug.print("🔒 Auth failed for entity {d}: {s}\n", .{
+        std.debug.print("Auth failed for entity {d}: {s}\n", .{
             event.data.entity.id,
             event.data.reason,
         });
@@ -462,9 +463,9 @@ fn authFailureHandlerSystem(
 
 /// Stats display system
 fn statsDisplaySystem(
-    stats: zevy_ecs.Res(ServerStats),
+    stats: zevy_ecs.params.Res(ServerStats),
 ) void {
-    std.debug.print("\n📊 Server Stats:\n", .{});
+    std.debug.print("\nServer Stats:\n", .{});
     std.debug.print("   Total requests: {d}\n", .{stats.ptr.total_requests});
     std.debug.print("   Successful: {d}\n", .{stats.ptr.successful_requests});
     std.debug.print("   Failed: {d}\n", .{stats.ptr.failed_requests});
@@ -478,8 +479,8 @@ fn statsDisplaySystem(
 
 /// Cleanup system for expired sessions
 fn sessionCleanupSystem(
-    sessions: zevy_ecs.Res(SessionStore),
-    time: zevy_ecs.Res(CurrentTime),
+    sessions: zevy_ecs.params.Res(SessionStore),
+    time: zevy_ecs.params.Res(CurrentTime),
 ) void {
     var to_remove = std.ArrayList([]const u8).initCapacity(sessions.ptr.allocator, 0) catch return;
     defer to_remove.deinit(sessions.ptr.allocator);
@@ -496,7 +497,7 @@ fn sessionCleanupSystem(
         if (sessions.ptr.sessions.fetchRemove(session_id)) |removed| {
             var mutable_data = removed.value.data;
             mutable_data.deinit();
-            std.debug.print("🧹 Cleaned up expired session: {s}\n", .{session_id});
+            std.debug.print("Cleaned up expired session: {s}\n", .{session_id});
         }
     }
 }
@@ -511,7 +512,7 @@ pub fn main() !void {
     var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var scheduler = try zevy_ecs.Scheduler.init(allocator);
+    var scheduler = try zevy_ecs.schedule.Scheduler.init(allocator);
     defer scheduler.deinit();
 
     // Initialize resources
@@ -542,83 +543,86 @@ pub fn main() !void {
     try scheduler.registerState(&manager, ServerState);
     try scheduler.transitionTo(&manager, ServerState, .Starting);
 
+    const Stage = zevy_ecs.schedule.Stage;
+    const Stages = zevy_ecs.schedule.Stages;
+
     // Add systems to scheduler stages
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.Startup),
+        Stage(Stages.Startup),
         startupSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.First),
+        Stage(Stages.First),
         requestCountingSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.First),
+        Stage(Stages.First),
         routingSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.PreUpdate),
+        Stage(Stages.PreUpdate),
         authenticationSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.PreUpdate),
+        Stage(Stages.PreUpdate),
         rateLimitingSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.Update),
+        Stage(Stages.Update),
         homeHandlerSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.Update),
+        Stage(Stages.Update),
         apiUserHandlerSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.Update),
+        Stage(Stages.Update),
         authFailureHandlerSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.PostUpdate),
+        Stage(Stages.PostUpdate),
         responseSendingSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     scheduler.addSystem(
         &manager,
-        zevy_ecs.Stage(zevy_ecs.Stages.Last),
+        Stage(Stages.Last),
         sessionCleanupSystem,
         zevy_ecs.DefaultParamRegistry,
     );
 
     // Startup
-    try scheduler.runStage(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Startup));
+    try scheduler.runStage(&manager, Stage(Stages.Startup));
     try scheduler.transitionTo(&manager, ServerState, .Running);
 
     // Simulate incoming requests
-    std.debug.print("\n🌐 Simulating incoming requests...\n\n", .{});
+    std.debug.print("\nSimulating incoming requests...\n\n", .{});
 
     // Create session for authenticated user
     try sessions.create("sess_12345", std.time.milliTimestamp());
@@ -666,13 +670,13 @@ pub fn main() !void {
     }
 
     // Process requests through pipeline
-    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
+    try scheduler.runStages(&manager, Stage(Stages.First), Stage(Stages.Last));
 
     // Display stats
     statsDisplaySystem(.{ .ptr = manager.getResource(ServerStats).? });
 
     // Shutdown
     try scheduler.transitionTo(&manager, ServerState, .ShuttingDown);
-    std.debug.print("👋 Server shutting down...\n", .{});
+    std.debug.print("Server shutting down...\n", .{});
     try scheduler.transitionTo(&manager, ServerState, .Stopped);
 }

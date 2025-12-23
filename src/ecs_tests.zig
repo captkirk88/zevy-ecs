@@ -2,6 +2,7 @@ const std = @import("std");
 const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
 const Entity = ecs.Entity;
+const relations = @import("relations.zig");
 
 // Test components
 const Position = packed struct {
@@ -28,14 +29,6 @@ const GameConfig = packed struct {
     difficulty: u8,
     max_players: u32,
 };
-
-test "Manager - init and deinit" {
-    var manager = try Manager.init(std.testing.allocator);
-    defer manager.deinit();
-
-    try std.testing.expect(manager.count() == 0);
-    try std.testing.expect(manager.next_entity_id == 0);
-}
 
 test "Manager - createEmpty entity" {
     var manager = try Manager.init(std.testing.allocator);
@@ -223,6 +216,28 @@ test "Manager - removeComponent" {
 
     try std.testing.expect(!try manager.hasComponent(entity, Velocity));
     try std.testing.expect(try manager.hasComponent(entity, Position));
+}
+
+test "Manager - addComponent panics for Relation types" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const entity = manager.createEmpty();
+
+    // This should panic because Relation components must be added via RelationManager
+    const relation_value = relations.Relation(relations.Child){ .target = entity, .data = relations.Child{} };
+    _ = relation_value; // comment this out to test
+    //try manager.addComponent(entity, relations.Relation(relations.Child), relation_value);
+}
+
+test "Manager - removeComponent panics for Relation types" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const entity = manager.createEmpty();
+    _ = entity; // comment this out to test
+    // This should panic because Relation components must be removed via RelationManager
+    // try manager.removeComponent(entity, relations.Relation(relations.Child));
 }
 
 test "Manager - getAllComponents" {

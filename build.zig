@@ -57,4 +57,44 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_plugin_tests.step);
+
+    try setupExamples(b, mod, reflect_mod, target, optimize);
+}
+
+fn setupExamples(b: *std.Build, mod: *std.Build.Module, reflect_mod: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !void {
+    // Examples
+    const examples_step = b.step("examples", "Run all examples");
+
+    var examples_dir = try std.fs.openDirAbsolute(b.path("examples").getPath(b), .{ .iterate = true });
+    defer examples_dir.close();
+
+    var examples_iter = examples_dir.iterate();
+    while (try examples_iter.next()) |entry| {
+        if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".zig")) {
+            const example_name = std.fs.path.stem(entry.name);
+            const example_path = try std.fs.path.join(b.allocator, &.{ "examples", entry.name });
+            defer b.allocator.free(example_path);
+
+            const example_mod = b.addModule(example_name, .{
+                .root_source_file = b.path(example_path),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "zevy_ecs", .module = mod },
+                    .{ .name = "zevy_reflect", .module = reflect_mod },
+                },
+            });
+
+            const example_exe = b.addExecutable(.{
+                .name = example_name,
+                .root_module = example_mod,
+            });
+
+            const run_example = b.addRunArtifact(example_exe);
+            const example_step = b.step(example_name, b.fmt("Run the {s} example", .{example_name}));
+            example_step.dependOn(&run_example.step);
+
+            examples_step.dependOn(example_step);
+        }
+    }
 }

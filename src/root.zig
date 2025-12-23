@@ -115,12 +115,27 @@ pub const schedule = struct {
     pub const StateManager = state.StateManager;
 };
 
-// Relations
-pub const relations = @import("relations.zig");
-/// RelationManager provides entity relationship management with optional indexing
-pub const RelationManager = relations.RelationManager;
-/// Relation component type for representing relationships between entities
-pub const Relation = relations.Relation;
+const relations_mod = @import("relations.zig");
+
+/// Relations module for managing entity relationships
+pub const relations = struct {
+    /// RelationManager provides entity relationship management with optional indexing
+    pub const RelationManager = relations_mod.RelationManager;
+    /// Relation component type for representing relationships between entities
+    pub const Relation = relations_mod.Relation;
+    /// Relation configuration type for defining relation behavior for `kinds`
+    pub const RelationConfig = relations_mod.RelationConfig;
+
+    /// Predefined relation kinds
+    pub const kinds = struct {
+        /// Indexed exclusive parent-child relationship (each child has one parent, parents can have multiple children)
+        pub const Child = relations_mod.Child;
+        /// Non-indexed attachment relationship (source entity is attached to target entity, no reverse lookup index)
+        pub const AttachedTo = relations_mod.AttachedTo;
+        /// Indexed non-exclusive ownership relationship (one entity can own multiple others, entities can have multiple owners)
+        pub const Owns = relations_mod.Owns;
+    };
+};
 
 pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");

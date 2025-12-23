@@ -1,20 +1,18 @@
 ### What to do...
 
- - [ ] Relations doesn't remove the Relations component when all relations are removed from an entity
-   - This causes issues when trying to re-add relations later as the Relations component already exists.
-   - Also, test multiple relation kinds per entity
-- [x] Test packed struct components. Should work already...
 - [ ] Explore threading when Zig's threading model is more mature
   - Specifically the newer std.Io APIs
+- [x] Relations doesn't remove the Relations component when all relations are removed from an entity
+- [x] Test packed struct components. Should work already...
 - [x] New project repo zevy_raylib using zevy_ecs and raylib-zig
   - Test zevy_ecs in a more real world scenario that helps find bugs and ideas for improvements
-- [x] Improve reflect.hasFunc and reflect.verifyFuncArgs to handle pointer types transparently
+- [x] Improve reflect.hasFunc and reflect.verifyFuncArgs to handle pointer types transparently (moved to zevy-reflect)
 - [x] Avoid abstracting away relations too much
   - Allow users to work with relations directly when needed through the RelationsManager resource
 
 ### What might do...
 
-- [x] Seperate reflect.zig into separate repo for general purpose reflection utilities?
+- [x] Seperate reflect.zig into separate repo for general purpose reflection utilities? (done: [zevy-reflect](https://github.com/captkirk88/zevy-reflect))
 
 ### Will recursively do...
 

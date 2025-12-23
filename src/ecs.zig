@@ -262,24 +262,18 @@ pub const Manager = struct {
 
     /// Add a component of type T to the given entity, or an error if entity is dead.
     pub fn addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
-        const tuple = .{value};
-        try self.world.add(entity, tuple);
-
-        const type_hash = reflect.typeHash(T);
-        self.component_removed.discardHandled();
-        try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
+        if (reflect.utils.isGenericInstantiation(T, "Relation")) {
+            std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}, entity: {d}", .{ comptime reflect.TypeInfo.from(T).toStringEx(true), entity.id });
+        }
+        return _addComponent(self, entity, T, value);
     }
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
     pub fn removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
-        if (!self.isAlive(entity)) {
-            return errs.ECSError.EntityNotAlive;
+        if (reflect.utils.isGenericInstantiation(T, "Relation")) {
+            std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}, entity: {d}", .{ comptime reflect.TypeInfo.from(T).toStringEx(true), entity.id });
         }
-        const type_hash = reflect.typeHash(T);
-        try self.world.removeComponent(entity, T);
-        self.component_removed.discardHandled();
-        try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+        return _removeComponent(self, entity, T);
     }
 
     /// Get a mutable pointer to a component of type T for the given entity, or an error if entity is not alive.
@@ -402,12 +396,13 @@ pub const Manager = struct {
             } else if (comptime reflect.hasFunc(T, "deinit")) {
                 @constCast(&default_value).deinit();
             }
-            // Warning: If T requires deinitialization method but calls it something other than deinit, you will get leaks.
+            // WARN: If T requires deinitialization method but calls it something other than deinit, you will get leaks.
+            // TODO use or create a separate allocator for tracking leaks specific to resources
             return res;
         } else {
             return self.addResource(T, default_value) catch |err| switch (err) {
                 error.ResourceAlreadyExists => {
-                    return self.getResource(T) orelse @panic("Resource should exist after ResourceAlreadyExists error");
+                    return self.getResource(T) orelse @panic("You should not reach here.. Take the red pill.");
                 },
                 else => return error.OutOfMemory,
             };
@@ -579,6 +574,28 @@ pub const Manager = struct {
         self.allocator.destroy(system);
     }
 };
+
+/// Add a component of type T to the given entity, or an error if entity is dead.
+pub fn _addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
+    if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+    const tuple = .{value};
+    try self.world.add(entity, tuple);
+
+    const type_hash = reflect.typeHash(T);
+    self.component_removed.discardHandled();
+    try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
+}
+
+/// Remove a component of type T from the given entity, or an error if not found or entity is dead.
+pub fn _removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
+    if (!self.isAlive(entity)) {
+        return errs.ECSError.EntityNotAlive;
+    }
+    const type_hash = reflect.typeHash(T);
+    try self.world.removeComponent(entity, T);
+    self.component_removed.discardHandled();
+    try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+}
 
 test "Query with just Entity" {
     var ecs_instance = Manager.init(std.testing.allocator) catch unreachable;

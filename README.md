@@ -24,36 +24,37 @@ zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) fr
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-  - [Installation](#installation)
-  - [Basic Usage](#basic-usage)
+    - [Installation](#installation)
+    - [Examples](#examples)
+    - [Basic Usage](#basic-usage)
 - [Core Concepts](#core-concepts)
-  - [Entities](#entities)
-  - [Components](#components)
-  - [Queries](#queries)
-  - [Systems](#systems)
-  - [System Parameters](#system-parameters)
-  - [Resources](#resources)
-  - [Events](#events)
-  - [Relations](#relations)
+    - [Entities](#entities)
+    - [Components](#components)
+    - [Queries](#queries)
+    - [Systems](#systems)
+    - [System Parameters](#system-parameters)
+    - [Resources](#resources)
+    - [Events](#events)
+    - [Relations](#relations)
 - [Advanced Features](#advanced-features)
-  - [System Composition](#system-composition)
-  - [Custom System Registries](#custom-system-registries)
-  - [Serialization](#serialization)
-    - [Basic Component Serialization](#basic-component-serialization)
-    - [Using ComponentWriter](#using-componentwriter)
-    - [Using ComponentReader](#using-componentreader)
-    - [Entity Serialization](#entity-serialization)
-    - [Batch Entity Serialization](#batch-entity-serialization)
-  - [Plugin System](#plugin-system)
-    - [Basic Plugin Usage](#basic-plugin-usage)
-    - [Creating Reusable Plugins](#creating-reusable-plugins)
-  - [Scheduler](#scheduler)
-    - [Predefined Stages](#predefined-stages)
-    - [Basic Usage](#basic-usage-1)
-    - [Creating Custom Stages](#creating-custom-stages)
-    - [State Management](#state-management)
-    - [Event Registration](#event-registration)
-    - [Getting Stage Information](#getting-stage-information)
+    - [System Composition](#system-composition)
+    - [Custom System Registries](#custom-system-registries)
+    - [Serialization](#serialization)
+        - [Basic Component Serialization](#basic-component-serialization)
+        - [Using ComponentWriter](#using-componentwriter)
+        - [Using ComponentReader](#using-componentreader)
+        - [Entity Serialization](#entity-serialization)
+        - [Batch Entity Serialization](#batch-entity-serialization)
+    - [Plugin System](#plugin-system)
+        - [Basic Plugin Usage](#basic-plugin-usage)
+        - [Creating Reusable Plugins](#creating-reusable-plugins)
+    - [Scheduler](#scheduler)
+        - [Predefined Stages](#predefined-stages)
+        - [Basic Usage](#basic-usage-1)
+        - [Creating Custom Stages](#creating-custom-stages)
+        - [State Management](#state-management)
+        - [Event Registration](#event-registration)
+        - [Getting Stage Information](#getting-stage-information)
 - [Performance](#performance)
 - [Projects](#projects)
 - [Dependencies](#dependencies)
@@ -85,6 +86,12 @@ exe.root_module.addImport("zevy_ecs_benchmark", zevy_ecs.module("benchmark"));
 // Optional: If you want to use the plugin system
 exe.root_module.addImport("zevy_ecs_plugins", zevy_ecs.module("plugins")); // Would recommend calling it something easier to work with.
 ```
+
+### Examples
+
+[Examples](./examples) directory.
+
+Run them with `zig build examples`.  Or use `zig build --help` to see all available examples.
 
 ### Basic Usage
 
