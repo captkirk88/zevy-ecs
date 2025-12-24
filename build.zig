@@ -1,4 +1,5 @@
 const std = @import("std");
+const reflect = @import("zevy_reflect");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -68,7 +69,7 @@ pub fn build(b: *std.Build) !void {
 }
 
 /// Check if the build is running in this project
-fn isSelf(b: *std.Build) bool {
+pub fn isSelf(b: *std.Build) bool {
     // Check for a file that only exists in the main zevy-ecs project
     if (std.fs.accessAbsolute(b.path("build.zig").getPath(b), .{})) {
         return true;

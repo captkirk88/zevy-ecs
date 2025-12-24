@@ -1,5 +1,6 @@
 ### What to do...
 
+- [ ] Move setupExamples to zevy-buildtools repo
 - [ ] Explore threading when Zig's threading model is more mature
   - Specifically the newer std.Io APIs
 - [x] Relations doesn't remove the Relations component when all relations are removed from an entity
