@@ -59,7 +59,11 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_plugin_tests.step);
 
     if (isSelf(b)) {
-        setupExamples(b, mod, "zevy_ecs", target, optimize);
+        setupExamples(b, &[_]std.Build.Module.Import{
+            .{ .name = "zevy_ecs", .module = mod },
+            .{ .name = "zevy_reflect", .module = reflect_mod },
+            .{ .name = "zevy_mem", .module = mem_mod },
+        }, target, optimize);
     }
 }
 
@@ -73,7 +77,7 @@ fn isSelf(b: *std.Build) bool {
     }
 }
 
-pub fn setupExamples(b: *std.Build, mod: *std.Build.Module, mod_import_name: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
+pub fn setupExamples(b: *std.Build, modules: []const std.Build.Module.Import, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
     // Examples
     const examples_step = b.step("examples", "Run all examples");
 
@@ -93,11 +97,17 @@ pub fn setupExamples(b: *std.Build, mod: *std.Build.Module, mod_import_name: []c
                 .optimize = optimize,
             });
 
-            var iter = mod.import_table.iterator();
-            while (iter.next()) |import_entry| {
-                example_mod.addImport(import_entry.key_ptr.*, import_entry.value_ptr.*);
+            // Add imports from the first module if any
+            if (modules.len > 0) {
+                for (modules) |module| {
+                    example_mod.addImport(module.name, module.module);
+                }
             }
-            example_mod.addImport(mod_import_name, mod);
+
+            // Add each module
+            for (modules) |item| {
+                example_mod.addImport(item.name, item.module);
+            }
 
             const example_exe = b.addExecutable(.{
                 .name = example_name,
@@ -109,7 +119,6 @@ pub fn setupExamples(b: *std.Build, mod: *std.Build.Module, mod_import_name: []c
             if (b.args) |args| {
                 run_example.addArgs(args);
             }
-
             const example_step = b.step(example_name, b.fmt("Run the {s} example", .{example_name}));
             example_step.dependOn(&run_example.step);
 
