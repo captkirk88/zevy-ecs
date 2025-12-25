@@ -360,13 +360,13 @@ test "EntityInstance - with relation component (Entity field)" {
     });
 
     // Create a custom relation-like component (simulating Relation(AttachedTo))
-    const AttachmentRelation = struct {
+    const Attachment = struct {
         target: ecs.Entity,
         offset_x: f32 = 0.0,
         offset_y: f32 = 0.0,
     };
 
-    try manager.addComponent(child, AttachmentRelation, AttachmentRelation{
+    try manager.addComponent(child, Attachment, .{
         .target = parent,
         .offset_x = 5.0,
         .offset_y = 5.0,
@@ -379,7 +379,7 @@ test "EntityInstance - with relation component (Entity field)" {
     // Verify the child has the attachment relation
     var has_attachment = false;
     for (child_instance.components) |comp| {
-        if (comp.as(AttachmentRelation)) |attachment| {
+        if (comp.as(Attachment)) |attachment| {
             has_attachment = true;
             // Verify the target entity reference is preserved
             try testing.expectEqual(parent.id, attachment.target.id);

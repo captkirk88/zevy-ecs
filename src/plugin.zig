@@ -603,8 +603,8 @@ test "PluginManager addBundle" {
     };
 
     const PluginBundle = struct {
-        plugin_one: PluginOne,
-        plugin_two: PluginTwo,
+        plugin_one: PluginOne = .{},
+        plugin_two: PluginTwo = .{},
     };
 
     var manager = try zevy_ecs.Manager.init(std.testing.allocator);
@@ -613,12 +613,8 @@ test "PluginManager addBundle" {
     var plugin_manager = PluginManager.init(std.testing.allocator);
     defer _ = plugin_manager.deinit(&manager);
 
-    const bundle = PluginBundle{
-        .plugin_one = .{},
-        .plugin_two = .{},
-    };
+    try plugin_manager.addBundle(PluginBundle, .{});
 
-    try plugin_manager.addBundle(PluginBundle, bundle);
     try plugin_manager.build(&manager);
 
     try std.testing.expectEqual(@as(i16, 16), manager.getResource(i16).?.*);

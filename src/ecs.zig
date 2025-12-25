@@ -262,7 +262,7 @@ pub const Manager = struct {
 
     /// Add a component of type T to the given entity, or an error if entity is dead.
     pub fn addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
-        if (reflect.utils.isGenericInstantiation(T, "Relation")) {
+        if (@hasDecl(T, "relation_config")) {
             std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}, entity: {d}", .{ comptime reflect.TypeInfo.from(T).toStringEx(true), entity.id });
         }
         return _addComponent(self, entity, T, value);
@@ -270,7 +270,7 @@ pub const Manager = struct {
 
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
     pub fn removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
-        if (reflect.utils.isGenericInstantiation(T, "Relation")) {
+        if (@hasDecl(T, "relation_config")) {
             std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}, entity: {d}", .{ comptime reflect.TypeInfo.from(T).toStringEx(true), entity.id });
         }
         return _removeComponent(self, entity, T);
