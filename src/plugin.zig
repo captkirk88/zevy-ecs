@@ -159,6 +159,22 @@ pub const PluginManager = struct {
         try self.plugin_hashes.put(self.allocator, key_hash, {});
     }
 
+    pub fn addBundle(self: *PluginManager, comptime BundleType: type, bundle: BundleType) error{
+        OutOfMemory,
+        PluginAlreadyExists,
+    }!void {
+        const info = reflect.getTypeInfo(BundleType);
+        if (info.category != .Struct) {
+            @compileError("Plugin bundle must be a struct");
+        }
+
+        inline for (info.fields) |field_info| {
+            const FieldType = field_info.type.type;
+            const field_value = @field(bundle, field_info.name);
+            try self.add(FieldType, field_value);
+        }
+    }
+
     pub fn get(self: *const PluginManager, comptime T: type) ?*T {
         const hash = comptime reflect.typeHash(T);
         for (self.plugins.items) |entry| {
@@ -561,4 +577,50 @@ test "PluginManager addPlugin" {
     try plugin_manager.build(&manager);
 
     try std.testing.expectEqual(@as(u8, 255), manager.getResource(u8).?.*);
+}
+
+test "PluginManager addBundle" {
+    const PluginOne = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(i16, 16);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
+    };
+
+    const PluginTwo = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
+            _ = try manager.addResource(f64, 3.14);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
+    };
+
+    const PluginBundle = struct {
+        plugin_one: PluginOne,
+        plugin_two: PluginTwo,
+    };
+
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var plugin_manager = PluginManager.init(std.testing.allocator);
+    defer _ = plugin_manager.deinit(&manager);
+
+    const bundle = PluginBundle{
+        .plugin_one = .{},
+        .plugin_two = .{},
+    };
+
+    try plugin_manager.addBundle(PluginBundle, bundle);
+    try plugin_manager.build(&manager);
+
+    try std.testing.expectEqual(@as(i16, 16), manager.getResource(i16).?.*);
+    try std.testing.expectEqual(3.14, manager.getResource(f64).?.*);
 }
