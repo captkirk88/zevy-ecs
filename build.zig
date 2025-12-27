@@ -5,17 +5,16 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const reflect_dep = b.lazyDependency("zevy_reflect", .{
+    const reflect_dep = b.dependency("zevy_reflect", .{
         .target = target,
         .optimize = optimize,
-        .branch_quota = 40_000,
-    }) orelse return error.ZevyReflectDependencyNotFound;
+    });
     const reflect_mod = reflect_dep.module("zevy_reflect");
 
-    const mem_dep = b.lazyDependency("zevy_mem", .{
+    const mem_dep = b.dependency("zevy_mem", .{
         .target = target,
         .optimize = optimize,
-    }) orelse return error.ZevyMemDependencyNotFound;
+    });
     const mem_mod = mem_dep.module("zevy_mem");
 
     const mod = b.addModule("zevy_ecs", .{
