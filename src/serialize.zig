@@ -9,7 +9,7 @@ pub const ComponentInstance = struct {
     data: []const u8,
 
     pub fn from(comptime T: type, value: *const T) ComponentInstance {
-        const info = comptime reflect.getTypeInfo(T);
+        const info = comptime reflect.getReflectInfo(T).type;
         return ComponentInstance{
             .hash = info.hash,
             .size = info.size,
@@ -20,7 +20,7 @@ pub const ComponentInstance = struct {
     /// Get the component data as a specific type T
     /// Returns null if the type hash doesn't match
     pub fn as(self: *const ComponentInstance, comptime T: type) ?*const T {
-        const expected_info = reflect.getTypeInfo(T);
+        const expected_info = reflect.getReflectInfo(T).type;
         if (self.hash == expected_info.hash and self.size == expected_info.size) {
             return @alignCast(std.mem.bytesAsValue(T, self.data[0..self.size]));
         }
@@ -284,7 +284,7 @@ pub const ComponentWriter = struct {
 
     /// Write a component of type T with value
     pub fn writeTypedComponent(self: *ComponentWriter, comptime T: type, value: *const T) !void {
-        const info = reflect.getTypeInfo(T);
+        const info = reflect.getReflectInfo(T).type;
         const bytes = std.mem.asBytes(value);
         const component = ComponentInstance{
             .hash = info.hash,

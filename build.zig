@@ -1,5 +1,6 @@
 const std = @import("std");
 const reflect = @import("zevy_reflect");
+const buildtools = @import("zevy_buildtools");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -17,7 +18,7 @@ pub fn build(b: *std.Build) !void {
     });
     const mem_mod = mem_dep.module("zevy_mem");
 
-    const mod = b.addModule("zevy_ecs", .{
+    const self_mod = b.addModule("zevy_ecs", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -41,13 +42,13 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "zevy_ecs", .module = mod },
+            .{ .name = "zevy_ecs", .module = self_mod },
             .{ .name = "zevy_reflect", .module = reflect_mod },
         },
     });
 
     const tests = b.addTest(.{
-        .root_module = mod,
+        .root_module = self_mod,
     });
     const plugin_tests = b.addTest(.{ .root_module = plugin_mod });
 
@@ -58,71 +59,13 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_plugin_tests.step);
 
-    if (isSelf(b)) {
-        setupExamples(b, &[_]std.Build.Module.Import{
-            .{ .name = "zevy_ecs", .module = mod },
-            .{ .name = "zevy_reflect", .module = reflect_mod },
-            .{ .name = "zevy_mem", .module = mem_mod },
-        }, target, optimize);
-    }
-}
+    buildtools.examples.setupExamples(b, &[_]std.Build.Module.Import{
+        .{ .name = "zevy_ecs", .module = self_mod },
+        .{ .name = "zevy_reflect", .module = reflect_mod },
+        .{ .name = "zevy_mem", .module = mem_mod },
+    }, target, optimize);
 
-/// Check if the build is running in this project
-pub fn isSelf(b: *std.Build) bool {
-    // Check for a file that only exists in the main zevy-ecs project
-    if (std.fs.accessAbsolute(b.path("build.zig").getPath(b), .{})) {
-        return true;
-    } else |_| {
-        return true;
-    }
-}
+    try buildtools.fmt.addFmtStep(b, false);
 
-pub fn setupExamples(b: *std.Build, modules: []const std.Build.Module.Import, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
-    // Examples
-    const examples_step = b.step("examples", "Run all examples");
-
-    var examples_dir = std.fs.openDirAbsolute(b.path("examples").getPath(b), .{ .iterate = true }) catch return;
-    defer examples_dir.close();
-
-    var examples_iter = examples_dir.iterate();
-    while (examples_iter.next() catch null) |entry| {
-        if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".zig")) {
-            const example_name = std.fs.path.stem(entry.name);
-            const example_path = std.fs.path.join(b.allocator, &.{ "examples", entry.name }) catch continue;
-            defer b.allocator.free(example_path);
-
-            const example_mod = b.addModule(example_name, .{
-                .root_source_file = b.path(example_path),
-                .target = target,
-                .optimize = optimize,
-            });
-
-            // Add imports from the first module if any
-            if (modules.len > 0) {
-                for (modules) |module| {
-                    example_mod.addImport(module.name, module.module);
-                }
-            }
-
-            // Add each module
-            for (modules) |item| {
-                example_mod.addImport(item.name, item.module);
-            }
-
-            const example_exe = b.addExecutable(.{
-                .name = example_name,
-                .root_module = example_mod,
-            });
-
-            const run_example = b.addRunArtifact(example_exe);
-
-            if (b.args) |args| {
-                run_example.addArgs(args);
-            }
-            const example_step = b.step(example_name, b.fmt("Run the {s} example", .{example_name}));
-            example_step.dependOn(&run_example.step);
-
-            examples_step.dependOn(example_step);
-        }
-    }
+    try buildtools.fetch.addFetchStep(b, b.path("build.zig.zon"));
 }

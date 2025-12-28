@@ -50,7 +50,7 @@ pub const World = struct {
             var heap_data: [field_count][]u8 = undefined;
             inline for (info.@"struct".fields, 0..) |field, i| {
                 const FieldType = field.type;
-                const comp_info = reflect.getTypeInfo(FieldType);
+                const comp_info = reflect.getReflectInfo(FieldType).type;
                 var runtime_value: FieldType = values[i];
                 const bytes = std.mem.asBytes(&runtime_value);
                 heap_data[i] = try self.allocator.alloc(u8, comp_info.size);
@@ -181,7 +181,7 @@ pub const World = struct {
             inline for (sorted_indices, 0..) |orig_idx, sorted_idx| {
                 const field = info.@"struct".fields[orig_idx];
                 const T = field.type;
-                const comp_info = reflect.getTypeInfo(T);
+                const comp_info = reflect.getReflectInfo(T).type;
                 sorted_hashes[sorted_idx] = comp_info.hash;
                 sizes[sorted_idx] = comp_info.size;
 
@@ -291,7 +291,7 @@ pub const World = struct {
                 var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
-                    const comp_info = reflect.getTypeInfo(T);
+                    const comp_info = reflect.getReflectInfo(T).type;
                     hash_index_pairs[i] = .{ .hash = comp_info.hash, .index = i };
                 }
                 const lessThan = struct {
@@ -314,7 +314,7 @@ pub const World = struct {
         inline for (sorted_indices, 0..) |orig_idx, sorted_idx| {
             const field = info.@"struct".fields[orig_idx];
             const T = field.type;
-            const comp_info = reflect.getTypeInfo(T);
+            const comp_info = reflect.getReflectInfo(T).type;
             sorted_hashes[sorted_idx] = comp_info.hash;
             sizes[sorted_idx] = comp_info.size;
             var runtime_value: T = values[orig_idx];
@@ -364,7 +364,7 @@ pub const World = struct {
 
     /// Get a pointer to component T for an entity, or null if not present
     pub fn getPtr(self: *World, entity: Entity, comptime T: type) ?*T {
-        const info = reflect.getTypeInfo(T);
+        const info = reflect.getReflectInfo(T).type;
         if (self.archetypes.get(entity)) |entry| {
             const arch = entry.archetype;
             var idx: ?usize = null;
@@ -469,7 +469,7 @@ pub const World = struct {
             const src_arch = entry.archetype;
             const src_idx = entry.index;
             // Build new signature: remove T's hash from the current signature
-            const t_info = reflect.getTypeInfo(T);
+            const t_info = reflect.getReflectInfo(T).type;
             const src_types = src_arch.signature.types;
             var new_types = try std.ArrayList(u64).initCapacity(self.allocator, src_types.len);
             defer new_types.deinit(self.allocator);
@@ -515,7 +515,7 @@ pub const World = struct {
         var hashes: [field_count]u64 = undefined;
         inline for (info.@"struct".fields, 0..) |field, i| {
             const T = field.type;
-            const comp_info = reflect.getTypeInfo(T);
+            const comp_info = reflect.getReflectInfo(T).type;
             hashes[i] = comp_info.hash;
         }
         std.sort.insertion(u64, &hashes, {}, std.sort.asc(u64));
@@ -528,7 +528,7 @@ pub const World = struct {
         var exclude_hashes: [exclude_count]u64 = undefined;
         inline for (exclude_info.@"struct".fields, 0..) |field, i| {
             const T = field.type;
-            const comp_info = reflect.getTypeInfo(T);
+            const comp_info = reflect.getReflectInfo(T).type;
             exclude_hashes[i] = comp_info.hash;
         }
         std.sort.insertion(u64, &exclude_hashes, {}, std.sort.asc(u64));

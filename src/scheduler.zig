@@ -48,7 +48,7 @@ pub const StageId = struct {
 /// Predefined stages map to specific ranges for ordering, custom stages use hash-based IDs.
 pub inline fn Stage(comptime T: type) StageId {
     // Check if T has a priority field for explicit ordering
-    if (comptime reflect.getTypeInfo(T).hasDecl("priority")) {
+    if (comptime reflect.getReflectInfo(T).type.hasDecl("priority")) {
         return T.priority;
     }
 

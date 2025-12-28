@@ -175,10 +175,10 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                 if (is_required) {
                     // Skip Entity since it's not stored as a component in archetypes
                     if (component_type != Entity) {
-                        const type_info = reflect.getTypeInfo(component_type);
+                        const incl_comp_hash = comptime reflect.getReflectInfo(component_type).hash();
                         var found = false;
                         for (signature.types) |h| {
-                            if (h == type_info.hash) {
+                            if (h == incl_comp_hash) {
                                 found = true;
                                 break;
                             }
@@ -192,9 +192,9 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             // Check none of the exclude types are present
             inline for (exclude_info.@"struct".fields) |field| {
                 const T = field.type;
-                const type_info = reflect.getTypeInfo(getComponentType(T));
+                const excl_comp_hash = comptime reflect.getReflectInfo(getComponentType(T)).hash();
                 for (signature.types) |h| {
-                    if (h == type_info.hash) {
+                    if (h == excl_comp_hash) {
                         return false;
                     }
                 }
@@ -211,7 +211,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                         self.component_indices[original_i] = ENTITY_SENTINEL;
                         continue;
                     }
-                    const type_hash = reflect.getTypeInfo(component_type).hash;
+                    const type_hash = comptime reflect.getReflectInfo(component_type).hash();
                     var found = false;
                     for (arch.signature.types, 0..) |h, j| {
                         if (h == type_hash) {

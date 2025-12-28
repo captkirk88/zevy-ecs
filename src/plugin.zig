@@ -107,7 +107,7 @@ pub const PluginManager = struct {
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
-        const type_info = reflect.getTypeInfo(@TypeOf(plugin.ptr));
+        const type_info = reflect.getReflectInfo(@TypeOf(plugin.ptr)).type;
         const key_hash = type_info.hash;
         // Check if plugin already exists
         if (self.plugin_hashes.contains(key_hash)) {
@@ -129,7 +129,7 @@ pub const PluginManager = struct {
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
-        const type_info = reflect.getTypeInfo(PluginType);
+        const type_info = reflect.getReflectInfo(PluginType).type;
         const key_hash = type_info.hash;
         // Check if plugin already exists
         if (self.plugin_hashes.contains(key_hash)) {
@@ -163,7 +163,7 @@ pub const PluginManager = struct {
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
-        const info = reflect.getTypeInfo(BundleType);
+        const info = reflect.getReflectInfo(BundleType).type;
         if (info.category != .Struct) {
             @compileError("Plugin bundle must be a struct");
         }
