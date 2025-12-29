@@ -9,22 +9,22 @@
 
     .dependencies = .{
         .zevy_reflect = .{
-            .url = "git+https://github.com/captkirk88/zevy-reflect#54f9f5b97255cf3ea917bb336b29c38aebbd8da9",
-            .hash = "zevy_reflect-0.0.1-8SzYxiB0AgBD8rZxAF-p8eYtmEyl-jZ9BRVTmA0Nqddq",
+            .url = "git+https://github.com/captkirk88/zevy-reflect#65e170f521b1d52878bcab2368dd85e3a57c1c20",
+            .hash = "zevy_reflect-0.0.1-8SzYxmR0AgCIv3CClZc7sGkrcRmI6IfdLYJ8W2OBnTy-",
         },
         // .zevy_reflect = .{
         //     .path = "../zevy-reflect",
         // },
         .zevy_mem = .{
-            .url = "git+https://github.com/captkirk88/zevy-mem#61546939ce9363ccf19025be864f5f830ed5c8df",
-            .hash = "zevy_mem-0.0.1-jK9L0SQjAgAGQzMKSQJD7L218wHq8xeKAgyFb5LNOet9",
+            .url = "git+https://github.com/captkirk88/zevy-mem#a015c8ba395ccfb10dd6a107b6bf830050668bc5",
+            .hash = "zevy_mem-0.0.1-jK9L0egvAgBHV3PcFZuFepOaEPxHAQDBjsp49CydrRSe",
         },
         // .zevy_mem = .{
         //     .path = "../zevy-mem",
         // },
         .zevy_buildtools = .{
-            .url = "git+https://github.com/captkirk88/zevy-buildtools#cc84a951e1bb8b4032c58fdf23258cecbdd27caf",
-            .hash = "zevy_buildtools-0.0.0-So808TZzAABf5scbnRki4NwMHPQXe1zlKu-RNCvAjcV0",
+            .url = "git+https://github.com/captkirk88/zevy-buildtools#19ebdd781d2a5dd4a71ef60a1e57480ca2ade84f",
+            .hash = "zevy_buildtools-0.0.0-So808T9yAACgz0kLKOrpEXdodhqgxDBBLPy05GKj08FE",
         },
     },
 
