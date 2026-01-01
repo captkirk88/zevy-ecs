@@ -3,6 +3,20 @@ const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
 const Entity = ecs.Entity;
 const relations = @import("relations.zig");
+const Query = @import("query.zig").Query;
+
+fn pointerSystem(query: Query(struct { pcA: ?PointerComp, pcB: ?PointerCompToPointerComp }, struct {})) void {
+    while (query.next()) |item| {
+        // Modify the pointed value to demonstrate components may contain pointers to externally-managed memory
+        if (item.pcA) |pcA| {
+            pcA.ptr.* = 100;
+            continue;
+        }
+        if (item.pcB) |pcB| {
+            pcB.ptr.ptr.* = 100;
+        }
+    }
+}
 
 // Test components
 const Position = packed struct {
@@ -22,6 +36,14 @@ const Health = struct {
 
 const Name = struct {
     value: []const u8,
+};
+
+const PointerComp = packed struct {
+    ptr: *u8,
+};
+
+const PointerCompToPointerComp = packed struct {
+    ptr: *PointerComp,
 };
 
 // Test resource
@@ -452,4 +474,67 @@ test "Manager - resource mutation through pointer" {
     try std.testing.expect(retrieved != null);
     try std.testing.expect(retrieved.?.difficulty == 10);
     try std.testing.expect(retrieved.?.max_players == 20);
+}
+
+test "Manager - component with pointer field" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Allocate a byte on the test allocator and store its pointer in the component
+    const ptr = try manager.allocator.create(u8);
+    ptr.* = 42;
+
+    const pointer_comp = PointerComp{ .ptr = ptr };
+    const entity = manager.create(.{pointer_comp});
+
+    // Run a system that modifies the pointed value
+    const sys = manager.createSystem(pointerSystem, @import("systems.registry.zig").DefaultParamRegistry);
+    try sys.run(&manager, sys.ctx);
+
+    const retrieved = try manager.getComponent(entity, PointerComp);
+    try std.testing.expect(retrieved != null);
+    try std.testing.expect(retrieved.?.ptr.* == 100);
+
+    // Clean up externally-managed memory
+    manager.allocator.destroy(ptr);
+}
+
+test "Manager - component with pointer to another component" {
+    const zevy_mem = @import("zevy_mem");
+    var debug_allocator = zevy_mem.DebugAllocator.init(std.testing.allocator);
+    defer {
+        if (debug_allocator.detectLeaks()) {
+            debug_allocator.dumpLeaks();
+            @panic("Memory leaks detected");
+        }
+        debug_allocator.deinit();
+    }
+    var manager = try Manager.init(debug_allocator.allocator());
+    defer manager.deinit();
+
+    // Allocate a byte on the test allocator and store its pointer in the first component
+    const ptr = try manager.allocator.create(u8);
+    ptr.* = 42;
+
+    var pointer_comp = PointerComp{ .ptr = ptr };
+    const entity = manager.create(.{pointer_comp});
+
+    const pointer_to_pointer_comp = PointerCompToPointerComp{ .ptr = &pointer_comp };
+    try manager.addComponent(entity, PointerCompToPointerComp, pointer_to_pointer_comp);
+
+    // Run a system that modifies the pointed value
+    const sys = manager.createSystem(pointerSystem, @import("systems.registry.zig").DefaultParamRegistry);
+    try sys.run(&manager, sys.ctx);
+
+    const retrieved = try manager.getComponent(entity, PointerCompToPointerComp);
+    try std.testing.expect(retrieved != null);
+    try std.testing.expect(retrieved.?.ptr.ptr.* == 100);
+    try std.testing.expect(pointer_comp.ptr.* == 100);
+
+    try manager.removeComponent(entity, PointerCompToPointerComp);
+
+    try std.testing.expect(pointer_comp.ptr.* == 100);
+    try std.testing.expect(retrieved.?.ptr.ptr.* == 100);
+    // Clean up externally-managed memory
+    manager.allocator.destroy(ptr);
 }

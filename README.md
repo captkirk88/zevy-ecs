@@ -197,7 +197,10 @@ if (manager.isAlive(entity)) {
 
 ### Components
 
-Components are plain Zig structs that hold data. Any type can be a component.
+Components are plain Zig structs that hold data. You can use packed structs if you prefer.
+
+> [!NOTE]
+> Components may contain pointers to externally-managed memory.  I recommend using POD types.  If you do use pointers, ensure the allocator's lifetime exceeds that of the ECS manager and destroy any externally-managed memory after removing the component or destroying the entity.
 
 ```zig
 const Position = struct {
