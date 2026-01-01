@@ -2,11 +2,16 @@
 
 zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
 
-[license]: https://img.shields.io/github/license/captkirk88/zevy-ecs?style=for-the-badge&logo=opensourcehardware&label=License&logoColor=C0CAF5&labelColor=414868&color=8c73cc
+
 
 [![][license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
 
 [![Zig Version](https://img.shields.io/badge/zig-0.15.1+-blue.svg)](https://ziglang.org/)
+
+## Why Zig?
+
+Zig is a modern systems programming language that offers performance, safety, and simplicity. Its powerful compile-time metaprogramming capabilities make it an excellent choice for building an ECS framework, allowing for zero-cost abstractions and type-safe system parameters. It's also easy to interoperate with C/C++ code, making it suitable for game development and other performance-critical applications. Zig is all about explicit control, Rust is about safety through it's type system. Zig can also achieve this by *programming contracts into your code* via comptime checks, testing, and careful design.
+
 
 ## Features
 
@@ -561,9 +566,7 @@ pub fn main() !void {
 
 ### Relations
 
-Relations allow you to create connections between entities with minimal memory overhead. The `RelationManager` is automatically initialized as a built-in resource when the ECS Manager is created, since entities and relations go hand-in-hand. The system uses an adaptive hybrid approach where relations can be either component-based (minimal overhead for sparse relations) or indexed (for efficient traversal of many relations).
-
-Relation components added via `manager.addComponent()` are automatically synced to the RelationManager for indexed relation types.
+Relations allow you to create connections between entities with minimal memory overhead. The `RelationManager` is automatically initialized as a built-in resource when the ECS Manager is created, since entities and relations go hand-in-hand. The system uses an adaptive hybrid approach where relations can be either component-based (minimal overhead for sparse relations) or indexed (for efficient traversal of many relations).  Relationships can only be created using `RelationManager` or via the system param `Relations` (which is a alias for `RelationsManager`).
 
 #### Relation Types
 
@@ -739,6 +742,12 @@ fn setupInventory(
 ## Advanced Features
 
 ### System Composition
+
+A few small helpers are provided for composing systems succinctly:
+
+- **pipe**: Runs a `first` system and injects its return value as the first argument to a `second` system. Useful for producer→consumer flows; errors returned by the first system propagate.
+- **runIf**: Runs the `system` only when `predicate` returns `true`. Compile-time enforced: `predicate` must return `bool`.
+- **chain**: Accepts a **comptime array** of systems and runs them sequentially as one system. The argument must be a comptime array literal and cannot be empty.
 
 ```zig
 // Systems with injected arguments
@@ -1374,3 +1383,5 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 Contributions are welcome!
 Please describe issues in detail. Bug reports, feature requests, etc. Pull requests are also welcome.
+
+[license]: https://img.shields.io/github/license/captkirk88/zevy-ecs?style=for-the-badge&logo=opensourcehardware&label=License&logoColor=C0CAF5&labelColor=414868&color=8c73cc

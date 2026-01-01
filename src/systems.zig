@@ -524,7 +524,7 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime Par
     );
 }
 
-pub fn chain(comptime systems: anytype, comptime ParamRegistry: type) System(void) {
+pub fn chain(systems: anytype, comptime ParamRegistry: type) System(void) {
     const info = @typeInfo(@TypeOf(systems));
     if (info != .array) {
         @compileError("chain expects an array of systems");

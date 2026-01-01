@@ -101,6 +101,10 @@ fn producer() u32 {
     return 42;
 }
 
+fn producerError() !u32 {
+    return error.TestError;
+}
+
 fn consumer(value: u32) void {
     std.testing.expect(value == 42) catch unreachable;
 }
@@ -280,6 +284,15 @@ test "System - pipe functionality" {
     _ = try piped.run(&manager, piped.ctx);
 }
 
+test "System - pipe propagates error from first system" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const piped = systems.pipe(producerError, consumer, DefaultRegistry);
+    const result = piped.run(&manager, piped.ctx);
+    try std.testing.expectError(error.TestError, result);
+}
+
 test "System - runIf conditional" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
@@ -295,7 +308,7 @@ test "System - chain runs systems sequentially" {
     const counter = ChainCounter{ .value = 2 };
     _ = try manager.addResource(ChainCounter, counter);
 
-    const ChainSystems: [2]fn (res: Res(ChainCounter)) void = comptime .{ chainIncrementCounter, chainMultiplyCounter };
+    const ChainSystems: [2]fn (res: Res(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
     const chained = systems.chain(ChainSystems, DefaultRegistry);
     _ = try chained.run(&manager, chained.ctx);
 
