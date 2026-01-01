@@ -144,7 +144,7 @@ pub fn System(comptime ReturnType: type) type {
 // }
 
 /// Converts a system function into a System struct for caching and later execution.
-pub fn ToSystem(system_fn: anytype, comptime SystemParamsRegistry: type) System(ToSystemReturnType(system_fn)) {
+pub inline fn ToSystem(system_fn: anytype, comptime SystemParamsRegistry: type) System(ToSystemReturnType(system_fn)) {
     return ToSystemWithArgs(system_fn, .{}, SystemParamsRegistry);
 }
 
@@ -340,7 +340,7 @@ fn SystemParamArgs(comptime system_fn: anytype) type {
 ///
 /// const system = ToSystemWithArgs(mySystem, .{42, "test"}, MyRegistry);
 /// ```
-pub fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: type) System(ToSystemReturnType(system_fn)) {
+pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Registry: type) System(ToSystemReturnType(system_fn)) {
     const ReturnType = ToSystemReturnType(system_fn);
     const ArgsType = @TypeOf(args);
     const ContextType = SystemWithArgsContext(ArgsType);
@@ -522,4 +522,34 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime Par
         }.run,
         ParamRegistry,
     );
+}
+
+pub fn chain(comptime systems: anytype, comptime ParamRegistry: type) System(void) {
+    const info = @typeInfo(@TypeOf(systems));
+    if (info != .array) {
+        @compileError("chain expects an array of systems");
+    }
+    const count = systems.len;
+    if (count == 0) {
+        @compileError("chain requires at least one system");
+    }
+
+    const Chain = struct {
+        pub var system_handles: [count]System(void) = undefined;
+
+        pub fn run(commands: *Commands) !void {
+            inline for (system_handles) |sys| {
+                _ = try sys.run(commands.manager, sys.ctx);
+            }
+        }
+    };
+    Chain.system_handles = blk: {
+        var arr: [count]System(void) = undefined;
+        inline for (systems, 0..) |sys, i| {
+            arr[i] = ToSystem(sys, ParamRegistry);
+        }
+        break :blk arr;
+    };
+
+    return ToSystem(Chain.run, ParamRegistry);
 }

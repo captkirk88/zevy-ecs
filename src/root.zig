@@ -34,6 +34,10 @@ pub const ToSystemReturnType = sys.ToSystemReturnType;
 pub const pipe = sys.pipe;
 /// Function to run a system only if a condition is met
 pub const runIf = sys.runIf;
+/// Function to chain multiple systems together into one system to be run sequentially
+///
+/// TODO: part of the prep for parallel systems
+pub const chain = sys.chain;
 
 // System parameter types
 /// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter

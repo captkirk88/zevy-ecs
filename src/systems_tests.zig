@@ -35,6 +35,10 @@ const DeltaTime = struct {
     value: f32,
 };
 
+const ChainCounter = struct {
+    value: i32,
+};
+
 // Basic system functions
 fn simpleSystem() void {}
 
@@ -83,6 +87,14 @@ fn eventReaderSystem(reader: EventReader(u32)) void {
 fn systemWithArgs(multiplier: i32, offset: i32) void {
     const result = multiplier * 2 + offset;
     std.testing.expect(result == 14) catch unreachable; // 5 * 2 + 4 = 14
+}
+
+fn chainIncrementCounter(res: Res(ChainCounter)) void {
+    res.ptr.value += 1;
+}
+
+fn chainMultiplyCounter(res: Res(ChainCounter)) void {
+    res.ptr.value *= 3;
 }
 
 fn producer() u32 {
@@ -274,6 +286,21 @@ test "System - runIf conditional" {
 
     const conditional = systems.runIf(predicateTrue, conditionalSystem, DefaultRegistry);
     _ = try conditional.run(&manager, conditional.ctx);
+}
+
+test "System - chain runs systems sequentially" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const counter = ChainCounter{ .value = 2 };
+    _ = try manager.addResource(ChainCounter, counter);
+
+    const ChainSystems: [2]fn (res: Res(ChainCounter)) void = comptime .{ chainIncrementCounter, chainMultiplyCounter };
+    const chained = systems.chain(ChainSystems, DefaultRegistry);
+    _ = try chained.run(&manager, chained.ctx);
+
+    const result = manager.getResource(ChainCounter) orelse unreachable;
+    try std.testing.expect(result.value == 9);
 }
 
 test "System - resource mutation" {
