@@ -541,7 +541,7 @@ pub fn OnAdded(comptime T: type) type {
         pub const ComponentType = T;
         pub const is_on_added = true;
 
-        pub const Item = struct { entity: ecs.Entity, comp: ?*T };
+        pub const Item = struct { entity: ecs.Entity, comp: *T };
 
         items: []const Item,
 
@@ -582,13 +582,11 @@ pub const OnAddedSystemParam = struct {
         var iter = e.component_added.iterator();
         while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
-            const comp = e.getComponent(ev.data.entity, Component) catch null;
-            if (comp) |comp_ptr| {
-                try results.append(e.allocator, .{ .entity = ev.data.entity, .comp = comp_ptr });
-            } else {
-                // Even if the component is no longer present, we still consider it as "added" for this frame.
-                // Use a null pointer for the component to indicate it was removed before system execution.
-                try results.append(e.allocator, .{ .entity = ev.data.entity, .comp = null });
+            if (try e.getComponent(ev.data.entity, Component)) |comp_ptr| {
+                try results.append(e.allocator, .{
+                    .entity = ev.data.entity,
+                    .comp = comp_ptr,
+                });
             }
             ev.handled = true;
         }
@@ -745,7 +743,6 @@ test "OnAddedSystemParam basic" {
     var on_added = try OnAddedSystemParam.apply(&manager, Position);
     try std.testing.expect(on_added.items.len >= 1);
     try std.testing.expect(on_added.items[0].entity.eql(entity));
-    try std.testing.expect(on_added.items[0].comp != null);
 
     // cleanup / free allocated slice
     OnAddedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_added)), Position);

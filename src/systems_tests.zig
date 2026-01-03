@@ -170,8 +170,10 @@ fn onAddedRemovedSystem(added: params.OnAdded(Position), removed: params.OnRemov
         removed_count += 1;
     }
 
-    try std.testing.expect(added_count >= 1);
-    try std.testing.expect(removed_count >= 1);
+    if (added.items.len != 0)
+        try std.testing.expectEqual(1, added_count);
+    if (removed.removed.len != 0)
+        try std.testing.expectEqual(1, removed_count);
 }
 
 test "System - basic execution" {
@@ -353,16 +355,17 @@ test "System - return value" {
 test "System - OnAdded and OnRemoved system params" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
-
+    const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     // Ensure no leftover component events from earlier tests
     manager.component_added.clear();
     manager.component_removed.clear();
 
     const entity = manager.create(.{});
     try manager.addComponent(entity, Position, .{ .x = 1, .y = 2 });
+    _ = try system.run(&manager, system.ctx);
+
     try manager.removeComponent(entity, Position);
 
-    const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
 }
 
