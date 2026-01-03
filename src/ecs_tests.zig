@@ -501,7 +501,7 @@ test "Manager - component with pointer field" {
 
 test "Manager - component with pointer to another component" {
     const zevy_mem = @import("zevy_mem");
-    var debug_allocator = zevy_mem.DebugAllocator.init(std.testing.allocator);
+    var debug_allocator = zevy_mem.allocators.DebugAllocator.init(std.testing.allocator);
     defer {
         if (debug_allocator.detectLeaks()) {
             debug_allocator.dumpLeaks();
