@@ -68,4 +68,6 @@ pub fn build(b: *std.Build) !void {
     try buildtools.fmt.addFmtStep(b, false);
 
     try buildtools.fetch.addFetchStep(b, b.path("build.zig.zon"));
+
+    try buildtools.deps.addDepsStep(b);
 }
