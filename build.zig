@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_tests.step);
     test_step.dependOn(&run_plugin_tests.step);
 
-    buildtools.examples.setupExamples(b, &[_]std.Build.Module.Import{
+    _ = buildtools.examples.setupExamples(b, &.{
         .{ .name = "zevy_ecs", .module = self_mod },
         .{ .name = "zevy_reflect", .module = reflect_mod },
         .{ .name = "zevy_mem", .module = mem_mod },
