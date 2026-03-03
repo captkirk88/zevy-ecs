@@ -39,6 +39,7 @@ test "Query - basic iteration with single component" {
     }
 
     var q = manager.query(struct { pos: Position }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(item.pos.x >= 0.0);
@@ -66,6 +67,7 @@ test "Query - multiple components" {
     }
 
     var q = manager.query(struct { pos: Position, vel: Velocity }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(item.pos.x < 100.0);
@@ -98,6 +100,7 @@ test "Query - exclude pattern" {
 
     // Query for Position and Health, but exclude Armor
     var q = manager.query(struct { pos: Position, health: Health }, struct { armor: Armor });
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(item.pos.x == 10.0);
@@ -120,6 +123,7 @@ test "Query - with Entity field" {
     }
 
     var q = manager.query(struct { entity: Entity, pos: Position }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(manager.isAlive(item.entity));
@@ -139,6 +143,7 @@ test "Query - only Entity" {
     }
 
     var q = manager.query(struct { entity: Entity }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(manager.isAlive(item.entity));
@@ -160,6 +165,7 @@ test "Query - empty query (no entities match)" {
 
     // Query for Velocity (no entities have it)
     var q = manager.query(struct { vel: Velocity }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |_| {
         count += 1;
@@ -179,6 +185,7 @@ test "Query - mutation through query" {
 
     // First pass: mutate all positions
     var q1 = manager.query(struct { pos: Position }, struct {});
+    defer q1.deinit();
     while (q1.next()) |item| {
         item.pos.x += 100.0;
         item.pos.y = 50.0;
@@ -186,6 +193,7 @@ test "Query - mutation through query" {
 
     // Second pass: verify mutations
     var q2 = manager.query(struct { pos: Position }, struct {});
+    defer q2.deinit();
     var count: usize = 0;
     while (q2.next()) |item| {
         try std.testing.expect(item.pos.x >= 100.0);
@@ -215,6 +223,7 @@ test "Query - optional components" {
 
     // Query with optional Velocity
     var q = manager.query(struct { pos: Position, vel: ?Velocity }, struct {});
+    defer q.deinit();
     var count_with_vel: usize = 0;
     var count_without_vel: usize = 0;
     var total: usize = 0;
@@ -265,6 +274,7 @@ test "Query - multiple archetypes" {
 
     // Query for Position across all archetypes
     var q = manager.query(struct { pos: Position }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |_| {
         count += 1;
@@ -302,6 +312,7 @@ test "Query - complex exclude pattern" {
 
     // Query for Position and Velocity, but exclude both Team and Armor
     var q = manager.query(struct { pos: Position, vel: Velocity }, struct { team: Team, armor: Armor });
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(item.pos.x == 1.0);
@@ -324,6 +335,7 @@ test "Query - large dataset iteration" {
     }
 
     var q = manager.query(struct { pos: Position, vel: Velocity }, struct {});
+    defer q.deinit();
     var iteration_count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(item.pos.x >= 0.0);
@@ -347,6 +359,7 @@ test "Query - entity and multiple components" {
     }
 
     var q = manager.query(struct { entity: Entity, pos: Position, vel: Velocity, health: Health }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(manager.isAlive(item.entity));
@@ -380,6 +393,7 @@ test "Query - mixed optional and required components" {
 
     // Query with required Position, Velocity and optional Health
     var q = manager.query(struct { pos: Position, vel: Velocity, health: ?Health }, struct {});
+    defer q.deinit();
     var count_with_health: usize = 0;
     var count_without_health: usize = 0;
 
@@ -404,6 +418,7 @@ test "Query - empty entity set" {
     defer manager.deinit();
 
     var q = manager.query(struct { pos: Position }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     while (q.next()) |_| {
         count += 1;
@@ -423,6 +438,7 @@ test "Query - query result consistency across multiple iterations" {
 
     // First iteration
     var q1 = manager.query(struct { pos: Position }, struct {});
+    defer q1.deinit();
     var count1: usize = 0;
     while (q1.next()) |_| {
         count1 += 1;
@@ -430,6 +446,7 @@ test "Query - query result consistency across multiple iterations" {
 
     // Second iteration with new query
     var q2 = manager.query(struct { pos: Position }, struct {});
+    defer q2.deinit();
     var count2: usize = 0;
     while (q2.next()) |_| {
         count2 += 1;
@@ -470,6 +487,7 @@ test "Query - component with pointer field" {
 
     // Query for components with pointers
     var q = manager.query(struct { comp: ComponentWithPointer }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     var sum: i32 = 0;
     var value_sum: f32 = 0.0;
@@ -491,6 +509,7 @@ test "Query - component with pointer field" {
 
     // Test mutation through the pointer
     var q2 = manager.query(struct { comp: ComponentWithPointer }, struct {});
+    defer q2.deinit();
     while (q2.next()) |item| {
         item.comp.data.* += 1000;
     }
@@ -526,6 +545,7 @@ test "Query - component with slice field" {
 
     // Query and verify slices are intact
     var q = manager.query(struct { comp: ComponentWithSlice }, struct {});
+    defer q.deinit();
     var count: usize = 0;
     var total_len: usize = 0;
 
@@ -573,6 +593,7 @@ test "Query - component with multiple pointer types" {
 
     // Query and verify all pointer types work correctly
     var q = manager.query(struct { comp: ComplexComponent }, .{});
+    defer q.deinit();
     var found = false;
 
     while (q.next()) |item| {
@@ -605,6 +626,7 @@ test "Query - hasNext" {
     }
 
     var q = manager.query(struct { pos: Position }, struct {});
+    defer q.deinit();
     var count: usize = 0;
 
     while (q.hasNext()) {

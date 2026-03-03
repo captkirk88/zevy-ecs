@@ -314,8 +314,9 @@ test "System - chain runs systems sequentially" {
     const chained = systems.chain(ChainSystems, DefaultRegistry);
     _ = try chained.run(&manager, chained.ctx);
 
-    const result = manager.getResource(ChainCounter) orelse unreachable;
-    try std.testing.expect(result.value == 9);
+    var result_guard = manager.getResourceRead(ChainCounter).?;
+    defer result_guard.deinit();
+    try std.testing.expect(result_guard.get().value == 9);
 }
 
 test "System - resource mutation" {
@@ -447,11 +448,12 @@ test "UntypedSystemHandle format includes sig in Debug mode" {
     const untyped = handle.eraseType();
 
     // Format the handle as a string using {f} to call format method
-    var buffer = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
-    defer buffer.deinit(std.testing.allocator);
-    try buffer.writer(std.testing.allocator).print("{f}", .{untyped});
+    var writer_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer writer_alloc.deinit();
+    try writer_alloc.writer.print("{f}", .{untyped});
 
-    const formatted = buffer.items;
+    const formatted = try writer_alloc.toOwnedSlice();
+    defer std.testing.allocator.free(formatted);
 
     if (is_debug) {
         // In debug mode, the formatted output should include both handle and sig
@@ -477,11 +479,12 @@ test "SystemHandle format with {d} shows only number" {
     const untyped = handle.eraseType();
 
     // Format with {d} specifier
-    var buffer = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
-    defer buffer.deinit(std.testing.allocator);
-    try buffer.writer(std.testing.allocator).print("{d}", .{untyped});
+    var writer_alloc: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer writer_alloc.deinit();
+    try writer_alloc.writer.print("{d}", .{untyped});
 
-    const formatted = buffer.items;
+    const formatted = try writer_alloc.toOwnedSlice();
+    defer std.testing.allocator.free(formatted);
 
     // Should only contain digits (the handle number)
     try std.testing.expect(formatted.len > 0);

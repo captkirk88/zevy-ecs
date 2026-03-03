@@ -174,7 +174,8 @@ test "merged SystemParamRegistry" {
     // Test that we can apply a default registry param
     const value: f32 = 42.0;
     _ = try ecs_instance.addResource(f32, value);
-    const res = try merge.apply(&ecs_instance, params.Res(f32));
+    var res = try merge.apply(&ecs_instance, params.Res(f32));
+    defer res.guard.deinit();
     try std.testing.expect(res.ptr.* == 42.0);
 }
 
@@ -239,14 +240,15 @@ test "CustomSystemParam with Query, Res, Local fields" {
         }
         pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
             _ = e;
-            _ = ptr;
-            _ = T;
-            // Custom deinit logic if needed
+            const complex: *T = @ptrCast(@alignCast(ptr));
+            complex.query.deinit();
+            complex.res.guard.deinit();
         }
     };
 
     const registry = SystemParamRegistry(&[_]type{CustomComplexParam});
-    const complex = try registry.apply(&ecs_instance, ComplexType);
+    var complex = try registry.apply(&ecs_instance, ComplexType);
+    defer registry.deinit(&ecs_instance, @ptrCast(@alignCast(&complex)), ComplexType);
     try std.testing.expect(@intFromPtr(complex.query.storage) != 0);
     try std.testing.expect(complex.res.ptr.* == 7);
     try std.testing.expect(@intFromPtr(complex.local) != 0);

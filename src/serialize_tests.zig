@@ -32,16 +32,18 @@ test "ComponentInstance - writeTo and readFrom" {
     const original = serialize.ComponentInstance.from(Position, &pos);
 
     // Write to buffer
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
 
-    const writer = buffer.writer(allocator).any();
+    const writer = &writer_alloc.writer;
     try original.writeTo(writer);
 
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
     // Read from buffer
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
-    const restored = try serialize.ComponentInstance.readFrom(reader, allocator);
+    var reader = std.Io.Reader.fixed(buffer);
+    const restored = try serialize.ComponentInstance.readFrom(&reader, allocator);
     defer allocator.free(restored.data);
 
     // Verify
@@ -62,19 +64,21 @@ test "ComponentInstance - readFrom with insufficient data" {
     const original = serialize.ComponentInstance.from(Position, &pos);
 
     // Write to buffer
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
 
-    const writer = buffer.writer(allocator).any();
+    const writer = &writer_alloc.writer;
     try original.writeTo(writer);
 
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
     // Truncate the buffer (remove last few bytes)
-    buffer.shrinkRetainingCapacity(buffer.items.len - 2);
+    const truncated = buffer[0 .. buffer.len - 2];
 
     // Try to read from truncated buffer - should fail
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
-    const result = serialize.ComponentInstance.readFrom(reader, allocator);
+    var reader = std.Io.Reader.fixed(truncated);
+    const result = serialize.ComponentInstance.readFrom(&reader, allocator);
     try testing.expectError(error.UnexpectedEndOfStream, result);
 }
 
@@ -130,16 +134,18 @@ test "EntityInstance - writeTo and readFrom" {
     var original_instance = try serialize.EntityInstance.fromEntity(allocator, &manager, entity);
     defer original_instance.deinit(allocator);
 
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
 
-    const writer = buffer.writer(allocator).any();
+    const writer = &writer_alloc.writer;
     try original_instance.writeTo(writer);
 
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
     // Read back EntityInstance
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
-    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    var reader = std.Io.Reader.fixed(buffer);
+    var restored_instance = try serialize.EntityInstance.readFrom(&reader, allocator);
     defer restored_instance.deinit(allocator);
 
     try testing.expectEqual(original_instance.components.len, restored_instance.components.len);
@@ -195,9 +201,9 @@ test "EntityInstance - roundtrip serialization" {
     });
 
     // Serialize all entities
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator).any();
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
+    const writer = &writer_alloc.writer;
 
     const entities = [_]ecs.Entity{ e1, e2, e3 };
     try writer.writeInt(usize, entities.len, .little);
@@ -209,21 +215,23 @@ test "EntityInstance - roundtrip serialization" {
     }
 
     // Deserialize all entities
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+    var reader = std.Io.Reader.fixed(buffer);
 
-    const count = try reader.readInt(usize, .little);
+    const count = try reader.takeInt(usize, .little);
     try testing.expectEqual(@as(usize, 3), count);
 
     var i: usize = 0;
     while (i < count) : (i += 1) {
-        var restored = try serialize.EntityInstance.readFrom(reader, allocator);
+        var restored = try serialize.EntityInstance.readFrom(&reader, allocator);
         defer restored.deinit(allocator);
         _ = try restored.toEntity(&manager);
     }
 
     // Verify we now have 6 entities total (3 original + 3 restored)
     var query_iter = manager.query(.{Position}, .{});
+    defer query_iter.deinit();
     var pos_count: usize = 0;
     while (query_iter.next()) |_| {
         pos_count += 1;
@@ -276,17 +284,19 @@ test "ComponentWriter and ComponentReader" {
     const pos = Position{ .x = 7.0, .y = 14.0 };
     const vel = Velocity{ .dx = 2.5, .dy = 3.5 };
 
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
 
     // Write components
-    var component_writer = serialize.ComponentWriter.init(buffer.writer(allocator).any());
+    var component_writer = serialize.ComponentWriter.init(&writer_alloc.writer);
     try component_writer.writeTypedComponent(Position, &pos);
     try component_writer.writeTypedComponent(Velocity, &vel);
 
     // Read components
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var component_reader = serialize.ComponentReader.init(fbs.reader().any());
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+    var reader = std.Io.Reader.fixed(buffer);
+    var component_reader = serialize.ComponentReader.init(&reader);
 
     const comp1 = try component_reader.readComponent(allocator);
     defer component_reader.freeComponent(allocator, comp1);
@@ -318,16 +328,18 @@ test "ComponentWriter and ComponentReader - writeComponents and readComponents" 
         serialize.ComponentInstance.from(Health, &health),
     };
 
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
 
     // Write components with count header
-    var component_writer = serialize.ComponentWriter.init(buffer.writer(allocator).any());
+    var component_writer = serialize.ComponentWriter.init(&writer_alloc.writer);
     try component_writer.writeComponents(&components);
 
     // Read components
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    var component_reader = serialize.ComponentReader.init(fbs.reader().any());
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+    var reader = std.Io.Reader.fixed(buffer);
+    var component_reader = serialize.ComponentReader.init(&reader);
     const restored_components = try component_reader.readComponents(allocator);
     defer component_reader.freeComponents(allocator, restored_components);
 
@@ -419,15 +431,17 @@ test "EntityInstance - serialize and deserialize with relation component" {
     defer child_instance.deinit(allocator);
 
     // Write to buffer
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator).any();
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
+    const writer = &writer_alloc.writer;
     try child_instance.writeTo(writer);
 
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
     // Read back from buffer
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
-    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    var reader = std.Io.Reader.fixed(buffer);
+    var restored_instance = try serialize.EntityInstance.readFrom(&reader, allocator);
     defer restored_instance.deinit(allocator);
 
     // Create entity from restored instance
@@ -511,15 +525,17 @@ test "EntityInstance - roundtrip with relation component" {
     var item_instance = try serialize.EntityInstance.fromEntity(allocator, &manager1, item1);
     defer item_instance.deinit(allocator);
 
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator).any();
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
+    const writer = &writer_alloc.writer;
     try item_instance.writeTo(writer);
 
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
     // Deserialize to manager2
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
-    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    var reader = std.Io.Reader.fixed(buffer);
+    var restored_instance = try serialize.EntityInstance.readFrom(&reader, allocator);
     defer restored_instance.deinit(allocator);
 
     const item2 = try restored_instance.toEntity(&manager2);
@@ -572,15 +588,17 @@ test "EntityInstance - multiple Entity fields in component" {
     try testing.expect(found_link);
 
     // Roundtrip through serialization
-    var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-    defer buffer.deinit(allocator);
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
 
-    const writer = buffer.writer(allocator).any();
+    const writer = &writer_alloc.writer;
     try link_instance.writeTo(writer);
 
-    var fbs = std.io.fixedBufferStream(buffer.items);
-    const reader = fbs.reader().any();
-    var restored_instance = try serialize.EntityInstance.readFrom(reader, allocator);
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
+    var reader = std.Io.Reader.fixed(buffer);
+    var restored_instance = try serialize.EntityInstance.readFrom(&reader, allocator);
     defer restored_instance.deinit(allocator);
 
     const new_link_entity = try restored_instance.toEntity(&manager);

@@ -255,8 +255,9 @@ test "Plugin basic functionality" {
 
     try plugin_manager.add(TestPlugin, .{});
     try plugin_manager.build(&manager);
-
-    try std.testing.expect(manager.getResource(bool).?.* == true);
+    var res_guard = manager.getResourceRead(bool).?;
+    defer res_guard.deinit();
+    try std.testing.expect(res_guard.get().* == true);
 }
 
 test "PluginManager add single plugin" {
@@ -288,8 +289,9 @@ test "PluginManager add single plugin" {
 
     try plugin_manager.add(TestPlugin, .{});
     try plugin_manager.build(&manager);
-
-    try std.testing.expectEqual(@as(i32, 42), manager.getResource(i32).?.*);
+    var res_guard = manager.getResourceRead(i32).?;
+    defer res_guard.deinit();
+    try std.testing.expectEqual(@as(i32, 42), res_guard.get().*);
 }
 
 test "PluginManager add multiple plugins" {
@@ -306,8 +308,9 @@ test "PluginManager add multiple plugins" {
 
     const TestPlugin2 = struct {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
-            const res = manager.getResource(i32).?;
-            res.* = 20;
+            var res_guard = manager.getResourceWrite(i32).?;
+            defer res_guard.deinit();
+            res_guard.get().* = 20;
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) !void {
             _ = self;
@@ -334,8 +337,9 @@ test "PluginManager add multiple plugins" {
     try plugin_manager.add(TestPlugin1, .{});
     try plugin_manager.add(TestPlugin2, .{});
     try plugin_manager.build(&manager);
-
-    try std.testing.expectEqual(@as(i32, 20), manager.getResource(i32).?.*);
+    var res_guard = manager.getResourceRead(i32).?;
+    defer res_guard.deinit();
+    try std.testing.expectEqual(@as(i32, 20), res_guard.get().*);
 }
 
 test "PluginManager prevents duplicate plugins" {
@@ -375,7 +379,9 @@ test "PluginManager prevents duplicate plugins" {
     try plugin_manager.build(&manager);
 
     // Should only have been added and built once
-    try std.testing.expectEqual(@as(i32, 42), manager.getResource(i32).?.*);
+    var res_guard = manager.getResourceRead(i32).?;
+    defer res_guard.deinit();
+    try std.testing.expectEqual(@as(i32, 42), res_guard.get().*);
     try std.testing.expectEqual(@as(usize, 1), plugin_manager.plugins.items.len);
 }
 
@@ -402,8 +408,10 @@ test "Plugin with deinit for proper memory cleanup" {
 
         pub fn deinit(self: *@This(), _: std.mem.Allocator, manager: *zevy_ecs.Manager) !void {
             // Mark that cleanup was called
-            if (manager.getResource(CleanupTracker)) |tracker| {
-                tracker.cleanup_called = true;
+            if (manager.getResourceWrite(CleanupTracker)) |tracker_guard_const| {
+                var tracker_guard = tracker_guard_const;
+                defer tracker_guard.deinit();
+                tracker_guard.get().cleanup_called = true;
             }
 
             // Free the allocated data
@@ -421,8 +429,9 @@ test "Plugin with deinit for proper memory cleanup" {
     try plugin_manager.build(&manager);
 
     // Verify build ran
-    const tracker = manager.getResource(CleanupTracker).?;
-    try std.testing.expect(!tracker.cleanup_called);
+    var tracker_guard = manager.getResourceRead(CleanupTracker).?;
+    try std.testing.expect(!tracker_guard.get().cleanup_called);
+    tracker_guard.deinit();
 
     // Deinit the plugin manager - this should call the plugin's deinit
     if (plugin_manager.deinit(&manager)) |errors| {
@@ -435,7 +444,9 @@ test "Plugin with deinit for proper memory cleanup" {
     }
 
     // Verify deinit was called (tracker is still valid since manager hasn't been deinited)
-    try std.testing.expect(tracker.cleanup_called);
+    tracker_guard = manager.getResourceRead(CleanupTracker).?;
+    try std.testing.expect(tracker_guard.get().cleanup_called);
+    tracker_guard.deinit();
 }
 
 // Ensure PluginManager continues deinitializing other plugins even if one deinit errors
@@ -459,8 +470,10 @@ test "PluginManager continues deinit on plugin error" {
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) anyerror!void {
             _ = self;
             _ = allocator;
-            if (manager.getResource(bool)) |b| {
-                b.* = true;
+            if (manager.getResourceWrite(bool)) |b_guard_const| {
+                var b_guard = b_guard_const;
+                defer b_guard.deinit();
+                b_guard.get().* = true;
             }
         }
     };
@@ -497,8 +510,9 @@ test "PluginManager continues deinit on plugin error" {
     _ = plugin_manager.deinit(&manager);
     deinit_done = true;
 
-    const res = manager.getResource(bool).?;
-    try std.testing.expect(res.* == true);
+    var res_guard = manager.getResourceRead(bool).?;
+    defer res_guard.deinit();
+    try std.testing.expect(res_guard.get().* == true);
 }
 test "PluginManager getNames returns correct plugin names" {
     const TestPluginA = struct {
@@ -575,8 +589,9 @@ test "PluginManager addPlugin" {
 
     try plugin_manager.addPlugin(interface);
     try plugin_manager.build(&manager);
-
-    try std.testing.expectEqual(@as(u8, 255), manager.getResource(u8).?.*);
+    var res_guard = manager.getResourceRead(u8).?;
+    defer res_guard.deinit();
+    try std.testing.expectEqual(@as(u8, 255), res_guard.get().*);
 }
 
 test "PluginManager addBundle" {
@@ -616,7 +631,11 @@ test "PluginManager addBundle" {
     try plugin_manager.addBundle(PluginBundle, .{});
 
     try plugin_manager.build(&manager);
+    var res_guard_i16 = manager.getResourceRead(i16).?;
+    defer res_guard_i16.deinit();
+    try std.testing.expectEqual(@as(i16, 16), res_guard_i16.get().*);
 
-    try std.testing.expectEqual(@as(i16, 16), manager.getResource(i16).?.*);
-    try std.testing.expectEqual(3.14, manager.getResource(f64).?.*);
+    var res_guard_f64 = manager.getResourceRead(f64).?;
+    defer res_guard_f64.deinit();
+    try std.testing.expectEqual(3.14, res_guard_f64.get().*);
 }

@@ -691,7 +691,7 @@ test "Scheduler assign outside scope" {
 
     // Add a custom stage and a system to it
     const custom_stage = StageId.init(150_000); // Between First (100,000) and PreUpdate (200,000)
-    const out_value = try ecs.addResource(bool, false);
+    _ = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
         pub fn run(out: params.Res(bool)) void {
@@ -705,7 +705,9 @@ test "Scheduler assign outside scope" {
     // Run stages from First to PostUpdate, which includes the custom stage
     try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
 
-    try std.testing.expect(out_value.* == true);
+    var out_guard = ecs.getResourceRead(bool).?;
+    defer out_guard.deinit();
+    try std.testing.expect(out_guard.get().* == true);
 }
 
 test "Custom stage types with explicit priorities" {

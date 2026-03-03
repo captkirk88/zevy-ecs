@@ -247,10 +247,26 @@ test "OnEnter and OnExit systems" {
     const PlayingEntered = struct { value: bool };
     const PlayingExited = struct { value: bool };
 
-    const menu_entered = try ecs.addResource(MenuEntered, .{ .value = false });
-    const menu_exited = try ecs.addResource(MenuExited, .{ .value = false });
-    const playing_entered = try ecs.addResource(PlayingEntered, .{ .value = false });
-    const playing_exited = try ecs.addResource(PlayingExited, .{ .value = false });
+    _ = try ecs.addResource(MenuEntered, .{ .value = false });
+    _ = try ecs.addResource(MenuExited, .{ .value = false });
+    _ = try ecs.addResource(PlayingEntered, .{ .value = false });
+    _ = try ecs.addResource(PlayingExited, .{ .value = false });
+
+    const get_flag = struct {
+        fn value(manager: *ecs_mod.Manager, comptime T: type) bool {
+            var guard = manager.getResourceRead(T).?;
+            defer guard.deinit();
+            return guard.get().value;
+        }
+    }.value;
+
+    const set_flag = struct {
+        fn value(manager: *ecs_mod.Manager, comptime T: type, v: bool) void {
+            var guard = manager.getResourceWrite(T).?;
+            guard.get().value = v;
+            guard.deinit();
+        }
+    }.value;
 
     // Create OnEnter system for Menu state
     const params = @import("systems.params.zig");
@@ -298,36 +314,36 @@ test "OnEnter and OnExit systems" {
 
     // Transition to Menu state - should trigger OnEnter(Menu)
     try scheduler.transitionTo(&ecs, GameState, .Menu);
-    try std.testing.expect(menu_entered.value);
-    try std.testing.expect(!menu_exited.value);
-    try std.testing.expect(!playing_entered.value);
-    try std.testing.expect(!playing_exited.value);
+    try std.testing.expect(get_flag(&ecs, MenuEntered));
+    try std.testing.expect(!get_flag(&ecs, MenuExited));
+    try std.testing.expect(!get_flag(&ecs, PlayingEntered));
+    try std.testing.expect(!get_flag(&ecs, PlayingExited));
 
     // Reset flags
-    menu_entered.value = false;
-    menu_exited.value = false;
-    playing_entered.value = false;
-    playing_exited.value = false;
+    set_flag(&ecs, MenuEntered, false);
+    set_flag(&ecs, MenuExited, false);
+    set_flag(&ecs, PlayingEntered, false);
+    set_flag(&ecs, PlayingExited, false);
 
     // Transition to Playing state - should trigger OnExit(Menu) and OnEnter(Playing)
     try scheduler.transitionTo(&ecs, GameState, .Playing);
-    try std.testing.expect(!menu_entered.value);
-    try std.testing.expect(menu_exited.value);
-    try std.testing.expect(playing_entered.value);
-    try std.testing.expect(!playing_exited.value);
+    try std.testing.expect(!get_flag(&ecs, MenuEntered));
+    try std.testing.expect(get_flag(&ecs, MenuExited));
+    try std.testing.expect(get_flag(&ecs, PlayingEntered));
+    try std.testing.expect(!get_flag(&ecs, PlayingExited));
 
     // Reset flags
-    menu_entered.value = false;
-    menu_exited.value = false;
-    playing_entered.value = false;
-    playing_exited.value = false;
+    set_flag(&ecs, MenuEntered, false);
+    set_flag(&ecs, MenuExited, false);
+    set_flag(&ecs, PlayingEntered, false);
+    set_flag(&ecs, PlayingExited, false);
 
     // Transition to Menu state again - should trigger OnExit(Playing) and OnEnter(Menu)
     try scheduler.transitionTo(&ecs, GameState, .Menu);
-    try std.testing.expect(menu_entered.value);
-    try std.testing.expect(!menu_exited.value);
-    try std.testing.expect(!playing_entered.value);
-    try std.testing.expect(playing_exited.value);
+    try std.testing.expect(get_flag(&ecs, MenuEntered));
+    try std.testing.expect(!get_flag(&ecs, MenuExited));
+    try std.testing.expect(!get_flag(&ecs, PlayingEntered));
+    try std.testing.expect(get_flag(&ecs, PlayingExited));
 }
 
 test "InState systems" {
@@ -352,9 +368,25 @@ test "InState systems" {
     const PlayingSystemRan = struct { value: bool };
     const PausedSystemRan = struct { value: bool };
 
-    const menu_ran = try ecs.addResource(MenuSystemRan, .{ .value = false });
-    const playing_ran = try ecs.addResource(PlayingSystemRan, .{ .value = false });
-    const paused_ran = try ecs.addResource(PausedSystemRan, .{ .value = false });
+    _ = try ecs.addResource(MenuSystemRan, .{ .value = false });
+    _ = try ecs.addResource(PlayingSystemRan, .{ .value = false });
+    _ = try ecs.addResource(PausedSystemRan, .{ .value = false });
+
+    const get_flag = struct {
+        fn value(manager: *ecs_mod.Manager, comptime T: type) bool {
+            var guard = manager.getResourceRead(T).?;
+            defer guard.deinit();
+            return guard.get().value;
+        }
+    }.value;
+
+    const set_flag = struct {
+        fn value(manager: *ecs_mod.Manager, comptime T: type, v: bool) void {
+            var guard = manager.getResourceWrite(T).?;
+            guard.get().value = v;
+            guard.deinit();
+        }
+    }.value;
 
     // Create InState systems for each state
     const params = @import("systems.params.zig");
@@ -393,46 +425,46 @@ test "InState systems" {
 
     // Run InState systems for Menu
     try scheduler.runInStateSystems(&ecs, GameState, .Menu);
-    try std.testing.expect(menu_ran.value);
-    try std.testing.expect(!playing_ran.value);
-    try std.testing.expect(!paused_ran.value);
+    try std.testing.expect(get_flag(&ecs, MenuSystemRan));
+    try std.testing.expect(!get_flag(&ecs, PlayingSystemRan));
+    try std.testing.expect(!get_flag(&ecs, PausedSystemRan));
 
     // Reset flags
-    menu_ran.value = false;
-    playing_ran.value = false;
-    paused_ran.value = false;
+    set_flag(&ecs, MenuSystemRan, false);
+    set_flag(&ecs, PlayingSystemRan, false);
+    set_flag(&ecs, PausedSystemRan, false);
 
     // Transition to Playing state
     try scheduler.transitionTo(&ecs, GameState, .Playing);
 
     // Run InState systems for Playing
     try scheduler.runInStateSystems(&ecs, GameState, .Playing);
-    try std.testing.expect(!menu_ran.value);
-    try std.testing.expect(playing_ran.value);
-    try std.testing.expect(!paused_ran.value);
+    try std.testing.expect(!get_flag(&ecs, MenuSystemRan));
+    try std.testing.expect(get_flag(&ecs, PlayingSystemRan));
+    try std.testing.expect(!get_flag(&ecs, PausedSystemRan));
 
     // Reset flags
-    menu_ran.value = false;
-    playing_ran.value = false;
-    paused_ran.value = false;
+    set_flag(&ecs, MenuSystemRan, false);
+    set_flag(&ecs, PlayingSystemRan, false);
+    set_flag(&ecs, PausedSystemRan, false);
 
     // Test runActiveStateSystems convenience method
     try scheduler.runActiveStateSystems(&ecs, GameState);
-    try std.testing.expect(!menu_ran.value);
-    try std.testing.expect(playing_ran.value);
-    try std.testing.expect(!paused_ran.value);
+    try std.testing.expect(!get_flag(&ecs, MenuSystemRan));
+    try std.testing.expect(get_flag(&ecs, PlayingSystemRan));
+    try std.testing.expect(!get_flag(&ecs, PausedSystemRan));
 
     // Reset flags
-    menu_ran.value = false;
-    playing_ran.value = false;
-    paused_ran.value = false;
+    set_flag(&ecs, MenuSystemRan, false);
+    set_flag(&ecs, PlayingSystemRan, false);
+    set_flag(&ecs, PausedSystemRan, false);
 
     // Transition to Paused state
     try scheduler.transitionTo(&ecs, GameState, .Paused);
 
     // Run InState systems using convenience method
     try scheduler.runActiveStateSystems(&ecs, GameState);
-    try std.testing.expect(!menu_ran.value);
-    try std.testing.expect(!playing_ran.value);
-    try std.testing.expect(paused_ran.value);
+    try std.testing.expect(!get_flag(&ecs, MenuSystemRan));
+    try std.testing.expect(!get_flag(&ecs, PlayingSystemRan));
+    try std.testing.expect(get_flag(&ecs, PausedSystemRan));
 }

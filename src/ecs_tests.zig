@@ -283,10 +283,12 @@ test "Manager - addResource" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 5, .max_players = 10 };
-    const res = try manager.addResource(GameConfig, config);
+    _ = try manager.addResource(GameConfig, config);
 
-    try std.testing.expect(res.difficulty == 5);
-    try std.testing.expect(res.max_players == 10);
+    var res_guard = manager.getResourceRead(GameConfig).?;
+    defer res_guard.deinit();
+    try std.testing.expect(res_guard.get().difficulty == 5);
+    try std.testing.expect(res_guard.get().max_players == 10);
 }
 
 test "Manager - addResource duplicate fails" {
@@ -310,8 +312,11 @@ test "Manager - getResource returns resource" {
 
     const retrieved = manager.getResource(GameConfig);
     try std.testing.expect(retrieved != null);
-    try std.testing.expect(retrieved.?.difficulty == 7);
-    try std.testing.expect(retrieved.?.max_players == 15);
+    defer retrieved.?.deinit();
+    var retrieved_guard = manager.getResourceRead(GameConfig).?;
+    defer retrieved_guard.deinit();
+    try std.testing.expect(retrieved_guard.get().difficulty == 7);
+    try std.testing.expect(retrieved_guard.get().max_players == 15);
 }
 
 test "Manager - getResource returns null for missing resource" {
@@ -374,6 +379,7 @@ test "Manager - query basic" {
     _ = manager.create(.{pos2});
 
     var query = manager.query(struct { pos: Position }, struct {});
+    defer query.deinit();
     var count: usize = 0;
     while (query.next()) |item| {
         try std.testing.expect(item.pos.x > 0.0);
@@ -463,17 +469,19 @@ test "Manager - resource mutation through pointer" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 1, .max_players = 2 };
-    const res = try manager.addResource(GameConfig, config);
+    _ = try manager.addResource(GameConfig, config);
 
-    // Mutate through original pointer
-    res.difficulty = 10;
-    res.max_players = 20;
+    // Mutate through write guard
+    var res_guard = manager.getResourceWrite(GameConfig).?;
+    res_guard.get().difficulty = 10;
+    res_guard.get().max_players = 20;
+    res_guard.deinit();
 
     // Get resource again and verify mutation
-    const retrieved = manager.getResource(GameConfig);
-    try std.testing.expect(retrieved != null);
-    try std.testing.expect(retrieved.?.difficulty == 10);
-    try std.testing.expect(retrieved.?.max_players == 20);
+    var retrieved_guard = manager.getResourceRead(GameConfig).?;
+    defer retrieved_guard.deinit();
+    try std.testing.expect(retrieved_guard.get().difficulty == 10);
+    try std.testing.expect(retrieved_guard.get().max_players == 20);
 }
 
 test "Manager - component with pointer field" {

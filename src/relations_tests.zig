@@ -344,6 +344,7 @@ test "RelationManager - query entities with relations" {
         struct { transform: Transform, rel: Relation(ChildOf) },
         .{},
     );
+    defer query.deinit();
 
     var count: usize = 0;
     while (query.next()) |item| {
@@ -472,7 +473,9 @@ test "RelationManager - auto index update when Relation component added directly
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    const rel_manager = manager.getResource(RelationManager) orelse unreachable;
+    var rel_guard = manager.getResourceWrite(RelationManager).?;
+    defer rel_guard.deinit();
+    const rel_manager = rel_guard.get();
 
     const parent = manager.create(.{Transform{}});
     var children: [10]ecs.Entity = undefined;

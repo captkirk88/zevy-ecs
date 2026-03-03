@@ -9,22 +9,13 @@
 
     .dependencies = .{
         .zevy_reflect = .{
-            .url = "git+https://github.com/captkirk88/zevy-reflect#e67338b3af4a349fc28405e067aeeb4fc6ebecee",
-            .hash = "zevy_reflect-0.1.1-8SzYxp-EAgBh15o08H-D0pQr947iCr2L4ykj7WrUutrw",
+            .path = "../zevy-reflect",
         },
-        // .zevy_reflect = .{
-        //     .path = "../zevy-reflect",
-        // },
         .zevy_mem = .{
-            .url = "git+https://github.com/captkirk88/zevy-mem#25828047262ad07974ee2a70f3785fe5e8615eea",
-            .hash = "zevy_mem-0.0.1-jK9L0bEyAwBCQAlAvIs637HC6Ks_FI7hPKooaPx7PQFa",
+            .path = "../zevy-mem",
         },
-        // .zevy_mem = .{
-        //     .path = "../zevy-mem",
-        // },
         .zevy_buildtools = .{
-            .url = "git+https://github.com/captkirk88/zevy-buildtools#561ed918d436408d0d2e41ec7d779a2aae3827ed",
-            .hash = "zevy_buildtools-0.0.0-So808V6LAAAVAZIE09gpma9MunuIWcGA5ElEK4i9K406",
+            .path = "../zevy-buildtools",
         },
     },
 

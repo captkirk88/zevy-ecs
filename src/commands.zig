@@ -167,8 +167,9 @@ pub const Commands = struct {
             parent: ecs.Entity,
             fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
-                try rel_mgr.add(manager, closure.child, closure.parent, RelationType);
+                var rel_guard = manager.getResourceWrite(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                defer rel_guard.deinit();
+                try rel_guard.get().add(manager, closure.child, closure.parent, RelationType);
             }
             fn deinit(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
@@ -191,8 +192,9 @@ pub const Commands = struct {
             entity2: ecs.Entity,
             fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                const rel_mgr = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
-                try rel_mgr.remove(manager, closure.entity1, closure.entity2, RelationType);
+                var rel_guard = manager.getResourceWrite(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                defer rel_guard.deinit();
+                try rel_guard.get().remove(manager, closure.entity1, closure.entity2, RelationType);
             }
             fn deinit_cmd(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));

@@ -96,6 +96,7 @@ pub fn EventReader(comptime T: type) type {
         const Self = @This();
         pub const EventType = T;
         pub const is_event_reader = true;
+        guard: ecs.ResourceWriteGuard(events.EventStore(T)),
         event_store: *events.EventStore(T),
         iterator: ?events.EventStore(T).Iterator = null,
 
@@ -170,16 +171,17 @@ pub const EventReaderSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventReader(T) {
-        const event_store = e.getResource(events.EventStore(T)) orelse {
-            const store_ptr = try events.EventStore(T).init(e.allocator, 16);
-            return EventReader(T){ .event_store = try e.addResource(events.EventStore(T), store_ptr) };
+        var guard = e.getResourceWrite(events.EventStore(T)) orelse blk: {
+            const store = try events.EventStore(T).init(e.allocator, 16);
+            _ = try e.addResource(events.EventStore(T), store);
+            break :blk e.getResourceWrite(events.EventStore(T)) orelse return error.ResourceNotFound;
         };
-        return EventReader(T){ .event_store = event_store };
+        return EventReader(T){ .guard = guard, .event_store = guard.get() };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
-        _ = ptr;
-        _ = T;
+        const reader: *EventReader(T) = @ptrCast(@alignCast(ptr));
+        reader.guard.deinit();
     }
 };
 
@@ -189,6 +191,7 @@ pub fn EventWriter(comptime T: type) type {
         const Self = @This();
         pub const EventType = T;
         pub const is_event_writer = true;
+        guard: ecs.ResourceWriteGuard(events.EventStore(T)),
         event_store: *events.EventStore(T),
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
@@ -230,16 +233,17 @@ pub const EventWriterSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventWriter(T) {
-        const event_store = e.getResource(events.EventStore(T)) orelse {
-            const store_ptr = try events.EventStore(T).init(e.allocator, 16);
-            return EventWriter(T){ .event_store = try e.addResource(events.EventStore(T), store_ptr) };
+        var guard = e.getResourceWrite(events.EventStore(T)) orelse blk: {
+            const store = try events.EventStore(T).init(e.allocator, 16);
+            _ = try e.addResource(events.EventStore(T), store);
+            break :blk e.getResourceWrite(events.EventStore(T)) orelse return error.ResourceNotFound;
         };
-        return EventWriter(T){ .event_store = event_store };
+        return EventWriter(T){ .guard = guard, .event_store = guard.get() };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
-        _ = ptr;
-        _ = T;
+        const writer: *EventWriter(T) = @ptrCast(@alignCast(ptr));
+        writer.guard.deinit();
     }
 };
 
@@ -258,7 +262,7 @@ pub fn State(comptime StateEnum: type) type {
         pub const StateEnum_ = StateEnum;
         pub const _is_state_param = true;
 
-        state_mgr: *state.StateManager(StateEnum),
+        state_mgr: state.StateManager(StateEnum),
 
         /// Check if a specific state value is currently active
         pub fn isActive(self: *const Self, state_enum: StateEnum) bool {
@@ -296,7 +300,10 @@ pub const StateSystemParam = struct {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
-        if (e.getResource(StateManagerType)) |state_mgr| {
+        if (e.getResourceRead(StateManagerType)) |guard_const| {
+            var guard = guard_const;
+            const state_mgr = guard.get().*;
+            guard.deinit();
             return State(StateEnum){ .state_mgr = state_mgr };
         }
 
@@ -322,7 +329,7 @@ pub fn NextState(comptime StateEnum: type) type {
         pub const StateEnum_ = StateEnum;
         pub const _is_next_state_param = true;
 
-        state_mgr: *state.StateManager(StateEnum),
+        state_mgr: state.StateManager(StateEnum),
 
         /// Transition to a specific state value immediately
         pub fn set(self: *Self, state_enum: StateEnum) error{StateNotRegistered}!void {
@@ -353,32 +360,22 @@ pub const NextStateSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime StateEnum: type) anyerror!*NextState(StateEnum) {
         const StateManagerType = state.StateManager(StateEnum);
-
-        // Get or create the StateManager resource for this specific enum type
-        const state_mgr = e.getResource(StateManagerType) orelse return error.StateManagerNotFound;
-
-        // Get or create NextState instance for this enum type
-        const NextStateType = NextState(StateEnum);
-        if (e.getResource(NextStateType)) |next_state| {
-            return next_state;
-        }
-
-        const next_state_value = NextStateType{
-            .state_mgr = state_mgr,
-        };
-        const next_state_ptr = try e.addResource(NextStateType, next_state_value);
-
+        var guard = e.getResourceRead(StateManagerType) orelse return error.StateManagerNotFound;
+        const state_mgr = guard.get().*;
+        guard.deinit();
+        const next_state_ptr = try e.allocator.create(NextState(StateEnum));
+        next_state_ptr.* = NextState(StateEnum){ .state_mgr = state_mgr };
         return next_state_ptr;
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
-        _ = e;
-        _ = ptr;
-        _ = StateEnum;
+        const next_state: *NextState(StateEnum) = @ptrCast(@alignCast(ptr));
+        e.allocator.destroy(next_state);
     }
 };
 
 pub fn Res(comptime T: type) type {
     return struct {
+        guard: ecs.ResourceWriteGuard(T),
         ptr: *T,
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
@@ -393,15 +390,12 @@ pub fn Res(comptime T: type) type {
 pub const ResourceSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
         const type_info = @typeInfo(T);
-        if (type_info == .@"struct" and
-            type_info.@"struct".fields.len == 1 and
-            type_info.@"struct".fields[0].name.len == 3 and
-            std.mem.eql(u8, type_info.@"struct".fields[0].name[0..3], "ptr"))
-        {
-            // For Res(T), the field is ptr: *T, so we want to return T, not *T
-            const ptr_type_info = @typeInfo(type_info.@"struct".fields[0].type);
-            if (ptr_type_info == .pointer) {
-                return ptr_type_info.pointer.child;
+        if (type_info == .@"struct") {
+            if (@hasField(T, "ptr")) {
+                const ptr_type_info = @typeInfo(@TypeOf(@field(@as(T, undefined), "ptr")));
+                if (ptr_type_info == .pointer) {
+                    return ptr_type_info.pointer.child;
+                }
             }
         } else if (type_info == .pointer) {
             const Child = type_info.pointer.child;
@@ -411,16 +405,14 @@ pub const ResourceSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!Res(T) {
-        const resource_ptr = e.getResource(T) orelse return error.ResourceNotFound;
-        return Res(T){ .ptr = @constCast(resource_ptr) };
+        var guard = e.getResourceWrite(T) orelse return error.ResourceNotFound;
+        return Res(T){ .guard = guard, .ptr = guard.get() };
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
-        // Resource system params do not allocate temporary memory; nothing to free.
-        // Keep a no-op deinit so the registry can call it uniformly if present.
         _ = e;
-        _ = ptr;
-        _ = ResourceType;
+        const res_ptr: *Res(ResourceType) = @ptrCast(@alignCast(ptr));
+        res_ptr.guard.deinit();
     }
 };
 
@@ -442,8 +434,8 @@ pub const QuerySystemParam = struct {
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
-        _ = ptr;
-        _ = T;
+        const query_ptr: *T = @ptrCast(@alignCast(ptr));
+        query_ptr.deinit();
     }
 };
 
@@ -486,6 +478,7 @@ pub const SingleSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
         var q = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+        defer q.deinit();
         const first = q.next() orelse return error.SingleFoundNoMatches;
         // Ensure there is exactly one match
         if (q.next() != null) {
@@ -501,34 +494,30 @@ pub const SingleSystemParam = struct {
     }
 };
 
-pub const Relations = @import("relations.zig").RelationManager;
+pub const Relations = ecs.ResourceWriteGuard(@import("relations.zig").RelationManager);
 
 /// Relations SystemParam analyzer and applier
 /// Provides access to the RelationManager resource
 pub const RelationsSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        }
         if (T == relations_mod.RelationManager) {
             return T;
         }
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Relations {
+    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!Relations {
         if (e.hasResource(relations_mod.RelationManager) == false) {
             const rel_mgr = relations_mod.RelationManager.init(e.allocator);
-            return try e.addResource(relations_mod.RelationManager, rel_mgr);
+            _ = try e.addResource(relations_mod.RelationManager, rel_mgr);
         }
-        return e.getResource(relations_mod.RelationManager) orelse error.RelationsManagerNotFound;
+        return e.getResourceWrite(relations_mod.RelationManager) orelse error.RelationsManagerNotFound;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
-        _ = ptr;
+        const rel_ptr: *Relations = @ptrCast(@alignCast(ptr));
+        rel_ptr.deinit();
         _ = T;
     }
 };
@@ -700,7 +689,8 @@ test "ResourceSystemParam basic" {
     defer ecs_instance.deinit();
     const value: i32 = 42;
     _ = try ecs_instance.addResource(i32, value);
-    const res = try ResourceSystemParam.apply(&ecs_instance, i32);
+    var res = try ResourceSystemParam.apply(&ecs_instance, i32);
+    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&res)), i32);
     try std.testing.expect(res.ptr.* == 42);
 }
 
@@ -717,7 +707,8 @@ test "EventReaderSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const reader = try EventReaderSystemParam.apply(&ecs_instance, u32);
+    var reader = try EventReaderSystemParam.apply(&ecs_instance, u32);
+    defer EventReaderSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&reader)), u32);
     try std.testing.expect(@intFromPtr(reader.event_store) != 0);
 }
 
@@ -725,7 +716,8 @@ test "EventWriterSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const writer = try EventWriterSystemParam.apply(&ecs_instance, u32);
+    var writer = try EventWriterSystemParam.apply(&ecs_instance, u32);
+    defer EventWriterSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&writer)), u32);
     try std.testing.expect(@intFromPtr(writer.event_store) != 0);
 }
 
@@ -776,19 +768,20 @@ test "RelationsSystemParam basic" {
     const a = manager.create(.{});
     const b = manager.create(.{});
 
-    const rel = try RelationsSystemParam.apply(&manager, *relations_mod.RelationManager);
+    var rel = try RelationsSystemParam.apply(&manager, *relations_mod.RelationManager);
+    defer rel.deinit();
 
     // Add relation a -> b using Child
-    try rel.add(&manager, a, b, Child);
+    try rel.get().add(&manager, a, b, Child);
 
     // Index should be created and queryable
-    const children = rel.getChildren(b, Child);
+    const children = rel.get().getChildren(b, Child);
     try std.testing.expect(children.len == 1);
     try std.testing.expect(children[0].eql(a));
 
-    try std.testing.expect(try rel.has(&manager, a, b, Child));
+    try std.testing.expect(try rel.get().has(&manager, a, b, Child));
 
-    const parent = try rel.getParent(&manager, a, Child);
+    const parent = try rel.get().getParent(&manager, a, Child);
     try std.testing.expect(parent.?.eql(b));
 }
 
@@ -864,8 +857,9 @@ test "CommandsSystemParam advanced" {
     try std.testing.expect(res == null);
 
     // Check relation was added then removed (not present)
-    const rel_mgr = manager.getResource(relations_mod.RelationManager).?;
-    try std.testing.expect(!(try rel_mgr.has(&manager, entity2, entity3, Child)));
+    var rel_guard = manager.getResourceWrite(relations_mod.RelationManager).?;
+    defer rel_guard.deinit();
+    try std.testing.expect(!(try rel_guard.get().has(&manager, entity2, entity3, Child)));
 }
 
 test "Commands deferred entity creation" {

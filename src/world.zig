@@ -38,13 +38,17 @@ pub const World = struct {
     /// world.add(entity, .{ Position{ .x = 0, .y = 0 }, Velocity{ .x = 1, .y = 1 } });
     /// ```
     pub fn add(self: *World, entity: Entity, values: anytype) error{OutOfMemory}!void {
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
+
         const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
         comptime if (info != .@"struct" or !info.@"struct".is_tuple) @compileError(std.fmt.comptimePrint("values must be a tuple of component instances: {s}", .{@typeName(components_type)}));
         const field_count = info.@"struct".fields.len;
 
         // Check if entity exists (migration path)
-        if (self.archetypes.get(entity)) |entry| {
+        if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             // Slow: Gather new component info, using heap-allocated buffers for data
             var new_components: [field_count]ComponentInstance = undefined;
             var heap_data: [field_count][]u8 = undefined;
@@ -133,8 +137,8 @@ pub const World = struct {
             const hashes_heap = try self.allocator.alloc(u64, hashes.len);
             @memmove(hashes_heap, hashes);
             const signature_mig = ArchetypeSignature{ .types = hashes_heap };
-            self.remove(entity); // Remove from old archetype before adding to new
-            try self.archetypes.add(entity, signature_mig, sizes_mig, data_mig);
+            removeWithStorage(storage, entity); // Remove from old archetype before adding to new
+            try self.archetypes.addWithStorage(storage, entity, signature_mig, sizes_mig, data_mig);
             // Free the migration signature's types after use
             self.allocator.free(signature_mig.types);
         } else {
@@ -145,7 +149,7 @@ pub const World = struct {
                 const signature = ArchetypeSignature{ .types = empty_hashes };
                 const empty_sizes: []const usize = &[_]usize{};
                 const empty_data: [][]const u8 = &[_][]const u8{};
-                try self.archetypes.add(entity, signature, empty_sizes, @constCast(empty_data));
+                try self.archetypes.addWithStorage(storage, entity, signature, empty_sizes, @constCast(empty_data));
                 return;
             }
 
@@ -153,7 +157,8 @@ pub const World = struct {
             comptime var sorted_indices: [field_count]usize = undefined;
             comptime {
                 // Build array of (hash, index) pairs
-                var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
+                const Pair = struct { hash: u64, index: usize };
+                var hash_index_pairs: [field_count]Pair = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
                     const hash = reflect.typeHash(T);
@@ -161,11 +166,11 @@ pub const World = struct {
                 }
                 // Sort by hash
                 const lessThan = struct {
-                    fn f(_: void, a: @TypeOf(hash_index_pairs[0]), b: @TypeOf(hash_index_pairs[0])) bool {
+                    fn f(_: void, a: Pair, b: Pair) bool {
                         return a.hash < b.hash;
                     }
                 }.f;
-                std.sort.insertion(@TypeOf(hash_index_pairs[0]), &hash_index_pairs, {}, lessThan);
+                std.sort.insertion(Pair, &hash_index_pairs, {}, lessThan);
                 // Extract sorted indices
                 for (hash_index_pairs, 0..) |pair, i| {
                     sorted_indices[i] = pair.index;
@@ -193,7 +198,7 @@ pub const World = struct {
             // Use stack-allocated signature for lookup
             const stack_signature = ArchetypeSignature{ .types = &sorted_hashes };
 
-            const archetype_ptr = try self.archetypes.getOrCreate(stack_signature, &sizes);
+            const archetype_ptr = try self.archetypes.getOrCreateWithStorage(storage, stack_signature, &sizes);
 
             const idx = archetype_ptr.entities.items.len;
 
@@ -217,7 +222,7 @@ pub const World = struct {
             }
 
             // Update sparse set
-            try self.archetypes.entity_sparse_set.set(entity.id, .{ .archetype = archetype_ptr, .index = idx });
+            try ArchetypeStorage.setWithStorage(storage, entity, .{ .archetype = archetype_ptr, .index = idx });
         }
     }
 
@@ -229,6 +234,10 @@ pub const World = struct {
             try self.add(entity, empty_components);
             return;
         }
+
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
 
         // Build sorted arrays of hashes, sizes, and data
         var hashes = try self.allocator.alloc(u64, components.len);
@@ -271,12 +280,16 @@ pub const World = struct {
         const signature = ArchetypeSignature{ .types = signature_hashes };
 
         // Add entity to archetype
-        try self.archetypes.add(entity, signature, sizes, data);
+        try self.archetypes.addWithStorage(storage, entity, signature, sizes, data);
     }
 
     /// Add multiple entities with the same component set and values (much faster than calling add() in a loop)
     pub fn addBatch(self: *World, entities: []const Entity, values: anytype) !void {
         if (entities.len == 0) return;
+
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
 
         const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
@@ -288,18 +301,19 @@ pub const World = struct {
         comptime var sorted_indices: [field_count]usize = undefined;
         comptime {
             if (field_count > 0) {
-                var hash_index_pairs: [field_count]struct { hash: u64, index: usize } = undefined;
+                const Pair = struct { hash: u64, index: usize };
+                var hash_index_pairs: [field_count]Pair = undefined;
                 for (info.@"struct".fields, 0..) |field, i| {
                     const T = field.type;
                     const comp_info = reflect.getReflectInfo(T).type;
                     hash_index_pairs[i] = .{ .hash = comp_info.hash, .index = i };
                 }
                 const lessThan = struct {
-                    fn f(_: void, a: @TypeOf(hash_index_pairs[0]), b: @TypeOf(hash_index_pairs[0])) bool {
+                    fn f(_: void, a: Pair, b: Pair) bool {
                         return a.hash < b.hash;
                     }
                 }.f;
-                std.sort.insertion(@TypeOf(hash_index_pairs[0]), &hash_index_pairs, {}, lessThan);
+                std.sort.insertion(Pair, &hash_index_pairs, {}, lessThan);
                 for (hash_index_pairs, 0..) |pair, i| {
                     sorted_indices[i] = pair.index;
                 }
@@ -325,7 +339,7 @@ pub const World = struct {
         const stack_signature = ArchetypeSignature{ .types = &sorted_hashes };
 
         // Get or create archetype
-        const archetype_ptr = try self.archetypes.getOrCreate(stack_signature, &sizes);
+        const archetype_ptr = try self.archetypes.getOrCreateWithStorage(storage, stack_signature, &sizes);
 
         // Reserve capacity in archetype for batch
         try archetype_ptr.entities.ensureTotalCapacity(self.allocator, archetype_ptr.entities.items.len + entities.len);
@@ -344,7 +358,7 @@ pub const World = struct {
             entries[i] = EntityMapEntry{ .archetype = archetype_ptr, .index = archetype_ptr.entities.items.len + i };
             ids[i] = entity.id;
         }
-        try self.archetypes.entity_sparse_set.insertMany(ids, entries);
+        try ArchetypeStorage.insertManyWithStorage(storage, ids, entries);
 
         for (entities) |entity| {
             const idx = archetype_ptr.entities.items.len;
@@ -365,7 +379,10 @@ pub const World = struct {
     /// Get a pointer to component T for an entity, or null if not present
     pub fn getPtr(self: *World, entity: Entity, comptime T: type) ?*T {
         const info = reflect.getReflectInfo(T).type;
-        if (self.archetypes.get(entity)) |entry| {
+        var storage_guard = self.archetypes.readGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
+        if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const arch = entry.archetype;
             var idx: ?usize = null;
             for (arch.signature.types, 0..) |h, i| {
@@ -402,7 +419,10 @@ pub const World = struct {
     ///
     /// Caller is responsible for freeing the returned array
     pub fn getAllComponents(self: *World, allocator: std.mem.Allocator, entity: Entity) error{OutOfMemory}![]ComponentInstance {
-        if (self.archetypes.get(entity)) |entry| {
+        var storage_guard = self.archetypes.readGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
+        if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const arch = entry.archetype;
             const entity_index = entry.index;
 
@@ -440,7 +460,13 @@ pub const World = struct {
 
     /// Remove an entity entirely from the ECS
     pub fn remove(self: *World, entity: Entity) void {
-        if (self.archetypes.get(entity)) |entry| {
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        removeWithStorage(storage_guard.get(), entity);
+    }
+
+    fn removeWithStorage(storage: *ArchetypeStorage.Inner, entity: Entity) void {
+        if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const arch = entry.archetype;
             const idx = entry.index;
             const last_idx = arch.entities.items.len - 1;
@@ -457,15 +483,18 @@ pub const World = struct {
             }
             if (last_idx != idx) {
                 const swapped_entity = arch.entities.items[idx];
-                self.archetypes.set(swapped_entity, .{ .archetype = arch, .index = idx }) catch {};
+                ArchetypeStorage.setWithStorage(storage, swapped_entity, .{ .archetype = arch, .index = idx }) catch {};
             }
-            self.archetypes.remove(entity);
+            ArchetypeStorage.removeWithStorage(storage, entity);
         }
     }
 
     /// Remove a single component T from an entity by migrating it to a new archetype without T
     pub fn removeComponent(self: *World, entity: Entity, comptime T: type) error{OutOfMemory}!void {
-        if (self.archetypes.get(entity)) |entry| {
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
+        if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const src_arch = entry.archetype;
             const src_idx = entry.index;
             // Build new signature: remove T's hash from the current signature
@@ -497,9 +526,9 @@ pub const World = struct {
             const dst_data = new_data.items[0..n];
             const dst_signature = ArchetypeSignature{ .types = dst_types_heap };
             // Remove from old archetype first
-            self.remove(entity);
+            removeWithStorage(storage, entity);
             // Add to new archetype
-            self.archetypes.add(entity, dst_signature, dst_sizes, dst_data) catch return;
+            self.archetypes.addWithStorage(storage, entity, dst_signature, dst_sizes, dst_data) catch return;
             // Free the heap-allocated signature.types after use
             self.allocator.free(dst_signature.types);
         }

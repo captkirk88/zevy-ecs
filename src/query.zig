@@ -47,10 +47,12 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
 
     return struct {
         storage: *archetype_storage.ArchetypeStorage,
+        guard: archetype_storage.ArchetypeStorage.ReadGuard,
         arch_iter: std.HashMap(archetype_mod.ArchetypeSignature, *archetype_mod.Archetype, archetype_storage.Context, 80).Iterator,
         entity_index: usize,
         current_archetype: ?*archetype_mod.Archetype,
         component_indices: [include_info.@"struct".fields.len]usize,
+        guard_released: bool,
 
         /// Returns a debug string representation of the Query type (only in Debug builds)
         pub const debugInfo = if (builtin.mode == .Debug) struct {
@@ -81,59 +83,64 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
         pub const ExcludeTypesParam = ExcludeTypes;
         pub const IncludeTypesTupleType = ret: {
             const is_tuple = include_info.@"struct".is_tuple;
-            const fields = blk: {
-                var f: [include_info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
-                for (include_info.@"struct".fields, 0..) |field, i| {
-                    const T = field.type;
-                    // Handle case where T is 'type' itself (when passing tuples like .{Position})
-                    // In this case, we need to extract the actual type from IncludeTypes
-                    const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
-                    var field_type: type = undefined;
-                    // Determine field type based on whether it's optional or not
-                    if (isOptionalType(T) and T != type) {
-                        if (component_type == Entity) {
-                            @compileError("Query field '" ++ field.name ++ "' cannot be ?Entity. Entity is always available in query results and should never be optional.");
-                        } else {
-                            field_type = ?*component_type;
-                        }
-                    } else if (@typeInfo(T) == .pointer) {
-                        @compileError(std.fmt.comptimePrint("Query includes/excludes must be value types {s}", @typeName(T)));
+            var field_names: [include_info.@"struct".fields.len][:0]const u8 = undefined;
+            var field_types: [include_info.@"struct".fields.len]type = undefined;
+            var field_attrs: [include_info.@"struct".fields.len]std.builtin.Type.StructField.Attributes = undefined;
+            for (include_info.@"struct".fields, 0..) |field, i| {
+                const T = field.type;
+                // Handle case where T is 'type' itself (when passing tuples like .{Position})
+                // In this case, we need to extract the actual type from IncludeTypes
+                const component_type = if (T == type) @field(IncludeTypes, field.name) else getComponentType(T);
+                var field_type: type = undefined;
+                // Determine field type based on whether it's optional or not
+                if (isOptionalType(T) and T != type) {
+                    if (component_type == Entity) {
+                        @compileError("Query field '" ++ field.name ++ "' cannot be ?Entity. Entity is always available in query results and should never be optional.");
                     } else {
-                        if (component_type == Entity) {
-                            field_type = Entity;
-                        } else {
-                            field_type = *component_type;
-                        }
+                        field_type = ?*component_type;
                     }
-                    f[i] = std.builtin.Type.StructField{
-                        .name = field.name,
-                        .type = field_type,
-                        .default_value_ptr = null,
-                        .is_comptime = false,
-                        .alignment = @alignOf(field_type),
-                    };
+                } else if (@typeInfo(T) == .pointer) {
+                    @compileError(std.fmt.comptimePrint("Query includes/excludes must be value types {s}", @typeName(T)));
+                } else {
+                    if (component_type == Entity) {
+                        field_type = Entity;
+                    } else {
+                        field_type = *component_type;
+                    }
                 }
-                break :blk f;
-            };
-            break :ret @Type(.{ .@"struct" = .{
-                .layout = .auto,
-                .fields = &fields,
-                .decls = &[_]std.builtin.Type.Declaration{},
-                .is_tuple = is_tuple,
-            } });
+                field_names[i] = field.name;
+                field_types[i] = field_type;
+                field_attrs[i] = .{
+                    .@"comptime" = false,
+                    .@"align" = @alignOf(field_type),
+                    .default_value_ptr = null,
+                };
+            }
+            if (is_tuple) break :ret @Tuple(&field_types);
+            break :ret @Struct(.auto, null, &field_names, &field_types, &field_attrs);
         };
         const IncludesEntity = includesEntity(IncludeTypes);
 
         pub fn init(storage: *archetype_storage.ArchetypeStorage) @This() {
+            var guard = storage.readGuard();
             var self = @This(){
                 .storage = storage,
-                .arch_iter = storage.archetypes.iterator(),
+                .guard = guard,
+                .arch_iter = guard.get().archetypes.iterator(),
                 .entity_index = 0,
                 .current_archetype = null,
                 .component_indices = undefined,
+                .guard_released = false,
             };
             self.advanceToNextMatchingArchetype();
             return self;
+        }
+
+        pub fn deinit(self: *@This()) void {
+            if (!self.guard_released) {
+                self.guard.deinit();
+                self.guard_released = true;
+            }
         }
 
         /// Get the current entity in the iteration

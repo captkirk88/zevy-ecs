@@ -12,8 +12,10 @@ test "ArchetypeStorage - init and deinit" {
     var storage = ArchetypeStorage.init(allocator);
     defer storage.deinit();
 
-    try std.testing.expect(storage.archetypes.count() == 0);
-    try std.testing.expect(storage.entity_sparse_set.count() == 0);
+    var guard = storage.readGuard();
+    defer guard.deinit();
+    try std.testing.expect(guard.get().archetypes.count() == 0);
+    try std.testing.expect(guard.get().entity_sparse_set.count() == 0);
 }
 
 test "ArchetypeStorage - getOrCreate creates new" {
@@ -29,8 +31,11 @@ test "ArchetypeStorage - getOrCreate creates new" {
 
     const archetype = try storage.getOrCreate(signature, sizes);
 
+    var guard = storage.readGuard();
+    defer guard.deinit();
+
     try std.testing.expect(archetype.signature.types.len == 2);
-    try std.testing.expect(storage.archetypes.count() == 1);
+    try std.testing.expect(guard.get().archetypes.count() == 1);
 }
 
 test "ArchetypeStorage - getOrCreate returns existing" {
@@ -47,8 +52,11 @@ test "ArchetypeStorage - getOrCreate returns existing" {
     const archetype1 = try storage.getOrCreate(signature, sizes);
     const archetype2 = try storage.getOrCreate(signature, sizes);
 
+    var guard = storage.readGuard();
+    defer guard.deinit();
+
     try std.testing.expect(archetype1 == archetype2);
-    try std.testing.expect(storage.archetypes.count() == 1);
+    try std.testing.expect(guard.get().archetypes.count() == 1);
 }
 
 test "ArchetypeStorage - multiple different archetypes" {
@@ -72,7 +80,10 @@ test "ArchetypeStorage - multiple different archetypes" {
     const sig3 = ArchetypeSignature{ .types = types3 };
     _ = try storage.getOrCreate(sig3, &[_]usize{ 16, 16, 16 });
 
-    try std.testing.expect(storage.archetypes.count() == 3);
+    var guard = storage.readGuard();
+    defer guard.deinit();
+
+    try std.testing.expect(guard.get().archetypes.count() == 3);
 }
 
 test "ArchetypeStorage - add" {
@@ -202,7 +213,9 @@ test "ArchetypeStorage - setEntityEntry grows sparse array" {
     try storage.set(entity, entry);
 
     // Sparse set should contain this entity
-    try std.testing.expect(storage.entity_sparse_set.contains(10000));
+    var guard = storage.readGuard();
+    defer guard.deinit();
+    try std.testing.expect(guard.get().entity_sparse_set.contains(10000));
 
     const retrieved = storage.get(entity);
     try std.testing.expect(retrieved != null);
@@ -336,7 +349,7 @@ test "ArchetypeStorage - stress test many entities" {
     }
 
     // Verify sparse set contains all entities
-    try std.testing.expect(storage.entity_sparse_set.count() == count);
+    try std.testing.expect(storage.entityCount() == count);
 
     // Spot check some entities
     for ([_]usize{ 0, 1000, 10000, 50000, 99999 }) |i| {
