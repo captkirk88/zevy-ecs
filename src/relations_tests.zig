@@ -473,7 +473,9 @@ test "RelationManager - auto index update when Relation component added directly
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    var rel_guard = manager.getResourceWrite(RelationManager).?;
+    var rel_ref = manager.getResource(RelationManager).?;
+    defer rel_ref.deinit();
+    var rel_guard = rel_ref.lock();
     defer rel_guard.deinit();
     const rel_manager = rel_guard.get();
 

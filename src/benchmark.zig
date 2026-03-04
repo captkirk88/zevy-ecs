@@ -1,7 +1,7 @@
 const std = @import("std");
 const mem = @import("zevy_mem");
 
-const CountingAllocator = mem.CountingAllocator;
+const CountingAllocator = mem.allocators.CountingAllocator;
 
 /// Output format for benchmark results
 pub const OutputFormat = enum {
@@ -82,7 +82,11 @@ pub const Benchmark = struct {
         errdefer self.base_allocator.free(name_copy);
 
         self.counting_allocator.reset();
-        const start = std.time.nanoTimestamp();
+        // std.Io.Threaded.now() ignores the Threaded userdata pointer, so an
+        // undefined local is safe here – we only need a valid vtable for timing.
+        var threaded: std.Io.Threaded = undefined;
+        const io = threaded.ioBasic();
+        const start = std.Io.Timestamp.now(io, std.Io.Clock.awake);
         var i: usize = 0;
         while (i < ops) : (i += 1) {
             const return_type = @typeInfo(@TypeOf(func)).@"fn".return_type;
@@ -97,8 +101,8 @@ pub const Benchmark = struct {
                 _ = @call(.auto, func, args);
             }
         }
-        const end = std.time.nanoTimestamp();
-        const total_duration = @as(u64, @intCast(end - start));
+        const end = std.Io.Timestamp.now(io, std.Io.Clock.awake);
+        const total_duration = @as(u64, @intCast(start.durationTo(end).nanoseconds));
         const total_bytes = self.counting_allocator.bytes_allocated;
         const per_op_ns = if (ops > 0) total_duration / ops else 0;
         const per_op_bytes = if (ops > 0) total_bytes / ops else 0;

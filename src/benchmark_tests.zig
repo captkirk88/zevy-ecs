@@ -260,7 +260,7 @@ test "ECS Benchmark - Mixed Systems" {
     const allocator = std.testing.allocator;
     var bench = Benchmark.initWithAllocator(
         allocator,
-        mem.CountingAllocator.init(std.heap.page_allocator),
+        mem.allocators.CountingAllocator.init(std.heap.page_allocator),
     );
     defer {
         bench.deinit();
@@ -324,7 +324,7 @@ const Transform = struct {
 };
 
 // Setup hierarchical scene graph (game objects with parent-child relationships)
-fn setupSceneGraph(manager: *Manager, rel: *root.params.Relations, count: usize) !std.ArrayList(Entity) {
+fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, count: usize) !std.ArrayList(Entity) {
     const allocator = manager.allocator;
     var all_entities = try std.ArrayList(Entity).initCapacity(allocator, count);
 
@@ -384,7 +384,6 @@ fn setupSceneGraph(manager: *Manager, rel: *root.params.Relations, count: usize)
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
     commands: *Commands,
-    rel: *root.params.Relations,
     query: Query(.{ Transform, relations.Relation(Child) }, .{}),
 ) void {
     // Query all entities that have Transform and a Child relation (children with parents)
@@ -409,8 +408,6 @@ fn systemUpdateTransforms(
         transform.world_y = parent_world_y + transform.local_y;
         transform.world_z = parent_world_z + transform.local_z;
     }
-
-    std.log.info("Relations index count: {d}", .{rel.indexCount()});
 }
 
 // Wrapper for benchmarking system execution
@@ -432,10 +429,21 @@ test "ECS Benchmark - Scene Graph Relations" {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
-        // Get Relations system parameter (creates RelationManager resource automatically)
-        const rel = try root.DefaultParamRegistry.apply(&manager, *root.params.Relations);
-
-        var entities = try setupSceneGraph(&manager, rel, count);
+        // Acquire Relations, build the scene graph, then release the lock before benchmarking.
+        // The system being benchmarked also acquires a lock on RelationManager, so
+        // holding the lock here while running bench.run() would deadlock.
+        var entities = blk: {
+            const rel = manager.getResource(root.relations.RelationManager);
+            if (rel) |r| {
+                defer r.deinit(); // release Arc ref when block exits
+                var rel_lock = r.lock();
+                defer rel_lock.deinit();
+                break :blk try setupSceneGraph(&manager, rel_lock.get(), count);
+            } else {
+                std.debug.print("Failed to acquire RelationManager for setup\n", .{});
+                break :blk try std.ArrayList(Entity).initCapacity(allocator, 0);
+            }
+        };
         defer entities.deinit(bench.allocator());
 
         // Create system that uses Query with Relation component
@@ -444,7 +452,7 @@ test "ECS Benchmark - Scene Graph Relations" {
         const label = try std.fmt.allocPrint(allocator, "Scene Graph {d} Entities", .{count});
         defer allocator.free(label);
 
-        // Benchmark running the system
+        // Benchmark running the system (acquires its own write lock on RelationManager)
         const result = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
         Benchmark.printResult(result, .markdown);
     }

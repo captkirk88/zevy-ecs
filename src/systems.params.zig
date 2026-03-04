@@ -1,5 +1,6 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
+const zevy_mem = @import("zevy_mem");
 
 const events = @import("events.zig");
 const systems = @import("systems.zig");
@@ -96,7 +97,8 @@ pub fn EventReader(comptime T: type) type {
         const Self = @This();
         pub const EventType = T;
         pub const is_event_reader = true;
-        guard: ecs.ResourceWriteGuard(events.EventStore(T)),
+        _ref: ecs.Ref(events.EventStore(T)),
+        _guard: zevy_mem.lock.Mutex(events.EventStore(T)).Guard,
         event_store: *events.EventStore(T),
         iterator: ?events.EventStore(T).Iterator = null,
 
@@ -171,17 +173,19 @@ pub const EventReaderSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventReader(T) {
-        var guard = e.getResourceWrite(events.EventStore(T)) orelse blk: {
+        var ref = e.getResource(events.EventStore(T)) orelse blk: {
             const store = try events.EventStore(T).init(e.allocator, 16);
             _ = try e.addResource(events.EventStore(T), store);
-            break :blk e.getResourceWrite(events.EventStore(T)) orelse return error.ResourceNotFound;
+            break :blk e.getResource(events.EventStore(T)) orelse return error.ResourceNotFound;
         };
-        return EventReader(T){ .guard = guard, .event_store = guard.get() };
+        const guard = ref.lock();
+        return EventReader(T){ ._ref = ref, ._guard = guard, .event_store = guard.get() };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
         const reader: *EventReader(T) = @ptrCast(@alignCast(ptr));
-        reader.guard.deinit();
+        reader._guard.deinit();
+        reader._ref.deinit();
     }
 };
 
@@ -191,7 +195,8 @@ pub fn EventWriter(comptime T: type) type {
         const Self = @This();
         pub const EventType = T;
         pub const is_event_writer = true;
-        guard: ecs.ResourceWriteGuard(events.EventStore(T)),
+        _ref: ecs.Ref(events.EventStore(T)),
+        _guard: zevy_mem.lock.Mutex(events.EventStore(T)).Guard,
         event_store: *events.EventStore(T),
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
@@ -233,17 +238,19 @@ pub const EventWriterSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventWriter(T) {
-        var guard = e.getResourceWrite(events.EventStore(T)) orelse blk: {
+        var ref = e.getResource(events.EventStore(T)) orelse blk: {
             const store = try events.EventStore(T).init(e.allocator, 16);
             _ = try e.addResource(events.EventStore(T), store);
-            break :blk e.getResourceWrite(events.EventStore(T)) orelse return error.ResourceNotFound;
+            break :blk e.getResource(events.EventStore(T)) orelse return error.ResourceNotFound;
         };
-        return EventWriter(T){ .guard = guard, .event_store = guard.get() };
+        const guard = ref.lock();
+        return EventWriter(T){ ._ref = ref, ._guard = guard, .event_store = guard.get() };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = e;
         const writer: *EventWriter(T) = @ptrCast(@alignCast(ptr));
-        writer.guard.deinit();
+        writer._guard.deinit();
+        writer._ref.deinit();
     }
 };
 
@@ -300,10 +307,11 @@ pub const StateSystemParam = struct {
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
-        if (e.getResourceRead(StateManagerType)) |guard_const| {
-            var guard = guard_const;
+        if (e.getResource(StateManagerType)) |ref| {
+            defer ref.deinit();
+            var guard = ref.lock();
+            defer guard.deinit();
             const state_mgr = guard.get().*;
-            guard.deinit();
             return State(StateEnum){ .state_mgr = state_mgr };
         }
 
@@ -360,7 +368,9 @@ pub const NextStateSystemParam = struct {
 
     pub fn apply(e: *ecs.Manager, comptime StateEnum: type) anyerror!*NextState(StateEnum) {
         const StateManagerType = state.StateManager(StateEnum);
-        var guard = e.getResourceRead(StateManagerType) orelse return error.StateManagerNotFound;
+        const ref = e.getResource(StateManagerType) orelse return error.StateManagerNotFound;
+        defer ref.deinit();
+        var guard = ref.lock();
         const state_mgr = guard.get().*;
         guard.deinit();
         const next_state_ptr = try e.allocator.create(NextState(StateEnum));
@@ -373,16 +383,36 @@ pub const NextStateSystemParam = struct {
     }
 };
 
+/// Opaque system parameter providing exclusive Mutex-guarded access to a resource of type T.
+/// Fields are hidden – use `res.get()` to obtain a mutable pointer to the value.
+/// The lock is held for the entire duration of the system invocation and released automatically.
 pub fn Res(comptime T: type) type {
-    return struct {
-        guard: ecs.ResourceWriteGuard(T),
-        ptr: *T,
+    return opaque {
+        const Self = @This();
+
+        /// Marker for `ResourceSystemParam.analyze`
+        pub const is_res = true;
+        /// The wrapped value type
+        pub const ResType = T;
+
+        /// Internal heap layout – do not use directly outside this file
+        pub const _Inner = struct {
+            ref: ecs.Ref(T),
+            guard: zevy_mem.lock.Mutex(T).Guard,
+        };
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
             pub fn get() []const u8 {
                 return "Res(" ++ @typeName(T) ++ ")";
             }
         }.get else void;
+
+        /// Get a mutable pointer to the resource value.
+        /// Valid only while this `Res` is alive (i.e. within the system function).
+        pub fn get(self: *Self) *T {
+            const inner: *_Inner = @ptrCast(@alignCast(self));
+            return inner.guard.get();
+        }
     };
 }
 
@@ -390,29 +420,27 @@ pub fn Res(comptime T: type) type {
 pub const ResourceSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
         const type_info = @typeInfo(T);
-        if (type_info == .@"struct") {
-            if (@hasField(T, "ptr")) {
-                const ptr_type_info = @typeInfo(@TypeOf(@field(@as(T, undefined), "ptr")));
-                if (ptr_type_info == .pointer) {
-                    return ptr_type_info.pointer.child;
-                }
-            }
-        } else if (type_info == .pointer) {
+        if (type_info == .pointer) {
             const Child = type_info.pointer.child;
-            return analyze(Child);
+            if (@hasDecl(Child, "is_res") and @hasDecl(Child, "ResType")) {
+                return Child.ResType;
+            }
         }
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!Res(T) {
-        var guard = e.getResourceWrite(T) orelse return error.ResourceNotFound;
-        return Res(T){ .guard = guard, .ptr = guard.get() };
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!*Res(T) {
+        const ref = e.getResource(T) orelse return error.ResourceNotFound;
+        const inner = try e.allocator.create(Res(T)._Inner);
+        inner.* = .{ .ref = ref, .guard = ref.lock() };
+        return @ptrCast(inner);
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
-        _ = e;
-        const res_ptr: *Res(ResourceType) = @ptrCast(@alignCast(ptr));
-        res_ptr.guard.deinit();
+        const inner: *Res(ResourceType)._Inner = @ptrCast(@alignCast(ptr));
+        inner.guard.deinit();
+        inner.ref.deinit();
+        e.allocator.destroy(inner);
     }
 };
 
@@ -494,31 +522,58 @@ pub const SingleSystemParam = struct {
     }
 };
 
-pub const Relations = ecs.ResourceWriteGuard(@import("relations.zig").RelationManager);
+/// Mutex-guarded handle to the RelationManager resource.
+/// Use `rel.get()` to access the `RelationManager`.
+/// Call `rel.deinit()` to release the lock and Arc reference (done automatically by the system runner).
+pub const Relations = struct {
+    _ref: ecs.Ref(relations_mod.RelationManager),
+    _guard: zevy_mem.lock.Mutex(relations_mod.RelationManager).Guard,
+
+    /// Returns a mutable pointer to the `RelationManager`.
+    pub fn get(self: *Relations) *relations_mod.RelationManager {
+        return self._guard.get();
+    }
+
+    /// Releases the lock and Arc reference.
+    pub fn deinit(self: *Relations) void {
+        self._guard.deinit();
+        self._ref.deinit();
+    }
+};
 
 /// Relations SystemParam analyzer and applier
 /// Provides access to the RelationManager resource
+/// Use as `rel: *params.Relations` in system functions.
 pub const RelationsSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        if (T == relations_mod.RelationManager) {
-            return T;
+        const type_info = @typeInfo(T);
+        if (type_info == .pointer) {
+            const Child = type_info.pointer.child;
+            // Accept *Relations
+            if (Child == Relations) return Relations;
+            // Accept *RelationManager for convenience/backward compat
+            if (Child == relations_mod.RelationManager) return Relations;
         }
         return null;
     }
 
-    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!Relations {
+    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Relations {
         if (e.hasResource(relations_mod.RelationManager) == false) {
             const rel_mgr = relations_mod.RelationManager.init(e.allocator);
             _ = try e.addResource(relations_mod.RelationManager, rel_mgr);
         }
-        return e.getResourceWrite(relations_mod.RelationManager) orelse error.RelationsManagerNotFound;
+        const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
+        const guard = ref.lock();
+        const rel_ptr = try e.allocator.create(Relations);
+        rel_ptr.* = .{ ._ref = ref, ._guard = guard };
+        return rel_ptr;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
-        _ = e;
+        _ = T;
         const rel_ptr: *Relations = @ptrCast(@alignCast(ptr));
         rel_ptr.deinit();
-        _ = T;
+        e.allocator.destroy(rel_ptr);
     }
 };
 
@@ -689,9 +744,9 @@ test "ResourceSystemParam basic" {
     defer ecs_instance.deinit();
     const value: i32 = 42;
     _ = try ecs_instance.addResource(i32, value);
-    var res = try ResourceSystemParam.apply(&ecs_instance, i32);
-    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&res)), i32);
-    try std.testing.expect(res.ptr.* == 42);
+    const res = try ResourceSystemParam.apply(&ecs_instance, i32);
+    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), i32);
+    try std.testing.expect(res.get().* == 42);
 }
 
 test "LocalSystemParam basic" {
@@ -768,8 +823,8 @@ test "RelationsSystemParam basic" {
     const a = manager.create(.{});
     const b = manager.create(.{});
 
-    var rel = try RelationsSystemParam.apply(&manager, *relations_mod.RelationManager);
-    defer rel.deinit();
+    const rel = try RelationsSystemParam.apply(&manager, *relations_mod.RelationManager);
+    defer RelationsSystemParam.deinit(&manager, @ptrCast(@alignCast(rel)), *relations_mod.RelationManager);
 
     // Add relation a -> b using Child
     try rel.get().add(&manager, a, b, Child);
@@ -857,7 +912,9 @@ test "CommandsSystemParam advanced" {
     try std.testing.expect(res == null);
 
     // Check relation was added then removed (not present)
-    var rel_guard = manager.getResourceWrite(relations_mod.RelationManager).?;
+    const rel_ref = manager.getResource(relations_mod.RelationManager).?;
+    defer rel_ref.deinit();
+    var rel_guard = rel_ref.lock();
     defer rel_guard.deinit();
     try std.testing.expect(!(try rel_guard.get().has(&manager, entity2, entity3, Child)));
 }

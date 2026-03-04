@@ -342,9 +342,9 @@ pub const Scheduler = struct {
 
         // Create cleanup system that discards handled and unhandled events (consumes them)
         const cleanup_system = struct {
-            pub fn cleanup(store_res: params.Res(events.EventStore(T))) void {
-                store_res.ptr.discardHandled();
-                store_res.ptr.discardUnhandled();
+            pub fn cleanup(store_res: *params.Res(events.EventStore(T))) void {
+                store_res.get().discardHandled();
+                store_res.get().discardUnhandled();
             }
         }.cleanup;
 
@@ -694,9 +694,9 @@ test "Scheduler assign outside scope" {
     _ = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
-        pub fn run(out: params.Res(bool)) void {
+        pub fn run(out: *params.Res(bool)) void {
             std.debug.print("Test system executed\n", .{});
-            out.ptr.* = true;
+            out.get().* = true;
         }
     }.run;
 
@@ -705,7 +705,9 @@ test "Scheduler assign outside scope" {
     // Run stages from First to PostUpdate, which includes the custom stage
     try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
 
-    var out_guard = ecs.getResourceRead(bool).?;
+    var out_ref = ecs.getResource(bool).?;
+    defer out_ref.deinit();
+    var out_guard = out_ref.lock();
     defer out_guard.deinit();
     try std.testing.expect(out_guard.get().* == true);
 }

@@ -167,7 +167,9 @@ pub const Commands = struct {
             parent: ecs.Entity,
             fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                var rel_guard = manager.getResourceWrite(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                const ref = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                defer ref.deinit();
+                var rel_guard = ref.lock();
                 defer rel_guard.deinit();
                 try rel_guard.get().add(manager, closure.child, closure.parent, RelationType);
             }
@@ -192,7 +194,9 @@ pub const Commands = struct {
             entity2: ecs.Entity,
             fn execute(data: *anyopaque, manager: *ecs.Manager) anyerror!void {
                 const closure = @as(*@This(), @ptrCast(@alignCast(data)));
-                var rel_guard = manager.getResourceWrite(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                const ref = manager.getResource(relations_mod.RelationManager) orelse return error.RelationResourceNotFound;
+                defer ref.deinit();
+                var rel_guard = ref.lock();
                 defer rel_guard.deinit();
                 try rel_guard.get().remove(manager, closure.entity1, closure.entity2, RelationType);
             }

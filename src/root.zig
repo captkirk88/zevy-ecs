@@ -16,6 +16,10 @@ pub const errors = errs.ECSError;
 pub const Manager = ecs.Manager;
 /// Entity type
 pub const Entity = ecs.Entity;
+/// Reference-counted Mutex-protected resource handle.
+/// Returned by `Manager.addResource` and `Manager.getResource`.
+/// Call `.deinit()` when done; use `.get().*.lock()` for mutable access.
+pub const Ref = ecs.Ref;
 /// World type
 pub const World = world.World;
 /// System type

@@ -42,8 +42,8 @@ const ChainCounter = struct {
 // Basic system functions
 fn simpleSystem() void {}
 
-fn resourceSystem(res: Res(DeltaTime)) void {
-    std.testing.expect(res.ptr.value == 0.016) catch unreachable;
+fn resourceSystem(res: *Res(DeltaTime)) void {
+    std.testing.expect(res.get().value == 0.016) catch unreachable;
 }
 
 fn querySystem(query: Query(struct { pos: Position }, struct {})) void {
@@ -54,10 +54,10 @@ fn querySystem(query: Query(struct { pos: Position }, struct {})) void {
     std.testing.expect(count == 5) catch unreachable;
 }
 
-fn multiParamSystem(res: Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity }, struct {})) void {
+fn multiParamSystem(res: *Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity }, struct {})) void {
     while (query.next()) |item| {
-        item.pos.x += item.vel.dx * res.ptr.value;
-        item.pos.y += item.vel.dy * res.ptr.value;
+        item.pos.x += item.vel.dx * res.get().value;
+        item.pos.y += item.vel.dy * res.get().value;
     }
 }
 
@@ -89,12 +89,12 @@ fn systemWithArgs(multiplier: i32, offset: i32) void {
     std.testing.expect(result == 14) catch unreachable; // 5 * 2 + 4 = 14
 }
 
-fn chainIncrementCounter(res: Res(ChainCounter)) void {
-    res.ptr.value += 1;
+fn chainIncrementCounter(res: *Res(ChainCounter)) void {
+    res.get().value += 1;
 }
 
-fn chainMultiplyCounter(res: Res(ChainCounter)) void {
-    res.ptr.value *= 3;
+fn chainMultiplyCounter(res: *Res(ChainCounter)) void {
+    res.get().value *= 3;
 }
 
 fn producer() u32 {
@@ -119,7 +119,7 @@ const GameState = enum { menu, playing, paused };
 
 fn actualFuncSystem(
     commands: *Commands,
-    res: Res(DeltaTime),
+    res: *Res(DeltaTime),
     local: *Local(u32),
     query: Query(struct { pos: Position }, .{Velocity}),
     single: params.Single(struct { vel: Velocity }, .{}),
@@ -141,12 +141,12 @@ fn actualFuncSystem(
     _ = relation_mgr;
 }
 
-fn mutateRes(res: Res(DeltaTime)) void {
-    res.ptr.value = 2.0;
+fn mutateRes(res: *Res(DeltaTime)) void {
+    res.get().value = 2.0;
 }
 
-fn checkRes(res: Res(DeltaTime)) void {
-    std.testing.expect(res.ptr.value == 2.0) catch unreachable;
+fn checkRes(res: *Res(DeltaTime)) void {
+    std.testing.expect(res.get().value == 2.0) catch unreachable;
 }
 
 fn errorSys() !void {
@@ -310,11 +310,13 @@ test "System - chain runs systems sequentially" {
     const counter = ChainCounter{ .value = 2 };
     _ = try manager.addResource(ChainCounter, counter);
 
-    const ChainSystems: [2]fn (res: Res(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
+    const ChainSystems: [2]fn (res: *Res(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
     const chained = systems.chain(ChainSystems, DefaultRegistry);
     _ = try chained.run(&manager, chained.ctx);
 
-    var result_guard = manager.getResourceRead(ChainCounter).?;
+    var result_ref = manager.getResource(ChainCounter).?;
+    defer result_ref.deinit();
+    var result_guard = result_ref.lock();
     defer result_guard.deinit();
     try std.testing.expect(result_guard.get().value == 9);
 }
@@ -572,6 +574,6 @@ test "SystemDebugInfo contains parameter information" {
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[6].name, "EventWriter") != null);
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[7].name, "OnAdded") != null);
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[8].name, "OnRemoved") != null);
-        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[9].name, "RelationManager") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[9].name, "Relations") != null);
     }
 }

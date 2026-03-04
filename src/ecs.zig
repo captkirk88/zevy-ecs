@@ -50,40 +50,11 @@ const ResourceEntry = struct {
     }
 };
 
-pub fn ResourceHandle(comptime T: type) type {
-    return *zevy_mem.pointers.Arc(*zevy_mem.lock.RwLock(T));
-}
-
-pub fn ResourceReadGuard(comptime T: type) type {
-    return struct {
-        arc: ResourceHandle(T),
-        guard: zevy_mem.lock.RwLock(T).ReadGuard,
-
-        pub fn deinit(self: *@This()) void {
-            self.guard.deinit();
-            self.arc.deinit();
-        }
-
-        pub fn get(self: *@This()) *const T {
-            return self.guard.get();
-        }
-    };
-}
-
-pub fn ResourceWriteGuard(comptime T: type) type {
-    return struct {
-        arc: ResourceHandle(T),
-        guard: zevy_mem.lock.RwLock(T).WriteGuard,
-
-        pub fn deinit(self: *@This()) void {
-            self.guard.deinit();
-            self.arc.deinit();
-        }
-
-        pub fn get(self: *@This()) *T {
-            return self.guard.get();
-        }
-    };
+/// Reference-counted handle to a Mutex-protected resource or shared value.
+/// Call `deinit()` when done to release the reference.
+/// Call `lock()` to acquire the guard, then `guard.get()` to access the value.
+pub fn Ref(comptime T: type) type {
+    return *zevy_mem.pointers.ArcMutex(T);
 }
 
 pub const Manager = struct {
@@ -92,10 +63,10 @@ pub const Manager = struct {
     generations: std.ArrayList(u32), // Generation per entity ID
     free_ids: std.ArrayList(u32), // Reusable entity IDs
     world: World, // Manages archetypes and component storage
-    resources: *zevy_mem.lock.RwLock(std.AutoHashMap(u64, ResourceEntry)), // TypeHash -> ResourceEntry
+    resources: *zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)), // TypeHash -> ResourceEntry
     systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
 
-    relations: ResourceHandle(relations.RelationManager),
+    relations: Ref(relations.RelationManager),
 
     // Component lifecycle event stores
     component_added: events.EventStore(ComponentEvent),
@@ -110,7 +81,7 @@ pub const Manager = struct {
             .generations = try std.ArrayList(u32).initCapacity(allocator, 1024),
             .free_ids = try std.ArrayList(u32).initCapacity(allocator, 256),
             .world = World.init(allocator),
-            .resources = try zevy_mem.lock.RwLock(std.AutoHashMap(u64, ResourceEntry)).init(allocator, std.AutoHashMap(u64, ResourceEntry).init(allocator)),
+            .resources = try zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)).init(allocator, std.AutoHashMap(u64, ResourceEntry).init(allocator)),
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
             .component_added = try events.EventStore(ComponentEvent).init(allocator, 64),
             .component_removed = try events.EventStore(ComponentEvent).init(allocator, 64),
@@ -126,7 +97,7 @@ pub const Manager = struct {
         self.generations.deinit(self.allocator);
         self.free_ids.deinit(self.allocator);
         self.world.deinit();
-        var res_guard = self.resources.lockWrite();
+        var res_guard = self.resources.lock();
         var res_it = res_guard.get().valueIterator();
         while (res_it.next()) |entry| {
             entry.deinit();
@@ -270,7 +241,7 @@ pub const Manager = struct {
         }
 
         // Remove all relations involving this entity
-        var rel_guard = self.relations.get().*.lockWrite();
+        var rel_guard = self.relations.lock();
         rel_guard.get().removeEntity(entity);
         rel_guard.deinit();
 
@@ -347,24 +318,24 @@ pub const Manager = struct {
     ///     // Handle error
     ///     return;
     /// };
-    /// res.* = MyResourceType{ .value = 100 }; // Update resource
+    /// var guard = res.get().*.lock(); defer guard.deinit(); guard.get().field = newValue;
     /// ```
-    pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!ResourceHandle(T) {
+    pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
         // Reject pointer types to avoid complexity
         if (@typeInfo(T) == .pointer) {
             @compileError("addResource does not accept pointer types. Use value types only.");
         }
 
         const type_hash = comptime reflect.typeHash(T);
-        var guard = self.resources.lockWrite();
+        var guard = self.resources.lock();
         defer guard.deinit();
         const result = try guard.get().getOrPut(type_hash);
         if (result.found_existing) return error.ResourceAlreadyExists;
 
-        const arc_ptr = try zevy_mem.pointers.Arc(T).initWithRwLock(self.allocator, value);
+        const arc_ptr = try zevy_mem.pointers.ArcMutex(T).init(self.allocator, value);
         const deinit_fn = struct {
             pub fn deinit(resource_ptr: *anyopaque) void {
-                const typed_ptr: ResourceHandle(T) = @ptrCast(@alignCast(resource_ptr));
+                const typed_ptr: Ref(T) = @ptrCast(@alignCast(resource_ptr));
                 typed_ptr.deinit();
             }
         }.deinit;
@@ -387,30 +358,17 @@ pub const Manager = struct {
     /// } else {
     ///     // Resource not found
     /// }
-    pub fn getResource(self: *Manager, comptime T: type) ?ResourceHandle(T) {
+    /// Returns a cloned `Ref(T)` handle. Caller must call `.deinit()` when done.
+    /// Use `.get().*.lock()` to acquire mutable access to the value.
+    pub fn getResource(self: *Manager, comptime T: type) ?Ref(T) {
         const type_hash = reflect.typeHash(T);
-        var guard = self.resources.lockRead();
+        var guard = self.resources.lock();
         defer guard.deinit();
         if (guard.get().get(type_hash)) |entry| {
-            const arc_ptr: ResourceHandle(T) = @ptrCast(@alignCast(entry.ptr));
+            const arc_ptr: Ref(T) = @ptrCast(@alignCast(entry.ptr));
             return arc_ptr.clone();
         }
-        return null;
-    }
 
-    pub fn getResourceRead(self: *Manager, comptime T: type) ?ResourceReadGuard(T) {
-        if (self.getResource(T)) |arc| {
-            const guard = arc.get().*.lockRead();
-            return .{ .arc = arc, .guard = guard };
-        }
-        return null;
-    }
-
-    pub fn getResourceWrite(self: *Manager, comptime T: type) ?ResourceWriteGuard(T) {
-        if (self.getResource(T)) |arc| {
-            const guard = arc.get().*.lockWrite();
-            return .{ .arc = arc, .guard = guard };
-        }
         return null;
     }
 
@@ -418,7 +376,7 @@ pub const Manager = struct {
     /// The default_value will be deinitialized if the resource already exists and has a deinit method.
     ///
     /// If no allocator is specified, defaults to the `Manager`'s allocator.
-    pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T, allocator: ?std.mem.Allocator) error{OutOfMemory}!ResourceHandle(T) {
+    pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T, allocator: ?std.mem.Allocator) error{OutOfMemory}!Ref(T) {
         if (self.getResource(T)) |res| {
             if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator})) {
                 @constCast(&default_value).deinit(allocator orelse self.allocator);
@@ -438,7 +396,7 @@ pub const Manager = struct {
     /// Check if a resource of type T exists.
     pub fn hasResource(self: *Manager, comptime T: type) bool {
         const type_hash = reflect.typeHash(T);
-        var guard = self.resources.lockRead();
+        var guard = self.resources.lock();
         defer guard.deinit();
         return guard.get().contains(type_hash);
     }
@@ -447,7 +405,7 @@ pub const Manager = struct {
     /// Only deallocates memory if it was allocated by addResource (allocated field is true).
     pub fn removeResource(self: *Manager, comptime T: type) void {
         const type_hash = reflect.typeHash(T);
-        var guard = self.resources.lockWrite();
+        var guard = self.resources.lock();
         const res = guard.get().fetchRemove(type_hash) orelse {
             guard.deinit();
             return;
@@ -458,7 +416,7 @@ pub const Manager = struct {
 
     /// List all resource type names currently stored in the ECS.
     pub fn listResourceTypes(self: *Manager, allocator: std.mem.Allocator) std.ArrayList([]const u8) {
-        var guard = self.resources.lockRead();
+        var guard = self.resources.lock();
         var types = std.ArrayList([]const u8).initCapacity(allocator, guard.get().count()) catch |err| @panic(@errorName(err));
         var it = guard.get().valueIterator();
         while (it.next()) |resource| {
@@ -727,8 +685,8 @@ test "removeSystem removes cached system" {
 
     // Define a test system that increments the counter
     const test_system = struct {
-        pub fn run(res: params.Res(TestCounter)) void {
-            res.ptr.count += 1;
+        pub fn run(res: *params.Res(TestCounter)) void {
+            res.get().count += 1;
         }
     }.run;
 
@@ -738,9 +696,11 @@ test "removeSystem removes cached system" {
     // Verify the system is cached and runs
     try std.testing.expect(ecs.systems.count() == 1);
     _ = try ecs.runSystem(handle);
-    var counter_guard = ecs.getResourceRead(TestCounter).?;
-    defer counter_guard.deinit();
-    try std.testing.expect(counter_guard.get().count == 1);
+    const ctr_ref = ecs.getResource(TestCounter).?;
+    defer ctr_ref.deinit();
+    var ctr_guard = ctr_ref.lock();
+    defer ctr_guard.deinit();
+    try std.testing.expect(ctr_guard.get().count == 1);
 
     // Remove the system
     ecs.removeSystem(handle);
@@ -761,8 +721,8 @@ test "removeSystem with same function cached twice returns same handle" {
     _ = try ecs.addResource(TestCounter, .{ .count = 0 });
 
     const test_system = struct {
-        pub fn run(_: *Manager, res: params.Res(TestCounter)) void {
-            res.ptr.count += 1;
+        pub fn run(_: *Manager, res: *params.Res(TestCounter)) void {
+            res.get().count += 1;
         }
     }.run;
 
