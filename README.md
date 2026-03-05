@@ -2,7 +2,7 @@
 
 A high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
 
-[![][license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
+[![license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
 
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0.dev-blue.svg)](https://ziglang.org/)
 
