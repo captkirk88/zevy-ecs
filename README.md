@@ -90,12 +90,6 @@ exe.root_module.addImport("zevy_ecs_benchmark", zevy_ecs.module("benchmark"));
 exe.root_module.addImport("zevy_ecs_plugins", zevy_ecs.module("plugins")); // Would recommend calling it something easier to work with.
 ```
 
-### Examples
-
-[Examples](./examples) directory.
-
-Run them with `zig build examples`.  Or use `zig build --help` to see all available examples.
-
 ### Basic Usage
 
 ```zig
