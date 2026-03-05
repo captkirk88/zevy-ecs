@@ -1,16 +1,14 @@
 # zevy_ecs
 
-zevy_ecs is a high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
-
-
+A high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
 
 [![][license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
 
-[![Zig Version](https://img.shields.io/badge/zig-0.15.1+-blue.svg)](https://ziglang.org/)
+[![Zig Version](https://img.shields.io/badge/zig-0.16.0.dev-blue.svg)](https://ziglang.org/)
 
 ## Why Zig?
 
-Zig is a modern systems programming language that offers performance, safety, and simplicity. Its powerful compile-time metaprogramming capabilities make it an excellent choice for building an ECS framework, allowing for zero-cost abstractions and type-safe system parameters. It's also easy to interoperate with C/C++ code, making it suitable for game development and other performance-critical applications. Zig is all about explicit control, Rust is about safety through it's type system. Zig can also achieve this by *programming contracts into your code* via comptime checks, testing, and careful design.
+Good question.  The std API has changed to the point I don't even know anymore.  Ultimately, Zig has it's advantages over Rust BUT the ecosystem is still very young and *rapidly* changing.  I would recommend using this library if you want to learn about ECS architecture and are comfortable with Zig's current state.  If you want a more stable, battle-tested ECS for production use, I would recommend using a Rust library like [Bevy's ECS](https://bevyengine.org/), if you can tolerate the compilation time.
 
 
 ## Features
@@ -1330,47 +1328,47 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 ### Benchmarks
 
-#### 4GHz CPU, ReleaseFast
+#### 4GHz CPU, --release=fast
 
 #### Creation
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Create 100 Entities | 3 | 23.400 us/op | 17.73 KiB/op | 6/op |
-| Create 1000 Entities | 3 | 120.033 us/op | 161.27 KiB/op | 13/op |
-| Create 10000 Entities | 3 | 983.600 us/op | 2.34 MiB/op | 27/op |
-| Create 100000 Entities | 3 | 7.279 ms/op | 21.96 MiB/op | 40/op |
-| Create 1000000 Entities | 3 | 71.723 ms/op | 235.59 MiB/op | 56/op |
+| Create 100 Entities | 3 | 30.600 us/op | 17.52 KiB/op | 6/op |
+| Create 1000 Entities | 3 | 137.100 us/op | 173.02 KiB/op | 13/op |
+| Create 10000 Entities | 3 | 1.056 ms/op | 2.44 MiB/op | 27/op |
+| Create 100000 Entities | 3 | 8.539 ms/op | 20.70 MiB/op | 40/op |
+| Create 1000000 Entities | 3 | 87.941 ms/op | 244.25 MiB/op | 56/op |
 
 #### Batch Creation
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Create 100 Entities | 3 | 19.500 us/op | 19.87 KiB/op | 6/op |
-| Create 1000 Entities | 3 | 96.433 us/op | 147.28 KiB/op | 9/op |
-| Create 10000 Entities | 3 | 541.600 us/op | 1.66 MiB/op | 11/op |
-| Create 100000 Entities | 3 | 4.086 ms/op | 16.42 MiB/op | 11/op |
-| Create 1000000 Entities | 3 | 39.222 ms/op | 167.03 MiB/op | 12/op |
+| Create 100 Entities | 3 | 16.833 us/op | 18.52 KiB/op | 6/op |
+| Create 1000 Entities | 3 | 64.533 us/op | 101.70 KiB/op | 7/op |
+| Create 10000 Entities | 3 | 423.800 us/op | 1.06 MiB/op | 9/op |
+| Create 100000 Entities | 3 | 3.306 ms/op | 11.27 MiB/op | 9/op |
+| Create 1000000 Entities | 3 | 32.509 ms/op | 116.36 MiB/op | 9/op |
 
 #### Mixed Systems
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Run 7 Systems on 100 Entities | 3 | 2.833 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 1000 Entities | 3 | 5.666 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 10000 Entities | 3 | 48.933 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 100000 Entities | 3 | 484.833 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 1000000 Entities | 3 | 5.354 ms/op | 0 B/op | 0/op |
+| Run 7 Systems on 100 Entities | 3 | 3.300 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 1000 Entities | 3 | 6.033 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 10000 Entities | 3 | 50.133 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 100000 Entities | 3 | 499.266 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 1000000 Entities | 3 | 5.423 ms/op | 0 B/op | 0/op |
 
 #### Relations
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Scene Graph 100 Entities | 3 | 1.100 us/op | 16 B/op | 0/op |
-| Scene Graph 1000 Entities | 3 | 6.633 us/op | 16 B/op | 0/op |
-| Scene Graph 10000 Entities | 3 | 59.233 us/op | 16 B/op | 0/op |
-| Scene Graph 100000 Entities | 3 | 578.166 us/op | 16 B/op | 0/op |
-| Scene Graph 1000000 Entities | 3 | 5.975 ms/op | 16 B/op | 0/op |
+| Scene Graph 100 Entities | 3 | 2.600 us/op | 48 B/op | 1/op |
+| Scene Graph 1000 Entities | 3 | 12.500 us/op | 48 B/op | 1/op |
+| Scene Graph 10000 Entities | 3 | 121.433 us/op | 48 B/op | 1/op |
+| Scene Graph 100000 Entities | 3 | 1.091 ms/op | 48 B/op | 1/op |
+| Scene Graph 1000000 Entities | 3 | 11.020 ms/op | 48 B/op | 1/op |
 
 ## Projects
 
