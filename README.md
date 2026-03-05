@@ -28,7 +28,6 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 
 - [Quick Start](#quick-start)
     - [Installation](#installation)
-    - [Examples](#examples)
     - [Basic Usage](#basic-usage)
 - [Core Concepts](#core-concepts)
     - [Entities](#entities)
