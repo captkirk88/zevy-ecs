@@ -2,8 +2,6 @@
 
 A high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
 
-[![license]](https://github.com/captkirk88/zevy-ecs/blob/main/LICENSE)
-
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0.dev-blue.svg)](https://ziglang.org/)
 
 ## Why Zig?
@@ -1378,4 +1376,6 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 Contributions are welcome!
 Please describe issues in detail. Bug reports, feature requests, etc. Pull requests are also welcome.
 
-[license]: https://img.shields.io/github/license/captkirk88/zevy-ecs?style=for-the-badge&logo=opensourcehardware&label=License&logoColor=C0CAF5&labelColor=414868&color=8c73cc
+## License
+MIT
+See [LICENSE](LICENSE) for more details.
