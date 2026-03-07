@@ -79,7 +79,7 @@ test "ComponentInstance - readFrom with insufficient data" {
     // Try to read from truncated buffer - should fail
     var reader = std.Io.Reader.fixed(truncated);
     const result = serialize.ComponentInstance.readFrom(&reader, allocator);
-    try testing.expectError(error.UnexpectedEndOfStream, result);
+    try testing.expectError(error.EndOfStream, result);
 }
 
 test "EntityInstance - fromEntity and toEntity" {

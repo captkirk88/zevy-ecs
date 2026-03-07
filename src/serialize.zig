@@ -29,22 +29,22 @@ pub const ComponentInstance = struct {
     }
 
     /// Write this component to any std.Io.Writer
-    pub fn writeTo(self: *const ComponentInstance, writer: *std.Io.Writer) anyerror!void {
-        try writer.writeInt(u64, self.hash, .little);
-        try writer.writeInt(usize, self.size, .little);
+    pub fn writeTo(self: *const ComponentInstance, writer: *std.Io.Writer) error{WriteFailed}!void {
+        try writer.writeInt(u64, self.hash, .big);
+        try writer.writeInt(usize, self.size, .big);
         try writer.writeAll(self.data);
     }
 
     /// Create a ComponentInstance from any std.Io.Reader
     ///
     /// The caller is responsible for freeing the returned data
-    pub fn readFrom(reader: *std.Io.Reader, allocator: std.mem.Allocator) anyerror!ComponentInstance {
-        const comp_hash = try reader.takeInt(u64, .little);
-        const comp_size = try reader.takeInt(usize, .little);
+    pub fn readFrom(reader: *std.Io.Reader, allocator: std.mem.Allocator) error{ ReadFailed, EndOfStream, OutOfMemory }!ComponentInstance {
+        const comp_hash = try reader.takeInt(u64, .big);
+        const comp_size = try reader.takeInt(usize, .big);
         const comp_data = try allocator.alloc(u8, comp_size);
         errdefer allocator.free(comp_data);
         reader.readSliceAll(comp_data) catch |err| switch (err) {
-            error.EndOfStream => return error.UnexpectedEndOfStream,
+            error.EndOfStream => return err,
             else => return err,
         };
         return ComponentInstance{
@@ -52,6 +52,10 @@ pub const ComponentInstance = struct {
             .size = comp_size,
             .data = comp_data,
         };
+    }
+
+    pub fn tryReadFrom(reader: *std.Io.Reader, allocator: std.mem.Allocator) ?ComponentInstance {
+        return readFrom(reader, allocator) catch return null;
     }
 };
 

@@ -14,15 +14,15 @@ const Owns = relations.Owns;
 const mem = @import("zevy_mem");
 
 pub fn main(init: std.process.Init) !void {
-    if (builtin.mode == .Debug) return;
+    //if (builtin.mode == .Debug) return;
 
     const allocator = init.gpa;
     var bench = Benchmark.init(allocator);
     defer bench.deinit();
-    try runBenchmarks(&bench, allocator);
+    try runBenchmarks(&bench, allocator, init.io);
 }
 
-fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator) !void {
+fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !void {
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
     // Non-batch Creation
@@ -57,12 +57,14 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator) !void {
 
     // Mixed Systems
     Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
-    for (counts) |count| {
+    inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
         // Setup entities
-        setupMixedEntities(&manager, count);
+        var entities = try setupMixedEntities(&manager, allocator, count);
+        defer entities.deinit(allocator);
+
         const systems = setupMixedSystems(&manager);
 
         const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
@@ -77,7 +79,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator) !void {
 
     // Relations
     Benchmark.printMarkdownHeaderWithTitle("Relations");
-    for (counts) |count| {
+    for (counts[0..2]) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
@@ -106,6 +108,44 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator) !void {
 
         // Benchmark running the system (acquires its own write lock on RelationManager)
         const result = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
+    // Serialization
+    Benchmark.printMarkdownHeaderWithTitle("Serialization");
+    inline for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        var entities = try setupMixedEntities(&manager, allocator, count);
+        defer entities.deinit(allocator);
+
+        const label = try std.fmt.allocPrint(allocator, "Serialize {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchSerialize, .{ &manager, allocator, io, entities });
+
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
+    // Deserialization
+    Benchmark.printMarkdownHeaderWithTitle("Deserialization");
+    inline for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        var entities = try setupMixedEntities(&manager, allocator, count);
+        defer entities.deinit(allocator);
+
+        const label = try std.fmt.allocPrint(allocator, "Deserialize {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchDeserialize, .{ &manager, allocator, io, count });
+
         Benchmark.printResult(result, .markdown);
     }
 
@@ -269,7 +309,8 @@ fn systemVelocityDamping(query: Query(VelocityDampingQueryInclude, .{})) void {
 }
 
 // Setup function to create diverse entity archetypes
-fn setupMixedEntities(manager: *Manager, count: usize) void {
+fn setupMixedEntities(manager: *Manager, allocator: std.mem.Allocator, comptime count: usize) !std.ArrayList(Entity) {
+    var entities = try std.ArrayList(Entity).initCapacity(allocator, count);
     for (0..count) |i| {
         const pos = Position{ .x = @floatFromInt(i), .y = 0.0, .z = 0.0 };
         const vel = Velocity{ .dx = 1.0, .dy = 0.5, .dz = -0.5 };
@@ -279,35 +320,36 @@ fn setupMixedEntities(manager: *Manager, count: usize) void {
         const archetype = i % 7;
         if (archetype == 0) {
             // Basic: Position, Velocity, Health
-            _ = manager.create(.{ pos, vel, health });
+            entities.append(allocator, manager.create(.{ pos, vel, health })) catch {};
         } else if (archetype == 1) {
             // With Armor
             const armor = Armor{ .value = 10 };
-            _ = manager.create(.{ pos, vel, health, armor });
+            entities.append(allocator, manager.create(.{ pos, vel, health, armor })) catch {};
         } else if (archetype == 2) {
             // With Damage
             const damage = Damage{ .value = 5 };
-            _ = manager.create(.{ pos, vel, health, damage });
+            entities.append(allocator, manager.create(.{ pos, vel, health, damage })) catch {};
         } else if (archetype == 3) {
             // With Armor and Damage
             const armor = Armor{ .value = 10 };
             const damage = Damage{ .value = 5 };
-            _ = manager.create(.{ pos, vel, health, armor, damage });
+            entities.append(allocator, manager.create(.{ pos, vel, health, armor, damage })) catch {};
         } else if (archetype == 4) {
             // With Team
             const team = Team{ .id = @intCast(i % 4) };
-            _ = manager.create(.{ pos, vel, health, team });
+            entities.append(allocator, manager.create(.{ pos, vel, health, team })) catch {};
         } else if (archetype == 5) {
             // With Target
             const target = Target{ .entity_id = @intCast(i / 2) };
-            _ = manager.create(.{ pos, vel, health, target });
+            entities.append(allocator, manager.create(.{ pos, vel, health, target })) catch {};
         } else {
             // With Team and Target
             const team = Team{ .id = @intCast(i % 4) };
             const target = Target{ .entity_id = @intCast(i / 2) };
-            _ = manager.create(.{ pos, vel, health, team, target });
+            entities.append(allocator, manager.create(.{ pos, vel, health, team, target })) catch {};
         }
     }
+    return entities;
 }
 
 fn setupMixedSystems(e: *Manager) [7]zevy_ecs.UntypedSystemHandle {
@@ -437,4 +479,43 @@ fn benchRunTransformSystem(manager: *Manager, system_handle: anytype) void {
     manager.runSystem(system_handle) catch |err| {
         std.debug.print("Error running transform system: {s}\n", .{@errorName(err)});
     };
+}
+
+fn benchSerialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, entities: std.ArrayList(Entity)) !void {
+    const label = try std.fmt.allocPrint(allocator, "test_data/benchmark_serialize_{d}.bin", .{entities.items.len});
+    var buf: [4096]u8 = undefined;
+    std.Io.Dir.cwd().createDirPath(io, "test_data/") catch |err| switch (err) {
+        error.PathAlreadyExists => {}, // Directory already exists, ignore
+        else => return err,
+    };
+    var file = try std.Io.Dir.cwd().createFile(io, label, .{
+        .truncate = true,
+    });
+    defer file.close(io);
+    var file_writer = file.writer(io, &buf);
+    // Note: Serialization writing is disabled due to writer issues on this platform.
+    // The component retrieval is tested instead.
+    for (entities.items) |entity| {
+        const comps = try manager.getAllComponents(manager.allocator, entity);
+        defer manager.allocator.free(comps);
+        for (comps) |comp| {
+            try comp.writeTo(&file_writer.interface);
+            try file_writer.flush();
+        }
+    }
+}
+
+fn benchDeserialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, count: usize) !void {
+    _ = manager;
+    var buf: [4096]u8 = undefined;
+    const label = try std.fmt.allocPrint(allocator, "test_data/benchmark_serialize_{d}.bin", .{count});
+    var file = try std.Io.Dir.cwd().openFile(io, label, .{});
+    defer file.close(io);
+    var file_reader = file.reader(io, &buf);
+    while (true) {
+        const comp = zevy_ecs.serialize.ComponentInstance.tryReadFrom(&file_reader.interface, allocator);
+        if (comp == null) break; // EOF reached
+        defer allocator.free(comp.?.data);
+        // Process component data as needed (omitted for benchmark)
+    }
 }

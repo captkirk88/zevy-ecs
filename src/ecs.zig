@@ -283,7 +283,8 @@ pub const Manager = struct {
         return self.world.has(entity, T);
     }
 
-    /// Get all components for an entity as an array of ComponentInstance
+    /// Get all components for an entity as an array of ComponentInstance.
+    ///
     /// Caller is responsible for freeing the returned array
     pub fn getAllComponents(self: *Manager, allocator: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
         if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
