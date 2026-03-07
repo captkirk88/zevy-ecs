@@ -1,6 +1,5 @@
 const std = @import("std");
-const benchmark = @import("benchmark.zig");
-const Benchmark = benchmark.Benchmark;
+const Benchmark = @import("benchmark.zig");
 const root = @import("root.zig");
 const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;

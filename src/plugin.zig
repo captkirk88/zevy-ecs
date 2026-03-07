@@ -103,6 +103,7 @@ pub const PluginManager = struct {
         return if (any_error) errors.items else null;
     }
 
+    /// Add a raw plugin instance that already implements the Plugin interface.
     pub fn addPlugin(self: *PluginManager, plugin: Plugin) error{
         OutOfMemory,
         PluginAlreadyExists,
@@ -159,6 +160,7 @@ pub const PluginManager = struct {
         try self.plugin_hashes.put(self.allocator, key_hash, {});
     }
 
+    /// Add a bundle of plugins defined as fields in a struct. Each field will be added as an individual plugin.
     pub fn addBundle(self: *PluginManager, comptime BundleType: type, bundle: BundleType) error{
         OutOfMemory,
         PluginAlreadyExists,
@@ -170,7 +172,7 @@ pub const PluginManager = struct {
 
         inline for (info.fields) |field_info| {
             const FieldType = field_info.type.type;
-            const field_value = @field(bundle, field_info.name);
+            const field_value = field_info.get(@constCast(&bundle));
             try self.add(FieldType, field_value);
         }
     }
