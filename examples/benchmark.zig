@@ -1,17 +1,116 @@
 const std = @import("std");
-const Benchmark = @import("benchmark.zig");
-const root = @import("root.zig");
-const ecs = @import("ecs.zig");
-const Manager = ecs.Manager;
-const Entity = ecs.Entity;
-const Commands = root.params.Commands;
-const Query = root.params.Query;
-const relations = @import("relations.zig");
+const builtin = @import("builtin");
+const Benchmark = @import("benchmark");
+const zevy_ecs = @import("zevy_ecs");
+const Manager = zevy_ecs.Manager;
+const Entity = zevy_ecs.Entity;
+const Commands = zevy_ecs.params.Commands;
+const Query = zevy_ecs.params.Query;
+const relations = zevy_ecs.relations;
 const RelationManager = relations.RelationManager;
 const Child = relations.Child;
 const Owns = relations.Owns;
 
 const mem = @import("zevy_mem");
+
+pub fn main(init: std.process.Init) !void {
+    if (builtin.mode == .Debug) return;
+
+    const allocator = init.gpa;
+    var bench = Benchmark.init(allocator);
+    defer bench.deinit();
+    try runBenchmarks(&bench, allocator);
+}
+
+fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator) !void {
+    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
+
+    // Non-batch Creation
+    Benchmark.printMarkdownHeaderWithTitle("Creation");
+    for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchCreateEntities, .{ &manager, count });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
+    // Batch Creation
+    Benchmark.printMarkdownHeaderWithTitle("Batch Creation");
+    for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, batchCreateEntities, .{ &manager, count, allocator });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
+    // Mixed Systems
+    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
+    for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        // Setup entities
+        setupMixedEntities(&manager, count);
+        const systems = setupMixedSystems(&manager);
+
+        const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystems, .{ &manager, &systems });
+
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
+    // Relations
+    Benchmark.printMarkdownHeaderWithTitle("Relations");
+    for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        // Acquire Relations, build the scene graph, then release the lock before benchmarking.
+        // The system being benchmarked also acquires a lock on RelationManager, so
+        // holding the lock here while running bench.run() would deadlock.
+        var entities = blk: {
+            const rel = manager.getResource(relations.RelationManager);
+            if (rel) |r| {
+                defer r.deinit(); // release Arc ref when block exits
+                var rel_lock = r.lock();
+                defer rel_lock.deinit();
+                break :blk try setupSceneGraph(&manager, rel_lock.get(), count);
+            } else {
+                std.debug.print("Failed to acquire RelationManager for setup\n", .{});
+                break :blk try std.ArrayList(Entity).initCapacity(allocator, 0);
+            }
+        };
+        defer entities.deinit(bench.allocator());
+
+        // Create system that uses Query with Relation component
+        const system_handle = manager.createSystemCached(systemUpdateTransforms, zevy_ecs.DefaultParamRegistry);
+
+        const label = try std.fmt.allocPrint(allocator, "Scene Graph {d} Entities", .{count});
+        defer allocator.free(label);
+
+        // Benchmark running the system (acquires its own write lock on RelationManager)
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+}
 
 // Test components
 const Position = struct {
@@ -211,85 +310,9 @@ fn setupMixedEntities(manager: *Manager, count: usize) void {
     }
 }
 
-test "ECS Benchmark - Entity Creation" {
-    const allocator = std.testing.allocator;
-    var bench = Benchmark.init(allocator);
-    defer bench.deinit();
-
-    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
-
-    Benchmark.printMarkdownHeaderWithTitle("Creation");
-    for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
-        defer manager.deinit();
-
-        const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
-        defer allocator.free(label);
-
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchCreateEntities, .{ &manager, count });
-        Benchmark.printResult(result, .markdown);
-    }
-
-    std.debug.print("\n", .{});
-}
-
-test "ECS Benchmark - Batch Entity Creation" {
-    const allocator = std.testing.allocator;
-    var bench = Benchmark.init(allocator);
-    defer bench.deinit();
-
-    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
-
-    Benchmark.printMarkdownHeaderWithTitle("Batch Creation");
-    for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
-        defer manager.deinit();
-
-        const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
-        defer allocator.free(label);
-
-        const result = try bench.run(label, BENCH_OPT_COUNT, batchCreateEntities, .{ &manager, count, allocator });
-        Benchmark.printResult(result, .markdown);
-    }
-
-    std.debug.print("\n", .{});
-}
-
-test "ECS Benchmark - Mixed Systems" {
-    const allocator = std.testing.allocator;
-    var bench = Benchmark.initWithAllocator(
-        allocator,
-        mem.allocators.CountingAllocator.init(std.heap.page_allocator),
-    );
-    defer {
-        bench.deinit();
-    }
-
-    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
-
-    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
-    for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
-        defer manager.deinit();
-
-        // Setup entities
-        setupMixedEntities(&manager, count);
-        const systems = setupMixedSystems(&manager);
-
-        const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
-        defer allocator.free(label);
-
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystems, .{ &manager, &systems });
-
-        Benchmark.printResult(result, .markdown);
-    }
-
-    std.debug.print("\n", .{});
-}
-
-fn setupMixedSystems(e: *Manager) [7]root.UntypedSystemHandle {
-    const DefaultRegistry = @import("root.zig").DefaultParamRegistry;
-    var results: [7]root.UntypedSystemHandle = undefined;
+fn setupMixedSystems(e: *Manager) [7]zevy_ecs.UntypedSystemHandle {
+    const DefaultRegistry = zevy_ecs.DefaultParamRegistry;
+    var results: [7]zevy_ecs.UntypedSystemHandle = undefined;
     results[0] = e.createSystemCached(systemMovement, DefaultRegistry).eraseType();
     results[1] = e.createSystemCached(systemHealthRegen, DefaultRegistry).eraseType();
     results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry).eraseType();
@@ -300,7 +323,7 @@ fn setupMixedSystems(e: *Manager) [7]root.UntypedSystemHandle {
     return results;
 }
 
-fn benchMixedSystems(e: *Manager, systems: *const [7]root.UntypedSystemHandle) void {
+fn benchMixedSystems(e: *Manager, systems: *const [7]zevy_ecs.UntypedSystemHandle) void {
     for (systems) |sys_id| {
         _ = e.runSystemUntyped(void, sys_id) catch |err| {
             std.debug.print("Error running system {d}: {s}\n", .{ sys_id, @errorName(err) });
@@ -323,7 +346,7 @@ const Transform = struct {
 };
 
 // Setup hierarchical scene graph (game objects with parent-child relationships)
-fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, count: usize) !std.ArrayList(Entity) {
+fn setupSceneGraph(manager: *Manager, rel: *zevy_ecs.relations.RelationManager, count: usize) !std.ArrayList(Entity) {
     const allocator = manager.allocator;
     var all_entities = try std.ArrayList(Entity).initCapacity(allocator, count);
 
@@ -347,7 +370,7 @@ fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, coun
     // Create level objects under root
     for (0..level_count) |i| {
         const level_obj = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(i)) * 10, .local_y = 0, .local_z = 0 }});
-        try rel.add(manager, level_obj, root_entity, Child);
+        try rel.add(manager, level_obj, root_entity, relations.kinds.Child);
         level_objects.append(allocator, level_obj) catch {};
         all_entities.append(allocator, level_obj) catch {};
 
@@ -355,7 +378,7 @@ fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, coun
         for (0..3) |j| {
             if (all_entities.items.len >= count) break;
             const prop = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(j)), .local_y = 1, .local_z = 0 }});
-            try rel.add(manager, prop, level_obj, Child);
+            try rel.add(manager, prop, level_obj, relations.kinds.Child);
             all_entities.append(allocator, prop) catch {};
         }
     }
@@ -364,7 +387,7 @@ fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, coun
     for (0..character_count) |i| {
         if (all_entities.items.len >= count) break;
         const character = manager.create(.{Transform{ .local_x = @as(f32, @floatFromInt(i)), .local_y = 0, .local_z = @as(f32, @floatFromInt(i)) * 2 }});
-        try rel.add(manager, character, root_entity, Child);
+        try rel.add(manager, character, root_entity, relations.kinds.Child);
         all_entities.append(allocator, character) catch {};
 
         // Add body parts (head, left_arm, right_arm, weapon)
@@ -372,7 +395,7 @@ fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, coun
         for (body_parts, 0..) |_, j| {
             if (all_entities.items.len >= count) break;
             const part = manager.create(.{Transform{ .local_x = 0, .local_y = @as(f32, @floatFromInt(j)), .local_z = 0 }});
-            try rel.add(manager, part, character, Child);
+            try rel.add(manager, part, character, relations.kinds.Child);
             all_entities.append(allocator, part) catch {};
         }
     }
@@ -383,12 +406,12 @@ fn setupSceneGraph(manager: *Manager, rel: *root.relations.RelationManager, coun
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
     commands: *Commands,
-    query: Query(.{ Transform, relations.Relation(Child) }, .{}),
+    query: Query(.{ Transform, relations.Relation(relations.kinds.Child) }, .{}),
 ) void {
     // Query all entities that have Transform and a Child relation (children with parents)
     while (query.next()) |item| {
         const transform: *Transform = item[0];
-        const child_relation: *relations.Relation(Child) = item[1];
+        const child_relation: *relations.Relation(relations.kinds.Child) = item[1];
 
         // Get parent's transform
         var parent_world_x: f32 = 0;
@@ -414,47 +437,4 @@ fn benchRunTransformSystem(manager: *Manager, system_handle: anytype) void {
     manager.runSystem(system_handle) catch |err| {
         std.debug.print("Error running transform system: {s}\n", .{@errorName(err)});
     };
-}
-
-test "ECS Benchmark - Scene Graph Relations" {
-    const allocator = std.testing.allocator;
-    var bench = Benchmark.init(allocator);
-    defer bench.deinit();
-
-    const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
-
-    Benchmark.printMarkdownHeaderWithTitle("Relations");
-    for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
-        defer manager.deinit();
-
-        // Acquire Relations, build the scene graph, then release the lock before benchmarking.
-        // The system being benchmarked also acquires a lock on RelationManager, so
-        // holding the lock here while running bench.run() would deadlock.
-        var entities = blk: {
-            const rel = manager.getResource(root.relations.RelationManager);
-            if (rel) |r| {
-                defer r.deinit(); // release Arc ref when block exits
-                var rel_lock = r.lock();
-                defer rel_lock.deinit();
-                break :blk try setupSceneGraph(&manager, rel_lock.get(), count);
-            } else {
-                std.debug.print("Failed to acquire RelationManager for setup\n", .{});
-                break :blk try std.ArrayList(Entity).initCapacity(allocator, 0);
-            }
-        };
-        defer entities.deinit(bench.allocator());
-
-        // Create system that uses Query with Relation component
-        const system_handle = manager.createSystemCached(systemUpdateTransforms, root.DefaultParamRegistry);
-
-        const label = try std.fmt.allocPrint(allocator, "Scene Graph {d} Entities", .{count});
-        defer allocator.free(label);
-
-        // Benchmark running the system (acquires its own write lock on RelationManager)
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
-        Benchmark.printResult(result, .markdown);
-    }
-
-    std.debug.print("\n", .{});
 }

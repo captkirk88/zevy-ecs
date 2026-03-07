@@ -160,11 +160,6 @@ fn gracefulPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
 
 // Tests
 test {
-    const builtin = @import("builtin");
-    if (builtin.mode != .Debug) {
-        const benchmarks = @import("benchmark_tests.zig");
-        std.testing.refAllDecls(benchmarks);
-    }
     std.testing.refAllDecls(ecs);
     std.testing.refAllDecls(@import("ecs_tests.zig"));
     std.testing.refAllDecls(@import("query_tests.zig"));

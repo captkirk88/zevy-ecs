@@ -526,20 +526,18 @@ pub const SingleSystemParam = struct {
 /// Use `rel.get()` to access the `RelationManager`.
 /// Call `rel.deinit()` to release the lock and Arc reference (done automatically by the system runner).
 pub const Relations = struct {
-    _ref: ecs.Ref(relations_mod.RelationManager),
+    ref: ecs.Ref(relations_mod.RelationManager),
     _guard: zevy_mem.lock.Mutex(relations_mod.RelationManager).Guard,
 
-    /// Returns a mutable pointer to the `RelationManager`.
+    /// Get a pointer to the RelationManager. Valid only while this Relations struct is alive.
     pub fn get(self: *Relations) *relations_mod.RelationManager {
         return self._guard.get();
     }
-
-    /// Releases the lock and Arc reference.
-    pub fn deinit(self: *Relations) void {
-        self._guard.deinit();
-        self._ref.deinit();
-    }
 };
+
+fn deinit_releations(self: *Relations) void {
+    self.ref.deinit();
+}
 
 /// Relations SystemParam analyzer and applier
 /// Provides access to the RelationManager resource
@@ -565,14 +563,14 @@ pub const RelationsSystemParam = struct {
         const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
         const guard = ref.lock();
         const rel_ptr = try e.allocator.create(Relations);
-        rel_ptr.* = .{ ._ref = ref, ._guard = guard };
+        rel_ptr.* = .{ .ref = ref, ._guard = guard };
         return rel_ptr;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = T;
         const rel_ptr: *Relations = @ptrCast(@alignCast(ptr));
-        rel_ptr.deinit();
+        deinit_releations(rel_ptr);
         e.allocator.destroy(rel_ptr);
     }
 };

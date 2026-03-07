@@ -695,7 +695,6 @@ test "Scheduler assign outside scope" {
     try scheduler.addStage(custom_stage);
     const test_system = struct {
         pub fn run(out: *params.Res(bool)) void {
-            std.debug.print("Test system executed\n", .{});
             out.get().* = true;
         }
     }.run;
