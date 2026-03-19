@@ -1,4 +1,6 @@
 name: Create tag 1.57
+# This workflow creates annotated tag 1.57 at 3efb5bdc044826e2dc19083687f75fd204855174
+# Tag message: "the last commit for zig version 1.51"
 
 on:
   push:
