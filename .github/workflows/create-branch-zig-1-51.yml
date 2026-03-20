@@ -14,38 +14,21 @@ jobs:
       - name: Create branch zig-1.51 from commit 3efb5bd
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
         run: |
           SHA="3efb5bdc044826e2dc19083687f75fd204855174"
           BRANCH="zig-1.51"
+          REPO="${{ github.repository }}"
 
           # Check if branch already exists
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: ******" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPO/git/ref/heads/$BRANCH")
-
-          if [ "$STATUS" = "200" ]; then
+          if gh api "repos/$REPO/git/ref/heads/$BRANCH" --silent 2>/dev/null; then
             echo "Branch $BRANCH already exists, skipping."
             exit 0
           fi
 
           # Create the branch
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -X POST \
-            -H "Authorization: ******" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPO/git/refs" \
-            -d "{\"ref\": \"refs/heads/$BRANCH\", \"sha\": \"$SHA\"}")
+          gh api repos/$REPO/git/refs \
+            --method POST \
+            --field ref="refs/heads/$BRANCH" \
+            --field sha="$SHA"
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -1)
-
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $BODY"
-
-          if [ "$HTTP_CODE" = "201" ]; then
-            echo "Branch $BRANCH created successfully at $SHA"
-          else
-            echo "Failed to create branch" && exit 1
-          fi
+          echo "Branch $BRANCH created successfully at $SHA"
