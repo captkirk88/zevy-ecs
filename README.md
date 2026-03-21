@@ -1325,58 +1325,58 @@ zevy_ecs includes a simple benchmarking utility to measure the performance of va
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Create 100 Entities | 3 | 15.100 us/op | 13.56 KiB/op | 3/op |
-| Create 1000 Entities | 3 | 88.166 us/op | 13.56 KiB/op | 3/op |
-| Create 10000 Entities | 3 | 692.533 us/op | 13.56 KiB/op | 3/op |
-| Create 100000 Entities | 3 | 7.344 ms/op | 13.56 KiB/op | 3/op |
-| Create 1000000 Entities | 3 | 79.418 ms/op | 13.56 KiB/op | 3/op |
+| Create 100 Entities | 3 | 23.733 us/op | 13.56 KiB/op | 3/op |
+| Create 1000 Entities | 3 | 100.500 us/op | 13.56 KiB/op | 3/op |
+| Create 10000 Entities | 3 | 749.200 us/op | 13.56 KiB/op | 3/op |
+| Create 100000 Entities | 3 | 7.516 ms/op | 13.56 KiB/op | 3/op |
+| Create 1000000 Entities | 3 | 83.363 ms/op | 13.56 KiB/op | 3/op |
 
 #### Batch Creation
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Create 100 Entities | 3 | 11.000 us/op | 16.49 KiB/op | 5/op |
-| Create 1000 Entities | 3 | 57.766 us/op | 42.85 KiB/op | 5/op |
-| Create 10000 Entities | 3 | 507.666 us/op | 306.53 KiB/op | 5/op |
-| Create 100000 Entities | 3 | 3.439 ms/op | 2.87 MiB/op | 5/op |
-| Create 1000000 Entities | 3 | 32.258 ms/op | 28.62 MiB/op | 5/op |
+| Create 100 Entities | 3 | 11.833 us/op | 16.49 KiB/op | 5/op |
+| Create 1000 Entities | 3 | 59.600 us/op | 42.85 KiB/op | 5/op |
+| Create 10000 Entities | 3 | 375.766 us/op | 306.53 KiB/op | 5/op |
+| Create 100000 Entities | 3 | 3.394 ms/op | 2.87 MiB/op | 5/op |
+| Create 1000000 Entities | 3 | 32.479 ms/op | 28.62 MiB/op | 5/op |
 
 #### Mixed Systems
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Run 7 Systems on 100 Entities | 3 | 6.400 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 1000 Entities | 3 | 9.966 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 10000 Entities | 3 | 50.100 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 100000 Entities | 3 | 503.200 us/op | 0 B/op | 0/op |
-| Run 7 Systems on 1000000 Entities | 3 | 5.391 ms/op | 0 B/op | 0/op |
+| Run 7 Systems on 100 Entities | 3 | 5.700 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 1000 Entities | 3 | 6.866 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 10000 Entities | 3 | 49.766 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 100000 Entities | 3 | 513.133 us/op | 0 B/op | 0/op |
+| Run 7 Systems on 1000000 Entities | 3 | 5.487 ms/op | 0 B/op | 0/op |
 
 #### Relations
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Scene Graph 100 Entities | 3 | 1.866 us/op | 48 B/op | 1/op |
-| Scene Graph 1000 Entities | 3 | 15.866 us/op | 48 B/op | 1/op |
+| Scene Graph 100 Entities | 3 | 1.933 us/op | 48 B/op | 1/op |
+| Scene Graph 1000 Entities | 3 | 10.600 us/op | 48 B/op | 1/op |
 
 #### Serialization
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Serialize 100 Entities | 3 | 3.386 ms/op | 12.91 KiB/op | 100/op |
-| Serialize 1000 Entities | 3 | 7.475 ms/op | 129.44 KiB/op | 1000/op |
-| Serialize 10000 Entities | 3 | 68.892 ms/op | 1.26 MiB/op | 10000/op |
-| Serialize 100000 Entities | 3 | 673.995 ms/op | 12.64 MiB/op | 100000/op |
-| Serialize 1000000 Entities | 3 | 6.782 s/op | 126.43 MiB/op | 1000000/op |
+| Serialize 100 Entities | 3 | 421.533 us/op | 0 B/op | 0/op |
+| Serialize 1000 Entities | 3 | 380.433 us/op | 0 B/op | 0/op |
+| Serialize 10000 Entities | 3 | 3.790 ms/op | 0 B/op | 0/op |
+| Serialize 100000 Entities | 3 | 12.473 ms/op | 0 B/op | 0/op |
+| Serialize 1000000 Entities | 3 | 105.732 ms/op | 0 B/op | 0/op |
 
 #### Deserialization
 
 | Benchmark | Operations | Time/op | Memory/op | Allocs/op
 |-----------|------------|---------|----------|----------|
-| Deserialize 100 Entities | 3 | 112.466 us/op | 0 B/op | 0/op |
-| Deserialize 1000 Entities | 3 | 227.366 us/op | 0 B/op | 0/op |
-| Deserialize 10000 Entities | 3 | 1.992 ms/op | 0 B/op | 0/op |
-| Deserialize 100000 Entities | 3 | 19.477 ms/op | 0 B/op | 0/op |
-| Deserialize 1000000 Entities | 3 | 195.205 ms/op | 0 B/op | 0/op |
+| Deserialize 100 Entities | 3 | 77.866 us/op | 0 B/op | 0/op |
+| Deserialize 1000 Entities | 3 | 264.000 us/op | 0 B/op | 0/op |
+| Deserialize 10000 Entities | 3 | 1.560 ms/op | 0 B/op | 0/op |
+| Deserialize 100000 Entities | 3 | 14.843 ms/op | 0 B/op | 0/op |
+| Deserialize 1000000 Entities | 3 | 144.560 ms/op | 0 B/op | 0/op |
 
 ## Projects
 
