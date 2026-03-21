@@ -38,11 +38,11 @@ const Name = struct {
     value: []const u8,
 };
 
-const PointerComp = packed struct {
+const PointerComp = struct {
     ptr: *u8,
 };
 
-const PointerCompToPointerComp = packed struct {
+const PointerCompToPointerComp = struct {
     ptr: *PointerComp,
 };
 

@@ -51,7 +51,7 @@ const Plugin = PluginTemplate.Interface;
 /// try plugin_manager.build(&manager);
 /// ```
 pub const PluginManager = struct {
-    plugins: std.ArrayListUnmanaged(PluginEntry) = .{},
+    plugins: std.ArrayListUnmanaged(PluginEntry) = .empty,
     plugin_hashes: std.AutoHashMapUnmanaged(u64, void) = .{},
     allocator: std.mem.Allocator,
 

@@ -483,9 +483,10 @@ fn benchRunTransformSystem(manager: *Manager, system_handle: anytype) void {
 
 fn benchSerialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, entities: std.ArrayList(Entity)) !void {
     const label = try std.fmt.allocPrint(allocator, "test_data/benchmark_serialize_{d}.bin", .{entities.items.len});
-    var buf: [4096]u8 = undefined;
+    defer allocator.free(label);
+    var buf: [65536]u8 = undefined; // 64 KiB write buffer
     std.Io.Dir.cwd().createDirPath(io, "test_data/") catch |err| switch (err) {
-        error.PathAlreadyExists => {}, // Directory already exists, ignore
+        error.PathAlreadyExists => {},
         else => return err,
     };
     var file = try std.Io.Dir.cwd().createFile(io, label, .{
@@ -493,22 +494,23 @@ fn benchSerialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, e
     });
     defer file.close(io);
     var file_writer = file.writer(io, &buf);
-    // Note: Serialization writing is disabled due to writer issues on this platform.
-    // The component retrieval is tested instead.
     for (entities.items) |entity| {
-        const comps = try manager.getAllComponents(manager.allocator, entity);
-        defer manager.allocator.free(comps);
+        // Use the plain allocator so the counting allocator isn't charged for temp work.
+        const comps = try manager.getAllComponents(allocator, entity);
+        defer allocator.free(comps);
         for (comps) |comp| {
             try comp.writeTo(&file_writer.interface);
-            try file_writer.flush();
         }
     }
+    // Single flush at the end — flushing per-component causes N syscalls.
+    try file_writer.flush();
 }
 
 fn benchDeserialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, count: usize) !void {
     _ = manager;
-    var buf: [4096]u8 = undefined;
+    var buf: [65536]u8 = undefined; // 64 KiB read buffer
     const label = try std.fmt.allocPrint(allocator, "test_data/benchmark_serialize_{d}.bin", .{count});
+    defer allocator.free(label);
     var file = try std.Io.Dir.cwd().openFile(io, label, .{});
     defer file.close(io);
     var file_reader = file.reader(io, &buf);

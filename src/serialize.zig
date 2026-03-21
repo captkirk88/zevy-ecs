@@ -65,40 +65,41 @@ pub const EntityInstance = struct {
     /// Entities referenced by this entity (for relations with Entity fields)
     /// These are serialized recursively
     referenced_entities: []EntityInstance = &[_]EntityInstance{},
+    /// Non-null when created by fromEntity(). All component data (including the
+    /// components slice itself) lives inside the arena, so deinit frees everything
+    /// in a single underlying deallocation instead of N individual frees.
+    _arena: ?*std.heap.ArenaAllocator = null,
 
-    /// Create an EntityInstance from an entity's components
-    /// The EntityInstance owns copies of the component data
+    /// Create an EntityInstance from an entity's components.
+    /// Uses an arena allocator internally so all component data is a single underlying
+    /// allocation — N individual frees become one `arena.deinit()` in deinit().
     pub fn fromEntity(allocator: std.mem.Allocator, manager: *ecs.Manager, entity: ecs.Entity) !EntityInstance {
         const components_view = try manager.getAllComponents(allocator, entity);
         defer allocator.free(components_view);
 
-        // Allocate the components array
-        const components = try allocator.alloc(ComponentInstance, components_view.len);
-        errdefer allocator.free(components);
+        // Heap-allocate the arena struct itself so we can store a stable pointer.
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        errdefer allocator.destroy(arena);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
+        const arena_alloc = arena.allocator();
 
-        var i: usize = 0;
-        errdefer {
-            // Free any component data we've already copied
-            for (components[0..i]) |comp| {
-                allocator.free(comp.data);
-            }
-        }
-
-        // Make owned copies of each component's data
+        // Both the components array and every data copy come from the same arena.
+        const components = try arena_alloc.alloc(ComponentInstance, components_view.len);
         for (components_view, 0..) |comp_view, idx| {
-            const data_copy = try allocator.alloc(u8, comp_view.data.len);
+            const data_copy = try arena_alloc.alloc(u8, comp_view.data.len);
             @memcpy(data_copy, comp_view.data);
             components[idx] = ComponentInstance{
                 .hash = comp_view.hash,
                 .size = comp_view.size,
                 .data = data_copy,
             };
-            i += 1;
         }
 
         return EntityInstance{
             .components = components,
             .referenced_entities = &[_]EntityInstance{},
+            ._arena = arena,
         };
     }
 
@@ -250,12 +251,21 @@ pub const EntityInstance = struct {
         };
     }
 
-    /// Free all memory associated with this EntityInstance
+    /// Free all memory associated with this EntityInstance.
+    /// Pass the same allocator that was used to create it.
     pub fn deinit(self: *EntityInstance, allocator: std.mem.Allocator) void {
-        for (self.components) |component| {
-            allocator.free(component.data);
+        if (self._arena) |arena| {
+            // fromEntity() path: arena owns the components slice and all data copies.
+            // One deinit frees everything instead of N individual frees.
+            arena.deinit();
+            allocator.destroy(arena);
+        } else {
+            // readFrom() / manual path: each data slice is individually owned.
+            for (self.components) |component| {
+                allocator.free(component.data);
+            }
+            allocator.free(self.components);
         }
-        allocator.free(self.components);
         var i: usize = 0;
         while (i < self.referenced_entities.len) : (i += 1) {
             var ref_entity: *EntityInstance = @constCast(&self.referenced_entities[i]);

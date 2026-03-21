@@ -237,7 +237,7 @@ pub const Manager = struct {
 
     pub fn destroy(self: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
         if (!self.isAlive(entity)) {
-            return errs.ECSError.EntityNotAlive;
+            return error.EntityNotAlive;
         }
 
         // Remove all relations involving this entity
@@ -273,13 +273,13 @@ pub const Manager = struct {
 
     /// Get a mutable pointer to a component of type T for the given entity, or an error if entity is not alive.
     pub fn getComponent(self: *Manager, entity: Entity, comptime T: type) error{EntityNotAlive}!?*T {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        if (!self.isAlive(entity)) return error.EntityNotAlive;
         return self.world.getPtr(entity, T);
     }
 
     /// Check if an entity has a component of type T
     pub fn hasComponent(self: *Manager, entity: Entity, comptime T: type) error{EntityNotAlive}!bool {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        if (!self.isAlive(entity)) return error.EntityNotAlive;
         return self.world.has(entity, T);
     }
 
@@ -287,7 +287,7 @@ pub const Manager = struct {
     ///
     /// Caller is responsible for freeing the returned array
     pub fn getAllComponents(self: *Manager, allocator: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
-        if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+        if (!self.isAlive(entity)) return error.EntityNotAlive;
         return self.world.getAllComponents(allocator, entity);
     }
 
@@ -565,7 +565,7 @@ pub const Manager = struct {
 
 /// Add a component of type T to the given entity, or an error if entity is dead.
 pub fn _addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
-    if (!self.isAlive(entity)) return errs.ECSError.EntityNotAlive;
+    if (!self.isAlive(entity)) return error.EntityNotAlive;
     const tuple = .{value};
     try self.world.add(entity, tuple);
 
@@ -577,7 +577,7 @@ pub fn _addComponent(self: *Manager, entity: Entity, comptime T: type, value: T)
 /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
 pub fn _removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
     if (!self.isAlive(entity)) {
-        return errs.ECSError.EntityNotAlive;
+        return error.EntityNotAlive;
     }
     const type_hash = reflect.typeHash(T);
     try self.world.removeComponent(entity, T);

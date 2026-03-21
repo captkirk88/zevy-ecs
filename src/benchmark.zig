@@ -83,7 +83,7 @@ pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, ar
     // std.Io.Threaded.now() ignores the Threaded userdata pointer, so an
     // undefined local is safe here – we only need a valid vtable for timing.
     var threaded: std.Io.Threaded = undefined;
-    const io = threaded.ioBasic();
+    const io = threaded.io();
     const start = std.Io.Timestamp.now(io, std.Io.Clock.awake);
     var i: usize = 0;
     while (i < ops) : (i += 1) {
