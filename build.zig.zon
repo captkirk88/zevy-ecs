@@ -5,7 +5,7 @@
 
     .fingerprint = 0xf22b53cc99fd8256, // Changing this has security and trust implications.
 
-    .minimum_zig_version = "0.16.0-dev.2694+74f361a5c",
+    .minimum_zig_version = "0.16.0-dev.2915+065c6e794",
 
     .dependencies = .{
         .zevy_reflect = .{
