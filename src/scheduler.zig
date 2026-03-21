@@ -165,15 +165,47 @@ pub const Stages = struct {
     };
 };
 
+/// Wraps a comptime tuple of systems into a chain entry for use with `addSystem`.
+/// Systems in the chain run sequentially within a single concurrent task.
+///
+/// Example:
+/// ```zig
+/// scheduler.addSystem(ecs, Stage(Stages.Update), chain(.{ physics_step, collision_resolve }), ParamRegistry);
+/// ```
+pub fn chain(comptime systems_tuple: anytype) ChainEntry(@TypeOf(systems_tuple)) {
+    return .{ .tuple = systems_tuple };
+}
+
+fn ChainEntry(comptime Tuple: type) type {
+    return struct {
+        pub const is_chain_entry = true;
+        pub const TupleType = Tuple;
+        tuple: Tuple,
+    };
+}
+
+/// A single system or an ordered chain of systems run as one concurrent task.
+pub const StageEntry = union(enum) {
+    /// Runs as its own independent concurrent task.
+    single: systems.UntypedSystemHandle,
+    /// Multiple systems run sequentially within a single concurrent task.
+    /// Slice is owned by the Scheduler and freed during deinit/removeStage.
+    chain: []systems.UntypedSystemHandle,
+};
+
 /// Manages system execution order and stages.
 ///
 /// Systems can be added to stages, and stages can be run in order.
+/// Systems within a stage run concurrently by default; use `chain()` with
+/// `addSystem` to express sequential ordering within a single concurrent task.
 ///
 /// The scheduler can also register event types, which creates EventStore resources.
 /// Includes integrated state management for application states.
 pub const Scheduler = struct {
     allocator: std.mem.Allocator,
-    systems: std.AutoHashMap(i32, std.ArrayList(systems.UntypedSystemHandle)),
+    /// Thread pool backend for concurrent system dispatch.
+    threaded: *std.Io.Threaded,
+    systems: std.AutoHashMap(i32, std.ArrayList(StageEntry)),
     // State management - stores state enum type hash and current value
     states: std.AutoHashMap(u64, StateInfo),
     active_state: ?StateValue,
@@ -215,9 +247,15 @@ pub const Scheduler = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Scheduler {
-        var _systems = std.AutoHashMap(i32, std.ArrayList(systems.UntypedSystemHandle)).init(allocator);
+        const threaded = try allocator.create(std.Io.Threaded);
+        errdefer {
+            threaded.deinit();
+            allocator.destroy(threaded);
+        }
+        threaded.* = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        var _systems = std.AutoHashMap(i32, std.ArrayList(StageEntry)).init(allocator);
         for (predefined_stages) |stage| {
-            const new_list = std.ArrayList(systems.UntypedSystemHandle).initCapacity(allocator, 0) catch |err| {
+            const new_list = std.ArrayList(StageEntry).initCapacity(allocator, 0) catch |err| {
                 _systems.deinit();
                 return err;
             };
@@ -225,6 +263,7 @@ pub const Scheduler = struct {
         }
         const self: Scheduler = .{
             .allocator = allocator,
+            .threaded = threaded,
             .systems = _systems,
             .states = std.AutoHashMap(u64, StateInfo).init(allocator),
             .active_state = null,
@@ -236,25 +275,59 @@ pub const Scheduler = struct {
     pub fn deinit(self: *Scheduler) void {
         var it = self.systems.iterator();
         while (it.next()) |entry| {
+            for (entry.value_ptr.items) |stage_entry| {
+                switch (stage_entry) {
+                    .chain => |handles| self.allocator.free(handles),
+                    .single => {},
+                }
+            }
             entry.value_ptr.deinit(self.allocator);
         }
         self.systems.deinit();
         self.states.deinit();
+        self.threaded.deinit();
+        self.allocator.destroy(self.threaded);
     }
 
     pub fn addSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype, comptime param_registry: type) void {
         const gop = self.systems.getOrPut(stage.value) catch |err| @panic(@errorName(err));
         if (!gop.found_existing) {
-            gop.value_ptr.* = std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
+            gop.value_ptr.* = std.ArrayList(StageEntry).initCapacity(self.allocator, 4) catch |err| @panic(@errorName(err));
         }
         const SystemType = @TypeOf(system);
+        // Detect chain entries created by chain()
+        if (comptime @typeInfo(SystemType) == .@"struct" and @hasDecl(SystemType, "is_chain_entry")) {
+            const tuple_info = @typeInfo(SystemType.TupleType);
+            const field_count = tuple_info.@"struct".fields.len;
+            if (field_count == 0) return;
+            var handles_list = std.ArrayList(systems.UntypedSystemHandle).initCapacity(
+                self.allocator,
+                field_count,
+            ) catch |err| @panic(@errorName(err));
+            inline for (tuple_info.@"struct".fields) |field| {
+                const sys = @field(system.tuple, field.name);
+                const SysType = @TypeOf(sys);
+                const untyped = switch (comptime systems.getSystemTypeFromType(SysType)) {
+                    .func => ecs.createSystemCached(sys, param_registry).eraseType(),
+                    .handle => sys.eraseType(),
+                    .untyped => sys,
+                    .system => ecs.cacheSystem(sys).eraseType(),
+                    else => std.debug.panic("chain: invalid system type: {s}", .{@typeName(SysType)}),
+                };
+                handles_list.appendAssumeCapacity(untyped);
+            }
+            const owned_handles = handles_list.toOwnedSliceAssert();
+            gop.value_ptr.append(self.allocator, StageEntry{ .chain = owned_handles }) catch |err| @panic(@errorName(err));
+            return;
+        }
         const untyped_system_handle = switch (comptime systems.getSystemTypeFromType(SystemType)) {
             .func => ecs.createSystemCached(system, param_registry).eraseType(),
             .handle => system.eraseType(),
             .untyped => system,
-            else => std.debug.panic("Invalid system type: {s}. Expected a function or SystemHandle.", .{@typeName(SystemType)}),
+            .system => ecs.cacheSystem(system).eraseType(),
+            else => std.debug.panic("Invalid system type: {s}. Expected a function, SystemHandle, System(T), or chain().", .{@typeName(SystemType)}),
         };
-        gop.value_ptr.append(self.allocator, untyped_system_handle) catch |err| @panic(@errorName(err));
+        gop.value_ptr.append(self.allocator, StageEntry{ .single = untyped_system_handle }) catch |err| @panic(@errorName(err));
     }
 
     pub fn addStage(self: *Scheduler, stage: StageId) error{ InvalidStageBounds, StageExists, OutOfMemory }!void {
@@ -263,26 +336,78 @@ pub const Scheduler = struct {
             if (stage.value < Stage(Stages.Min).value or stage.value > Stage(Stages.Max).value) {
                 return error.InvalidStageBounds;
             }
-            gop.value_ptr.* = try std.ArrayList(systems.UntypedSystemHandle).initCapacity(self.allocator, 4);
+            gop.value_ptr.* = try std.ArrayList(StageEntry).initCapacity(self.allocator, 4);
         } else {
             return error.StageExists;
         }
     }
 
     pub fn removeStage(self: *Scheduler, stage: StageId) error{StageHasNoSystems}!void {
-        if (self.systems.fetchRemove(stage.value)) |entry| {
-            entry.value.deinit(self.allocator);
+        if (self.systems.fetchRemove(stage.value)) |kv| {
+            for (kv.value.items) |stage_entry| {
+                switch (stage_entry) {
+                    .chain => |handles| self.allocator.free(handles),
+                    .single => {},
+                }
+            }
+            var list = kv.value;
+            list.deinit(self.allocator);
         } else {
             return error.StageHasNoSystems;
         }
     }
 
+    /// Run all systems in a stage concurrently.
+    /// Each `addSystem` single entry runs as its own async task; each `chain()`
+    /// entry runs sequentially within a single async task.
+    /// Commands flushing is deferred until all tasks complete.
     pub fn runStage(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) anyerror!void {
-        if (self.systems.get(stage.value)) |list| {
-            for (list.items) |handle| {
-                try ecs.runSystemUntyped(void, handle);
+        const list = self.systems.get(stage.value) orelse return error.StageHasNoSystems;
+        if (list.items.len == 0) return;
+
+        // Set up DeferredFlusher so Commands params on worker threads defer
+        // flushing instead of executing immediately (not thread-safe for Manager).
+        var flusher = ecs_mod.DeferredFlusher.init(ecs.allocator);
+        defer flusher.deinit();
+        ecs.deferred_flusher = &flusher;
+        defer ecs.deferred_flusher = null;
+
+        const io = self.threaded.io();
+
+        // Pre-allocate futures to avoid OOM after tasks are already dispatched.
+        var futures = std.ArrayList(std.Io.Future(anyerror!void)).empty;
+        defer futures.deinit(self.allocator);
+        try futures.ensureTotalCapacity(self.allocator, list.items.len);
+
+        // Dispatch each stage entry as an async task.
+        for (list.items) |entry| {
+            switch (entry) {
+                .single => |handle| {
+                    futures.appendAssumeCapacity(io.async(runSingleTask, .{ ecs, handle }));
+                },
+                .chain => |handles| {
+                    futures.appendAssumeCapacity(io.async(runChainTask, .{ ecs, handles }));
+                },
             }
-        } else return error.StageHasNoSystems;
+        }
+
+        // Await all futures. Always wait for everything even on error.
+        var first_err: ?anyerror = null;
+        for (futures.items) |*future| {
+            if (future.await(io)) |_| {} else |err| {
+                if (first_err == null) first_err = err;
+            }
+        }
+
+        // Disable deferred mode before flushing.
+        ecs.deferred_flusher = null;
+
+        // Flush all deferred Commands serially on the main thread.
+        flusher.flushAll(ecs) catch |err| {
+            if (first_err == null) first_err = err;
+        };
+
+        if (first_err) |err| return err;
     }
 
     pub fn runStages(self: *Scheduler, ecs: *ecs_mod.Manager, start: StageId, end: StageId) anyerror!void {
@@ -509,7 +634,19 @@ pub const Scheduler = struct {
         };
     }
 };
+// ============================================================================
+// Private helpers for async task dispatch
+// ============================================================================
 
+fn runSingleTask(ecs: *ecs_mod.Manager, handle: systems.UntypedSystemHandle) anyerror!void {
+    return ecs.runSystemUntyped(void, handle);
+}
+
+fn runChainTask(ecs: *ecs_mod.Manager, handles: []systems.UntypedSystemHandle) anyerror!void {
+    for (handles) |handle| {
+        try ecs.runSystemUntyped(void, handle);
+    }
+}
 /// Returns a temporary stage ID for systems that should run when entering a specific state
 /// Usage: scheduler.addSystem(OnEnter(GameState.Playing), my_system_handle)
 pub inline fn OnEnter(comptime state: anytype) StageId {
@@ -845,4 +982,152 @@ test "State management without registration throws errors" {
     // Test 3: Verify getActiveState returns null when state not registered
     const active_state = scheduler.getActiveState(GameState);
     try std.testing.expect(active_state == null);
+}
+
+// ============================================================================
+// Async / concurrent execution tests
+// ============================================================================
+
+test "Concurrent stage: two independent systems both run" {
+    const allocator = std.testing.allocator;
+    var ecs = try ecs_mod.Manager.init(allocator);
+    defer ecs.deinit();
+
+    // Two distinct resource types written by separate systems.
+    const AValue = struct { v: u32 };
+    const BValue = struct { v: u32 };
+
+    _ = try ecs.addResource(AValue, .{ .v = 0 });
+    _ = try ecs.addResource(BValue, .{ .v = 0 });
+
+    const sysA = struct {
+        fn run(res: *params.Res(AValue)) void {
+            res.get().v = 111;
+        }
+    }.run;
+
+    const sysB = struct {
+        fn run(res: *params.Res(BValue)) void {
+            res.get().v = 222;
+        }
+    }.run;
+
+    var scheduler = try Scheduler.init(allocator);
+    defer scheduler.deinit();
+
+    scheduler.addSystem(&ecs, Stage(Stages.Update), sysA, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(Stages.Update), sysB, registry.DefaultParamRegistry);
+
+    try scheduler.runStage(&ecs, Stage(Stages.Update));
+
+    {
+        const ra = ecs.getResource(AValue).?;
+        defer ra.deinit();
+        var ga = ra.lock();
+        defer ga.deinit();
+        try std.testing.expectEqual(@as(u32, 111), ga.get().v);
+    }
+    {
+        const rb = ecs.getResource(BValue).?;
+        defer rb.deinit();
+        var gb = rb.lock();
+        defer gb.deinit();
+        try std.testing.expectEqual(@as(u32, 222), gb.get().v);
+    }
+}
+
+test "chain(): systems within a chain run in order" {
+    const allocator = std.testing.allocator;
+    var ecs = try ecs_mod.Manager.init(allocator);
+    defer ecs.deinit();
+
+    // Use distinct resource types so each system has a unique signature and
+    // can be cached independently by createSystemCached.
+    const A = struct { v: u32 };
+    const B = struct { v: u32 };
+    const C = struct { v: u32 };
+    _ = try ecs.addResource(A, .{ .v = 0 });
+    _ = try ecs.addResource(B, .{ .v = 0 });
+    _ = try ecs.addResource(C, .{ .v = 0 });
+
+    // sys1 → A.v = 1
+    // sys2 reads A.v, writes B.v = A.v + 10  (proves sys2 runs after sys1)
+    // sys3 reads B.v, writes C.v = B.v + 100  (proves sys3 runs after sys2)
+    const sys1 = struct {
+        fn run(a: *params.Res(A)) void {
+            a.get().v = 1;
+        }
+    }.run;
+    const sys2 = struct {
+        fn run(a: *params.Res(A), b: *params.Res(B)) void {
+            b.get().v = a.get().v + 10;
+        }
+    }.run;
+    const sys3 = struct {
+        fn run(b: *params.Res(B), c: *params.Res(C)) void {
+            c.get().v = b.get().v + 100;
+        }
+    }.run;
+
+    var scheduler = try Scheduler.init(allocator);
+    defer scheduler.deinit();
+
+    scheduler.addSystem(&ecs, Stage(Stages.Update), chain(.{ sys1, sys2, sys3 }), registry.DefaultParamRegistry);
+
+    try scheduler.runStage(&ecs, Stage(Stages.Update));
+
+    const ra = ecs.getResource(A).?;
+    defer ra.deinit();
+    var ga = ra.lock();
+    defer ga.deinit();
+    try std.testing.expectEqual(@as(u32, 1), ga.get().v);
+
+    const rb = ecs.getResource(B).?;
+    defer rb.deinit();
+    var gb = rb.lock();
+    defer gb.deinit();
+    try std.testing.expectEqual(@as(u32, 11), gb.get().v); // 1 + 10
+
+    const rc = ecs.getResource(C).?;
+    defer rc.deinit();
+    var gc = rc.lock();
+    defer gc.deinit();
+    try std.testing.expectEqual(@as(u32, 111), gc.get().v); // 11 + 100
+}
+
+test "Concurrent stage: Commands deferred flush adds components" {
+    const allocator = std.testing.allocator;
+    var ecs = try ecs_mod.Manager.init(allocator);
+    defer ecs.deinit();
+
+    const commands_mod = @import("commands.zig");
+    const Tag = struct { value: u32 };
+
+    // Create the target entity on the main thread before the stage runs.
+    const entity = ecs.createEmpty();
+
+    // System takes the entity as its first (injected) arg and queues addComponent.
+    // Commands flushing is deferred by CommandsSystemParam.deinit until all stage
+    // futures settle, so the mutation reaches the Manager safely on the main thread.
+    const tagSys = struct {
+        fn run(ent: ecs_mod.Entity, cmds: *commands_mod.Commands) void {
+            cmds.addComponent(ent, Tag, .{ .value = 99 }) catch {};
+        }
+    }.run;
+
+    // Bind the runtime entity via ToSystemWithArgs, then hand the pre-built
+    // System(void) to addSystem via the .system / cacheSystem path.
+    const prebuilt = systems.ToSystemWithArgs(tagSys, .{entity}, registry.DefaultParamRegistry);
+
+    var scheduler = try Scheduler.init(allocator);
+    defer scheduler.deinit();
+
+    scheduler.addSystem(&ecs, Stage(Stages.Update), prebuilt, registry.DefaultParamRegistry);
+
+    try scheduler.runStage(&ecs, Stage(Stages.Update));
+
+    // Component must exist after runStage — proving deferred flush ran.
+    const tag = try ecs.getComponent(entity, Tag);
+    try std.testing.expect(tag != null);
+    if (tag) |t| try std.testing.expectEqual(@as(u32, 99), t.value);
 }

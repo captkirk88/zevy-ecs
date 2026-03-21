@@ -38,10 +38,9 @@ pub const ToSystemReturnType = sys.ToSystemReturnType;
 pub const pipe = sys.pipe;
 /// Function to run a system only if a condition is met
 pub const runIf = sys.runIf;
-/// Function to chain multiple systems together into one system to be run sequentially
-///
-/// TODO: part of the prep for parallel systems
-pub const chain = sys.chain;
+/// Wraps a comptime tuple of systems into a sequential chain for use with `addSystem`.
+/// Systems in the chain run in order as a single concurrent task within the stage.
+pub const chain = scheduler.chain;
 
 // System parameter types
 /// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter
@@ -105,6 +104,9 @@ pub const EventStore = events.EventStore;
 pub const schedule = struct {
     /// Scheduler is the system execution scheduler and state manager
     pub const Scheduler = scheduler.Scheduler;
+    /// A stage entry: either a single system or an ordered chain of systems
+    /// run as one concurrent task. Created implicitly by addSystem / chain().
+    pub const StageEntry = scheduler.StageEntry;
     /// StageId type for identifying execution stages
     pub const StageId = scheduler.StageId;
     pub const Stage = scheduler.Stage;

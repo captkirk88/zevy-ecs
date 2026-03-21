@@ -57,6 +57,54 @@ pub fn Ref(comptime T: type) type {
     return *zevy_mem.pointers.ArcMutex(T);
 }
 
+/// Collects deferred Commands flushers during concurrent stage execution.
+/// Thread-safe: `append()` may be called concurrently from worker threads.
+/// `flushAll()` must only be called from the main thread after all futures are awaited.
+pub const DeferredFlusher = struct {
+    pub const FlushEntry = struct {
+        ctx: *anyopaque,
+        flush_fn: *const fn (ctx: *anyopaque, manager: *Manager) anyerror!void,
+        cleanup_fn: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator) void,
+    };
+
+    mutex: std.Io.Mutex,
+    entries: std.ArrayList(FlushEntry),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) DeferredFlusher {
+        return .{
+            .mutex = .init,
+            .entries = .empty,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *DeferredFlusher) void {
+        self.entries.deinit(self.allocator);
+    }
+
+    /// Thread-safe: can be called concurrently from any worker thread.
+    pub fn append(self: *DeferredFlusher, entry: FlushEntry) error{OutOfMemory}!void {
+        std.Io.Threaded.mutexLock(&self.mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.mutex);
+        try self.entries.append(self.allocator, entry);
+    }
+
+    /// Flush all deferred entries serially. NOT thread-safe; call only from
+    /// the main thread after all concurrent stage futures have been awaited.
+    pub fn flushAll(self: *DeferredFlusher, manager: *Manager) anyerror!void {
+        var first_err: ?anyerror = null;
+        for (self.entries.items) |entry| {
+            if (entry.flush_fn(entry.ctx, manager)) |_| {} else |err| {
+                if (first_err == null) first_err = err;
+            }
+            entry.cleanup_fn(entry.ctx, manager.allocator);
+        }
+        self.entries.clearAndFree(self.allocator);
+        if (first_err) |err| return err;
+    }
+};
+
 pub const Manager = struct {
     allocator: std.mem.Allocator,
     next_entity_id: u32,
@@ -71,6 +119,11 @@ pub const Manager = struct {
     // Component lifecycle event stores
     component_added: events.EventStore(ComponentEvent),
     component_removed: events.EventStore(ComponentEvent),
+
+    /// Non-null during concurrent stage execution. CommandsSystemParam defers
+    /// flushing to after all stage futures settle instead of flushing immediately.
+    /// Set by the Scheduler; do not modify directly.
+    deferred_flusher: ?*DeferredFlusher = null,
 
     /// Initialize the ECS with an optional custom allocator.
     /// If no allocator is provided, the default page allocator is used.

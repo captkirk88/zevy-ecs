@@ -730,9 +730,31 @@ pub const CommandsSystemParam = struct {
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = T;
         const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
-        commands.flush(e) catch |err| @panic(@errorName(err));
-        commands.deinit();
-        e.allocator.destroy(commands);
+        if (e.deferred_flusher) |flusher| {
+            // Concurrent mode: called from a worker thread. Defer flushing to
+            // after all stage futures are awaited (flush is not thread-safe).
+            const Callbacks = struct {
+                fn flush(ctx: *anyopaque, manager: *ecs.Manager) anyerror!void {
+                    const cmds: *Commands = @ptrCast(@alignCast(ctx));
+                    try cmds.flush(manager);
+                }
+                fn cleanup(ctx: *anyopaque, allocator: std.mem.Allocator) void {
+                    const cmds: *Commands = @ptrCast(@alignCast(ctx));
+                    cmds.deinit();
+                    allocator.destroy(cmds);
+                }
+            };
+            flusher.append(.{
+                .ctx = commands,
+                .flush_fn = Callbacks.flush,
+                .cleanup_fn = Callbacks.cleanup,
+            }) catch @panic("CommandsSystemParam: DeferredFlusher OOM");
+        } else {
+            // Sequential mode: flush immediately (original behavior).
+            commands.flush(e) catch |err| @panic(@errorName(err));
+            commands.deinit();
+            e.allocator.destroy(commands);
+        }
     }
 };
 

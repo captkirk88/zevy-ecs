@@ -183,7 +183,7 @@ const Team = struct {
 };
 
 const Target = struct {
-    entity_id: u32,
+    entity: Entity,
 };
 
 // Query types
@@ -286,15 +286,15 @@ fn systemTeamCollision(query: Query(TeamCollisionQueryInclude, .{})) void {
 }
 
 // System 6: Target Tracking - Update target positions
-fn systemTargetTracking(query: Query(TargetTrackingQueryInclude, .{})) void {
+fn systemCrudAddRemoveComponents(query: Query(TargetTrackingQueryInclude, .{}), commands: *Commands) !void {
     while (query.next()) |item| {
-        const pos: *Position = item.pos;
         const target: *Target = item.target;
-        // Simulate tracking calculation
-        const dx = @as(f32, @floatFromInt(target.entity_id)) - pos.x;
-        const dy = 0.0 - pos.y;
-        std.mem.doNotOptimizeAway(dx);
-        std.mem.doNotOptimizeAway(dy);
+        // Example of adding/removing components (not actually modifying the query results)
+        if (target.entity.id % 2 == 0) {
+            try commands.addComponent(target.entity, Armor, .{ .value = 5 });
+        } else {
+            try commands.removeComponent(target.entity, Armor);
+        }
     }
 }
 
@@ -340,12 +340,12 @@ fn setupMixedEntities(manager: *Manager, allocator: std.mem.Allocator, comptime 
             entities.append(allocator, manager.create(.{ pos, vel, health, team })) catch {};
         } else if (archetype == 5) {
             // With Target
-            const target = Target{ .entity_id = @intCast(i / 2) };
+            const target = Target{ .entity = Entity{ .id = @intCast(i / 2), .generation = 0 } };
             entities.append(allocator, manager.create(.{ pos, vel, health, target })) catch {};
         } else {
             // With Team and Target
             const team = Team{ .id = @intCast(i % 4) };
-            const target = Target{ .entity_id = @intCast(i / 2) };
+            const target = Target{ .entity = Entity{ .id = @intCast(i / 2), .generation = 0 } };
             entities.append(allocator, manager.create(.{ pos, vel, health, team, target })) catch {};
         }
     }
@@ -360,7 +360,7 @@ fn setupMixedSystems(e: *Manager) [7]zevy_ecs.UntypedSystemHandle {
     results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry).eraseType();
     results[3] = e.createSystemCached(systemDamageNoArmor, DefaultRegistry).eraseType();
     results[4] = e.createSystemCached(systemTeamCollision, DefaultRegistry).eraseType();
-    results[5] = e.createSystemCached(systemTargetTracking, DefaultRegistry).eraseType();
+    results[5] = e.createSystemCached(systemCrudAddRemoveComponents, DefaultRegistry).eraseType();
     results[6] = e.createSystemCached(systemVelocityDamping, DefaultRegistry).eraseType();
     return results;
 }

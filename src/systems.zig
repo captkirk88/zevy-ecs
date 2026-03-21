@@ -28,6 +28,8 @@ pub const SystemType = enum {
     handle,
     /// A system represented as an UntypedSystemHandle
     untyped,
+    /// A pre-built System(T) struct returned by ToSystem / ToSystemWithArgs
+    system,
     /// Not a valid system type
     invalid,
 };
@@ -58,6 +60,10 @@ pub fn getSystemTypeFromType(comptime T: type) SystemType {
     if (type_info == .@"struct") {
         if (@hasField(T, "handle") and @hasDecl(T, "return_type")) {
             return .handle;
+        }
+        // Check if it's a System(T) returned by ToSystem / ToSystemWithArgs
+        if (@hasField(T, "run") and @hasField(T, "ctx") and @hasDecl(T, "return_type")) {
+            return .system;
         }
     }
 
