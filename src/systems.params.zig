@@ -463,6 +463,7 @@ pub const QuerySystemParam = struct {
         query.shareDeinitState(released);
         return query;
     }
+
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         const query_ptr: *T = @ptrCast(@alignCast(ptr));
         query_ptr.deinit();

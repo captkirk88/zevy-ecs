@@ -1,7 +1,8 @@
 ### What to do...
 
+- [ ] Improve SystemParam.analyze to make it easier to analyze the type passed in
 - [x] Move setupExamples to zevy-buildtools repo
-- [ ] Explore threading when Zig's threading model is more mature
+- [x] Explore threading when Zig's threading model is more mature
   - Specifically the newer std.Io APIs
 - [x] Relations doesn't remove the Relations component when all relations are removed from an entity
 - [x] Test packed struct components. Should work already...
@@ -14,6 +15,10 @@
 ### What might do...
 
 - [x] Seperate reflect.zig into separate repo for general purpose reflection utilities? (done: [zevy-reflect](https://github.com/captkirk88/zevy-reflect))
+- [ ] Create a zevy-app repo for a generic App that uses zevy-ecs Scheduler and provides a main loop.
+  - This would create a common structure and allow for easier integration with other libraries.
+  - It would also allow for better separation of concerns and make it easier to maintain and update the App and Scheduler independently.
+  - The Scheduler currently only takes a zevy_ecs.Manager, but it could be modified to take a context that by default includes the Manager but can also include other resources as needed. This would allow for more flexibility and make it easier to integrate with other libraries and systems. (This would be a breaking change for v2.0.0)
 
 ### Will recursively do...
 
