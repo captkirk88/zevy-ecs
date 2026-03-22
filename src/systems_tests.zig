@@ -84,6 +84,26 @@ fn eventReaderSystem(reader: EventReader(u32)) void {
     std.testing.expect(count == 2) catch unreachable;
 }
 
+fn queryEarlyDeinitSystem(commands: *Commands, query: Query(struct { pos: Position }, struct {})) !void {
+    var released_query = query;
+    defer released_query.deinit();
+
+    var captured_entities = std.ArrayList(ecs_mod.Entity).empty;
+    defer captured_entities.deinit(commands.manager.allocator);
+
+    while (released_query.next()) |_| {
+        try captured_entities.append(commands.manager.allocator, released_query.entity());
+    }
+
+    released_query.deinit();
+
+    for (captured_entities.items) |entity| {
+        var entity_commands = try commands.entity(entity);
+        _ = try entity_commands.add(Velocity, .{ .dx = 1.0, .dy = 2.0 });
+        try entity_commands.flush();
+    }
+}
+
 fn systemWithArgs(multiplier: i32, offset: i32) void {
     const result = multiplier * 2 + offset;
     std.testing.expect(result == 14) catch unreachable; // 5 * 2 + 4 = 14
@@ -206,6 +226,31 @@ test "System - with query parameter" {
 
     const system = ToSystem(querySystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
+}
+
+test "System - query parameter can be explicitly deinited before writes" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    for (0..4) |i| {
+        const pos = Position{ .x = @floatFromInt(i), .y = 0.0 };
+        _ = manager.create(.{pos});
+    }
+
+    const system = ToSystem(queryEarlyDeinitSystem, DefaultRegistry);
+    _ = try system.run(&manager, system.ctx);
+
+    var verify = manager.query(struct { pos: Position, vel: Velocity }, struct {});
+    defer verify.deinit();
+
+    var count: usize = 0;
+    while (verify.next()) |item| {
+        try std.testing.expectEqual(@as(f32, 1.0), item.vel.dx);
+        try std.testing.expectEqual(@as(f32, 2.0), item.vel.dy);
+        count += 1;
+    }
+
+    try std.testing.expectEqual(@as(usize, 4), count);
 }
 
 test "System - with multiple parameters" {

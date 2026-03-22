@@ -52,7 +52,9 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
         entity_index: usize,
         current_archetype: ?*archetype_mod.Archetype,
         component_indices: [include_info.@"struct".fields.len]usize,
+        last_entity: ?Entity,
         guard_released: bool,
+        shared_guard_released: ?*bool,
 
         /// Returns a debug string representation of the Query type (only in Debug builds)
         pub const debugInfo = if (builtin.mode == .Debug) struct {
@@ -130,24 +132,45 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                 .entity_index = 0,
                 .current_archetype = null,
                 .component_indices = undefined,
+                .last_entity = null,
                 .guard_released = false,
+                .shared_guard_released = null,
             };
             self.advanceToNextMatchingArchetype();
             return self;
         }
 
+        pub fn shareDeinitState(self: *@This(), shared_state: *bool) void {
+            shared_state.* = self.guard_released;
+            self.shared_guard_released = shared_state;
+        }
+
         pub fn deinit(self: *@This()) void {
-            if (!self.guard_released) {
+            if (!self.isGuardReleased()) {
                 self.guard.deinit();
-                self.guard_released = true;
+                self.setGuardReleased(true);
+            }
+        }
+
+        fn isGuardReleased(self: *const @This()) bool {
+            if (self.shared_guard_released) |shared_state| {
+                return shared_state.*;
+            }
+            return self.guard_released;
+        }
+
+        fn setGuardReleased(self: *@This(), released: bool) void {
+            self.guard_released = released;
+            if (self.shared_guard_released) |shared_state| {
+                shared_state.* = released;
             }
         }
 
         /// Get the current entity in the iteration
         /// Can only be called after calling next() and getting a non-null result
         pub fn entity(self: *const @This()) Entity {
-            if (self.current_archetype) |arch| {
-                return arch.entities.items[self.entity_index];
+            if (self.last_entity) |last_yielded_entity| {
+                return last_yielded_entity;
             }
             @panic("Query.entity() called when no archetype is available. Ensure next() returned a non-null result before calling entity() or check with hasNext().");
         }
@@ -245,6 +268,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                 }
             }
             self.current_archetype = null;
+            self.last_entity = null;
         }
 
         pub fn next(self: *const @This()) ?IncludeTypesTupleType {
@@ -252,6 +276,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
             const mutable_self = @constCast(self);
             while (mutable_self.current_archetype) |arch| {
                 if (mutable_self.entity_index < arch.entities.items.len) {
+                    mutable_self.last_entity = arch.entities.items[mutable_self.entity_index];
                     var result: IncludeTypesTupleType = undefined;
                     inline for (include_info.@"struct".fields, 0..) |field, original_i| {
                         const j = mutable_self.component_indices[original_i];
@@ -316,6 +341,7 @@ pub fn Query(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) typ
                 }
                 mutable_self.advanceToNextMatchingArchetype();
             }
+            mutable_self.last_entity = null;
             return null;
         }
     };

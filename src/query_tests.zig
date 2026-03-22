@@ -204,6 +204,28 @@ test "Query - mutation through query" {
     try std.testing.expect(count == 10);
 }
 
+test "Query - entity() returns the last yielded entity" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var expected_entities: [4]Entity = undefined;
+    for (&expected_entities, 0..) |*entity, i| {
+        const pos = Position{ .x = @floatFromInt(i), .y = 0.0 };
+        entity.* = manager.create(.{pos});
+    }
+
+    var q = manager.query(struct { pos: Position }, struct {});
+    defer q.deinit();
+
+    var index: usize = 0;
+    while (q.next()) |_| {
+        try std.testing.expectEqual(expected_entities[index], q.entity());
+        index += 1;
+    }
+
+    try std.testing.expectEqual(@as(usize, expected_entities.len), index);
+}
+
 test "Query - optional components" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();

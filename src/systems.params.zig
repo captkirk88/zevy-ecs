@@ -458,12 +458,18 @@ pub const QuerySystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
-        return e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+        var query = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+        const released = try e.allocator.create(bool);
+        query.shareDeinitState(released);
+        return query;
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
-        _ = e;
         const query_ptr: *T = @ptrCast(@alignCast(ptr));
         query_ptr.deinit();
+        if (query_ptr.shared_guard_released) |shared_state| {
+            query_ptr.shared_guard_released = null;
+            e.allocator.destroy(shared_state);
+        }
     }
 };
 

@@ -78,7 +78,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     std.debug.print("\n", .{});
 
     // CRUD Systems
-    Benchmark.printMarkdownHeaderWithTitle("CRUD Systems");
+    Benchmark.printMarkdownHeaderWithTitle("CRUD System");
     inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -99,7 +99,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
 
     // Relations
     Benchmark.printMarkdownHeaderWithTitle("Relations");
-    for (counts[0..2]) |count| {
+    for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
 
@@ -317,54 +317,46 @@ fn systemTargetTracking(query: Query(TargetTrackingQueryInclude, .{})) void {
     }
 }
 
-// CRUD System: collect work from a query, then release the query before mutating the world.
-fn systemCrudAddRemoveComponents(commands: *Commands) !void {
-    const CrudOp = struct {
-        entity: Entity,
-        target: Entity,
-        pos_snapshot: Position,
-    };
+// CRUD System: collect work from a query, explicitly release it, then mutate the world.
+fn systemCrudAddRemoveComponents(commands: *Commands, query: Query(TargetTrackingQueryInclude, .{})) !void {
+    var released_query = query;
+    defer released_query.deinit();
 
-    var ops = try std.ArrayList(CrudOp).initCapacity(commands.manager.allocator, 0);
-    defer ops.deinit(commands.manager.allocator);
+    var spawn_snapshot: ?Position = null;
 
-    {
-        var query = commands.manager.query(TargetTrackingQueryInclude, .{});
-        defer query.deinit();
+    while (released_query.next()) |item| {
+        const pos: *Position = item.pos;
+        const target = item.target.entity;
 
-        while (query.next()) |item| {
-            try ops.append(commands.manager.allocator, .{
-                .entity = query.entity(),
-                .target = item.target.entity,
-                .pos_snapshot = item.pos.*,
-            });
+        // Read from the target entity and update the current entity inline while the query is alive.
+        if (try commands.manager.getComponent(target, Position)) |target_pos| {
+            pos.x += (target_pos.x - pos.x) * 0.01;
+            pos.y += (target_pos.y - pos.y) * 0.01;
+            pos.z += (target_pos.z - pos.z) * 0.01;
+        }
+
+        // Update or delete a component through deferred commands.
+        if (target.id % 2 == 0) {
+            try commands.addComponent(target, Armor, .{ .value = @intCast((target.id % 15) + 1) });
+        } else {
+            try commands.removeComponent(target, Armor);
+        }
+
+        if (spawn_snapshot == null) {
+            spawn_snapshot = pos.*;
         }
     }
 
-    for (ops.items) |op| {
-        // Read from a target entity and update the current entity after the query is released.
-        if (try commands.manager.getComponent(op.target, Position)) |target_pos| {
-            if (try commands.manager.getComponent(op.entity, Position)) |pos| {
-                pos.x += (target_pos.x - pos.x) * 0.01;
-                pos.y += (target_pos.y - pos.y) * 0.01;
-                pos.z += (target_pos.z - pos.z) * 0.01;
-            }
-        }
+    released_query.deinit();
 
-        // Update or delete a component on the referenced entity.
-        if (op.target.id % 2 == 0) {
-            try commands.addComponent(op.target, Armor, .{ .value = @intCast((op.target.id % 15) + 1) });
-        } else {
-            try commands.removeComponent(op.target, Armor);
-        }
-
-        // Create a short-lived entity and destroy it after adding data.
+    if (spawn_snapshot) |snapshot| {
+        // Create a short-lived entity after releasing the query so the world can mutate safely.
         var spawned = try commands.create();
-        _ = try spawned.add(Position, op.pos_snapshot);
+        defer spawned.deinit();
+
+        _ = try spawned.add(Position, snapshot);
         _ = try spawned.add(Health, .{ .current = 1, .max = 1 });
-        try spawned.flush();
         _ = try spawned.destroy();
-        try spawned.flush();
     }
 }
 
