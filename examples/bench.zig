@@ -6,6 +6,9 @@ const Manager = zevy_ecs.Manager;
 const Entity = zevy_ecs.Entity;
 const Commands = zevy_ecs.params.Commands;
 const Query = zevy_ecs.params.Query;
+const Scheduler = zevy_ecs.schedule.Scheduler;
+const Stage = zevy_ecs.schedule.Stage;
+const Stages = zevy_ecs.schedule.Stages;
 const relations = zevy_ecs.relations;
 const RelationManager = relations.RelationManager;
 const Child = relations.Child;
@@ -72,6 +75,29 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
 
         const result = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystems, .{ &manager, &systems });
 
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
+    // Scheduler
+    Benchmark.printMarkdownHeaderWithTitle("Scheduler");
+    inline for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        var entities = try setupMixedEntities(&manager, allocator, count);
+        defer entities.deinit(allocator);
+
+        var scheduler = try Scheduler.init(bench.allocator());
+        defer scheduler.deinit();
+
+        setupScheduledMixedSystems(&manager, &scheduler);
+
+        const label = try std.fmt.allocPrint(allocator, "Run Scheduler Stage on {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerMixedSystems, .{ &scheduler, &manager });
         Benchmark.printResult(result, .markdown);
     }
 
@@ -214,7 +240,7 @@ const TeamCollisionQueryInclude = struct { pos: Position, team: Team };
 const TargetTrackingQueryInclude = struct { pos: Position, target: Target };
 const VelocityDampingQueryInclude = struct { vel: Velocity };
 
-const BENCH_OPT_COUNT = 3;
+const BENCH_OPT_COUNT = 10;
 
 // Benchmark 1: Entity Creation Performance
 fn benchCreateEntities(manager: *Manager, count: usize) void {
@@ -434,6 +460,23 @@ fn benchMixedSystems(e: *Manager, systems: *const [7]zevy_ecs.UntypedSystemHandl
             break;
         };
     }
+}
+
+fn setupScheduledMixedSystems(manager: *Manager, scheduler: *Scheduler) void {
+    const DefaultRegistry = zevy_ecs.DefaultParamRegistry;
+    scheduler.addSystem(manager, Stage(Stages.Update), systemMovement, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemHealthRegen, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemDamageWithArmor, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemDamageNoArmor, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemTeamCollision, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemTargetTracking, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemVelocityDamping, DefaultRegistry);
+}
+
+fn benchSchedulerMixedSystems(scheduler: *Scheduler, manager: *Manager) void {
+    scheduler.runStage(manager, Stage(Stages.Update)) catch |err| {
+        std.debug.print("Error running scheduler stage: {s}\n", .{@errorName(err)});
+    };
 }
 
 fn benchRunCrudSystem(e: *Manager, system_handle: zevy_ecs.UntypedSystemHandle) void {
