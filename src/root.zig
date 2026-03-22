@@ -12,34 +12,18 @@ const sparse = @import("sparse_set.zig");
 
 /// Error enum
 pub const errors = errs.ECSError;
-/// ECS Manager type
 pub const Manager = ecs.Manager;
-/// Entity type
 pub const Entity = ecs.Entity;
-/// Reference-counted Mutex-protected resource handle.
-/// Returned by `Manager.addResource` and `Manager.getResource`.
-/// Call `.deinit()` when done; use `.get().*.lock()` for mutable access.
 pub const Ref = ecs.Ref;
-/// World type
 pub const World = world.World;
-/// System type
 pub const System = sys.System;
-/// Identifier for a cached system (generic, preserves return type)
 pub const SystemHandle = sys.SystemHandle;
-/// Type-erased system handle for storage
 pub const UntypedSystemHandle = sys.UntypedSystemHandle;
-/// Function to create a system from a function
 pub const ToSystem = sys.ToSystem;
-/// Function to create a system from a function with arguments
 pub const ToSystemWithArgs = sys.ToSystemWithArgs;
-/// Function to infer the return type of a system function
 pub const ToSystemReturnType = sys.ToSystemReturnType;
-/// Function to create a pipe system from two systems
 pub const pipe = sys.pipe;
-/// Function to run a system only if a condition is met
 pub const runIf = sys.runIf;
-/// Wraps a comptime tuple of systems into a sequential chain for use with `addSystem`.
-/// Systems in the chain run in order as a single concurrent task within the stage.
 pub const chain = scheduler.chain;
 
 // System parameter types

@@ -431,6 +431,7 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
     };
 }
 
+/// Infers the return type of a system function, unwrapping error unions to get the payload type if necessary.
 pub fn ToSystemReturnType(comptime system_fn: anytype) type {
     const FnInfo = @typeInfo(@TypeOf(system_fn));
 

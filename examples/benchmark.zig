@@ -77,6 +77,26 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
 
     std.debug.print("\n", .{});
 
+    // CRUD Systems
+    Benchmark.printMarkdownHeaderWithTitle("CRUD Systems");
+    inline for (counts) |count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        var entities = try setupMixedEntities(&manager, allocator, count);
+        defer entities.deinit(allocator);
+
+        const crud_system = manager.createSystemCached(systemCrudAddRemoveComponents, zevy_ecs.DefaultParamRegistry);
+
+        const label = try std.fmt.allocPrint(allocator, "Run CRUD System on {d} Entities", .{count});
+        defer allocator.free(label);
+
+        const result = try bench.run(label, BENCH_OPT_COUNT, benchRunCrudSystem, .{ &manager, crud_system.eraseType() });
+        Benchmark.printResult(result, .markdown);
+    }
+
+    std.debug.print("\n", .{});
+
     // Relations
     Benchmark.printMarkdownHeaderWithTitle("Relations");
     for (counts[0..2]) |count| {
@@ -285,16 +305,66 @@ fn systemTeamCollision(query: Query(TeamCollisionQueryInclude, .{})) void {
     }
 }
 
-// System 6: Target Tracking - Update target positions
-fn systemCrudAddRemoveComponents(query: Query(TargetTrackingQueryInclude, .{}), commands: *Commands) !void {
+// System 6: Target Tracking - Steer toward a deterministic target position
+fn systemTargetTracking(query: Query(TargetTrackingQueryInclude, .{})) void {
     while (query.next()) |item| {
+        const pos: *Position = item.pos;
         const target: *Target = item.target;
-        // Example of adding/removing components (not actually modifying the query results)
-        if (target.entity.id % 2 == 0) {
-            try commands.addComponent(target.entity, Armor, .{ .value = 5 });
-        } else {
-            try commands.removeComponent(target.entity, Armor);
+        const target_bias = @as(f32, @floatFromInt(target.entity.id % 97));
+        pos.x += (target_bias - pos.x) * 0.001;
+        pos.y += (@as(f32, @floatFromInt((target.entity.id >> 1) % 53)) - pos.y) * 0.001;
+        pos.z += (@as(f32, @floatFromInt((target.entity.id >> 2) % 29)) - pos.z) * 0.001;
+    }
+}
+
+// CRUD System: collect work from a query, then release the query before mutating the world.
+fn systemCrudAddRemoveComponents(commands: *Commands) !void {
+    const CrudOp = struct {
+        entity: Entity,
+        target: Entity,
+        pos_snapshot: Position,
+    };
+
+    var ops = try std.ArrayList(CrudOp).initCapacity(commands.manager.allocator, 0);
+    defer ops.deinit(commands.manager.allocator);
+
+    {
+        var query = commands.manager.query(TargetTrackingQueryInclude, .{});
+        defer query.deinit();
+
+        while (query.next()) |item| {
+            try ops.append(commands.manager.allocator, .{
+                .entity = query.entity(),
+                .target = item.target.entity,
+                .pos_snapshot = item.pos.*,
+            });
         }
+    }
+
+    for (ops.items) |op| {
+        // Read from a target entity and update the current entity after the query is released.
+        if (try commands.manager.getComponent(op.target, Position)) |target_pos| {
+            if (try commands.manager.getComponent(op.entity, Position)) |pos| {
+                pos.x += (target_pos.x - pos.x) * 0.01;
+                pos.y += (target_pos.y - pos.y) * 0.01;
+                pos.z += (target_pos.z - pos.z) * 0.01;
+            }
+        }
+
+        // Update or delete a component on the referenced entity.
+        if (op.target.id % 2 == 0) {
+            try commands.addComponent(op.target, Armor, .{ .value = @intCast((op.target.id % 15) + 1) });
+        } else {
+            try commands.removeComponent(op.target, Armor);
+        }
+
+        // Create a short-lived entity and destroy it after adding data.
+        var spawned = try commands.create();
+        _ = try spawned.add(Position, op.pos_snapshot);
+        _ = try spawned.add(Health, .{ .current = 1, .max = 1 });
+        try spawned.flush();
+        _ = try spawned.destroy();
+        try spawned.flush();
     }
 }
 
@@ -360,7 +430,7 @@ fn setupMixedSystems(e: *Manager) [7]zevy_ecs.UntypedSystemHandle {
     results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry).eraseType();
     results[3] = e.createSystemCached(systemDamageNoArmor, DefaultRegistry).eraseType();
     results[4] = e.createSystemCached(systemTeamCollision, DefaultRegistry).eraseType();
-    results[5] = e.createSystemCached(systemCrudAddRemoveComponents, DefaultRegistry).eraseType();
+    results[5] = e.createSystemCached(systemTargetTracking, DefaultRegistry).eraseType();
     results[6] = e.createSystemCached(systemVelocityDamping, DefaultRegistry).eraseType();
     return results;
 }
@@ -372,6 +442,12 @@ fn benchMixedSystems(e: *Manager, systems: *const [7]zevy_ecs.UntypedSystemHandl
             break;
         };
     }
+}
+
+fn benchRunCrudSystem(e: *Manager, system_handle: zevy_ecs.UntypedSystemHandle) void {
+    _ = e.runSystemUntyped(void, system_handle) catch |err| {
+        std.debug.print("Error running CRUD system {d}: {s}\n", .{ system_handle, @errorName(err) });
+    };
 }
 
 // Relation Benchmarks

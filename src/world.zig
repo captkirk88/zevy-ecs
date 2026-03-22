@@ -46,7 +46,6 @@ pub const World = struct {
     }
 
     fn addWithStorage(self: *World, storage: *ArchetypeStorage.Inner, entity: Entity, values: anytype) error{OutOfMemory}!void {
-
         const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
         comptime if (info != .@"struct" or !info.@"struct".is_tuple) @compileError(std.fmt.comptimePrint("values must be a tuple of component instances: {s}", .{@typeName(components_type)}));
@@ -442,16 +441,29 @@ pub const World = struct {
             };
             std.sort.pdqContext(0, group.items.items.len, SortCtx{ .items = group.items.items });
 
+            const moved_count = group.items.items.len;
             const dst_start = dst_arch.entities.items.len;
-            try dst_arch.entities.ensureTotalCapacity(self.allocator, dst_start + group.items.items.len);
+            try dst_arch.entities.ensureTotalCapacity(self.allocator, dst_start + moved_count);
             for (dst_arch.component_arrays, 0..) |*arr, i| {
-                try arr.ensureTotalCapacity(self.allocator, arr.items.len + group.items.items.len * dst_sizes[i]);
+                try arr.ensureTotalCapacity(self.allocator, arr.items.len + moved_count * dst_sizes[i]);
             }
+
+            const moved_ids = try self.allocator.alloc(u32, moved_count);
+            defer self.allocator.free(moved_ids);
+            const moved_entries = try self.allocator.alloc(EntityMapEntry, moved_count);
+            defer self.allocator.free(moved_entries);
+            const swapped_ids = try self.allocator.alloc(u32, moved_count);
+            defer self.allocator.free(swapped_ids);
+            const swapped_entries = try self.allocator.alloc(EntityMapEntry, moved_count);
+            defer self.allocator.free(swapped_entries);
+            var swapped_count: usize = 0;
 
             for (group.items.items, 0..) |item, group_offset| {
                 const dst_idx = dst_start + group_offset;
                 dst_arch.entities.items.ptr[dst_idx] = item.entity;
                 dst_arch.entities.items.len += 1;
+                moved_ids[group_offset] = item.entity.id;
+                moved_entries[group_offset] = .{ .archetype = dst_arch, .index = dst_idx };
 
                 var src_comp_i: usize = 0;
                 for (dst_sizes[0..dst_len], 0..) |comp_size, i| {
@@ -469,8 +481,17 @@ pub const World = struct {
                     dst_arr.items.len += comp_size;
                 }
 
-                removeWithStorage(storage, item.entity);
-                try ArchetypeStorage.setWithStorage(storage, item.entity, .{ .archetype = dst_arch, .index = dst_idx });
+                if (removeAtWithStorage(storage, src_arch, item.entity, item.src_idx)) |swapped_entry| {
+                    const swapped_entity = src_arch.entities.items[swapped_entry.index];
+                    swapped_ids[swapped_count] = swapped_entity.id;
+                    swapped_entries[swapped_count] = .{ .archetype = src_arch, .index = swapped_entry.index };
+                    swapped_count += 1;
+                }
+            }
+
+            try ArchetypeStorage.insertManyWithStorage(storage, moved_ids, moved_entries);
+            if (swapped_count > 0) {
+                try ArchetypeStorage.insertManyWithStorage(storage, swapped_ids[0..swapped_count], swapped_entries[0..swapped_count]);
             }
         }
     }
@@ -738,6 +759,26 @@ pub const World = struct {
         }
     }
 
+    fn removeAtWithStorage(storage: *ArchetypeStorage.Inner, arch: *archetype.Archetype, entity: Entity, idx: usize) ?EntityMapEntry {
+        const last_idx = arch.entities.items.len - 1;
+        arch.entities.items[idx] = arch.entities.items[last_idx];
+        arch.entities.items.len -= 1;
+        for (arch.component_arrays, 0..) |*arr, i| {
+            const comp_size = arch.component_sizes[i];
+            const off = idx * comp_size;
+            const last_off = last_idx * comp_size;
+            if (idx != last_idx) {
+                @memmove(arr.items[off .. off + comp_size], arr.items[last_off .. last_off + comp_size]);
+            }
+            arr.items.len -= comp_size;
+        }
+        ArchetypeStorage.removeWithStorage(storage, entity);
+        if (last_idx != idx) {
+            return .{ .archetype = arch, .index = idx };
+        }
+        return null;
+    }
+
     /// Remove a single component T from an entity by migrating it to a new archetype without T.
     /// Returns true if the component was present and removed, false if the entity had no such component.
     pub fn removeComponent(self: *World, entity: Entity, comptime T: type) error{OutOfMemory}!bool {
@@ -952,16 +993,29 @@ pub const World = struct {
             };
             std.sort.pdqContext(0, group.items.items.len, SortCtx{ .items = group.items.items });
 
+            const moved_count = group.items.items.len;
             const dst_start = dst_arch.entities.items.len;
-            try dst_arch.entities.ensureTotalCapacity(self.allocator, dst_start + group.items.items.len);
+            try dst_arch.entities.ensureTotalCapacity(self.allocator, dst_start + moved_count);
             for (dst_arch.component_arrays, 0..) |*arr, i| {
-                try arr.ensureTotalCapacity(self.allocator, arr.items.len + group.items.items.len * dst_sizes[i]);
+                try arr.ensureTotalCapacity(self.allocator, arr.items.len + moved_count * dst_sizes[i]);
             }
+
+            const moved_ids = try self.allocator.alloc(u32, moved_count);
+            defer self.allocator.free(moved_ids);
+            const moved_entries = try self.allocator.alloc(EntityMapEntry, moved_count);
+            defer self.allocator.free(moved_entries);
+            const swapped_ids = try self.allocator.alloc(u32, moved_count);
+            defer self.allocator.free(swapped_ids);
+            const swapped_entries = try self.allocator.alloc(EntityMapEntry, moved_count);
+            defer self.allocator.free(swapped_entries);
+            var swapped_count: usize = 0;
 
             for (group.items.items, 0..) |item, group_offset| {
                 const dst_idx = dst_start + group_offset;
                 dst_arch.entities.items.ptr[dst_idx] = item.entity;
                 dst_arch.entities.items.len += 1;
+                moved_ids[group_offset] = item.entity.id;
+                moved_entries[group_offset] = .{ .archetype = dst_arch, .index = dst_idx };
 
                 var dst_i: usize = 0;
                 for (src_types, 0..) |_, src_i| {
@@ -976,9 +1030,18 @@ pub const World = struct {
                     dst_i += 1;
                 }
 
-                removeWithStorage(storage, item.entity);
-                try ArchetypeStorage.setWithStorage(storage, item.entity, .{ .archetype = dst_arch, .index = dst_idx });
+                if (removeAtWithStorage(storage, src_arch, item.entity, item.src_idx)) |swapped_entry| {
+                    const swapped_entity = src_arch.entities.items[swapped_entry.index];
+                    swapped_ids[swapped_count] = swapped_entity.id;
+                    swapped_entries[swapped_count] = .{ .archetype = src_arch, .index = swapped_entry.index };
+                    swapped_count += 1;
+                }
                 removed_mask[item.mask_idx] = true;
+            }
+
+            try ArchetypeStorage.insertManyWithStorage(storage, moved_ids, moved_entries);
+            if (swapped_count > 0) {
+                try ArchetypeStorage.insertManyWithStorage(storage, swapped_ids[0..swapped_count], swapped_entries[0..swapped_count]);
             }
         }
     }

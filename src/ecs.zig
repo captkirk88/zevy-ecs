@@ -18,6 +18,7 @@ const is_debug = builtin.mode == .Debug;
 
 pub const errors = errs.ECSError;
 
+/// Entity type
 pub const Entity = struct {
     id: u32,
     generation: u32,
@@ -105,6 +106,7 @@ pub const DeferredFlusher = struct {
     }
 };
 
+/// ECS Manager responsible for entity lifecycle, archetype management, resources, and systems.
 pub const Manager = struct {
     allocator: std.mem.Allocator,
     next_entity_id: u32,
