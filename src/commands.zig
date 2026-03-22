@@ -1,4 +1,4 @@
-﻿const std = @import("std");
+const std = @import("std");
 const ecs = @import("ecs.zig");
 const relations_mod = @import("relations.zig");
 const reflect = @import("reflect.zig");
