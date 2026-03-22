@@ -59,7 +59,6 @@ Good question.  The std API has changed to the point I don't even know anymore. 
         - [Event Registration](#event-registration)
         - [Getting Stage Information](#getting-stage-information)
 - [Performance](#performance)
-- [Projects](#projects)
 - [Dependencies](#dependencies)
 - [Contributing](#contributing)
 
