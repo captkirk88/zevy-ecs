@@ -11,6 +11,7 @@ const errors = @import("errors.zig");
 /// the next header starts at an aligned offset.
 const CommandHeader = struct {
     execute: *const fn (*anyopaque, *ecs.Manager) anyerror!void,
+    batch_execute: ?*const fn ([]const *const anyopaque, *ecs.Manager) anyerror!void,
     /// Bytes from start of this header to start of the command's data.
     data_offset: u32,
     /// Bytes from start of this header to start of the next entry.
@@ -25,6 +26,7 @@ fn pushCmdToBuf(
     comptime DataType: type,
     data: DataType,
     execute: *const fn (*anyopaque, *ecs.Manager) anyerror!void,
+    batch_execute: ?*const fn ([]const *const anyopaque, *ecs.Manager) anyerror!void,
 ) error{OutOfMemory}!void {
     const header_align = @alignOf(CommandHeader);
     const data_align = @alignOf(DataType);
@@ -50,6 +52,7 @@ fn pushCmdToBuf(
     const header: *CommandHeader = @ptrCast(@alignCast(buf.items[header_offset..].ptr));
     header.* = .{
         .execute = execute,
+        .batch_execute = batch_execute,
         .data_offset = @intCast(data_offset_rel),
         .entry_size = @intCast(next_header - header_offset),
     };
@@ -60,11 +63,55 @@ fn pushCmdToBuf(
     }
 }
 
-/// Execute every command in `buf` in insertion order, then clear it (retaining capacity).
+const BatchGroup = struct {
+    batch_execute: *const fn ([]const *const anyopaque, *ecs.Manager) anyerror!void,
+    data_ptrs: std.ArrayListUnmanaged(*const anyopaque),
+};
+
+/// Execute every command in `buf`, batching component operations between generic barriers,
+/// then clear it (retaining capacity).
 fn flushBuf(buf: *std.ArrayList(u8), manager: *ecs.Manager) anyerror!void {
     var offset: usize = 0;
     while (offset < buf.items.len) {
         const header: *const CommandHeader = @ptrCast(@alignCast(buf.items[offset..].ptr));
+        if (header.batch_execute) |_| {
+            var groups = std.ArrayListUnmanaged(BatchGroup).empty;
+            defer {
+                for (groups.items) |*group| group.data_ptrs.deinit(manager.allocator);
+                groups.deinit(manager.allocator);
+            }
+
+            while (offset < buf.items.len) {
+                const batch_header: *const CommandHeader = @ptrCast(@alignCast(buf.items[offset..].ptr));
+                const batch_execute = batch_header.batch_execute orelse break;
+                const data_ptr: *const anyopaque = @ptrCast(buf.items[offset + batch_header.data_offset ..].ptr);
+
+                var group_index: ?usize = null;
+                for (groups.items, 0..) |group, i| {
+                    if (@intFromPtr(group.batch_execute) == @intFromPtr(batch_execute)) {
+                        group_index = i;
+                        break;
+                    }
+                }
+
+                if (group_index == null) {
+                    try groups.append(manager.allocator, .{
+                        .batch_execute = batch_execute,
+                        .data_ptrs = .empty,
+                    });
+                    group_index = groups.items.len - 1;
+                }
+
+                try groups.items[group_index.?].data_ptrs.append(manager.allocator, data_ptr);
+                offset += batch_header.entry_size;
+            }
+
+            for (groups.items) |group| {
+                try group.batch_execute(group.data_ptrs.items, manager);
+            }
+            continue;
+        }
+
         const data_ptr: *anyopaque = @ptrCast(buf.items[offset + header.data_offset ..].ptr);
         try header.execute(data_ptr, manager);
         offset += header.entry_size;
@@ -125,7 +172,21 @@ pub const Commands = struct {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 try mgr.addComponent(d.ent, T, d.value);
             }
-        }.execute);
+            fn batchExecute(data_ptrs: []const *const anyopaque, mgr: *ecs.Manager) anyerror!void {
+                var ents = try mgr.allocator.alloc(ecs.Entity, data_ptrs.len);
+                defer mgr.allocator.free(ents);
+                var values = try mgr.allocator.alloc(T, data_ptrs.len);
+                defer mgr.allocator.free(values);
+
+                for (data_ptrs, 0..) |data_ptr, i| {
+                    const d: *const Data = @ptrCast(@alignCast(data_ptr));
+                    ents[i] = d.ent;
+                    values[i] = d.value;
+                }
+
+                try mgr.addComponentBatch(ents, T, values);
+            }
+        }.execute, null);
     }
 
     /// Get a component from an existing entity.
@@ -143,7 +204,7 @@ pub const Commands = struct {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 try mgr.removeComponent(d.ent, T);
             }
-        }.execute);
+        }.execute, null);
     }
 
     /// Queue destroying an existing entity.
@@ -154,7 +215,7 @@ pub const Commands = struct {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 try mgr.destroy(d.ent);
             }
-        }.execute);
+        }.execute, null);
     }
 
     /// Queue adding a resource.
@@ -165,7 +226,7 @@ pub const Commands = struct {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 _ = try mgr.addResource(T, d.value);
             }
-        }.execute);
+        }.execute, null);
     }
 
     /// Queue removing a resource.
@@ -176,7 +237,7 @@ pub const Commands = struct {
                 _ = ptr;
                 mgr.removeResource(T);
             }
-        }.execute);
+        }.execute, null);
     }
 
     /// Queue adding a relation between two entities.
@@ -191,7 +252,7 @@ pub const Commands = struct {
                 defer rel_guard.deinit();
                 try rel_guard.get().add(mgr, d.child, d.parent, RelationType);
             }
-        }.execute);
+        }.execute, null);
     }
 
     /// Queue removing a relation between two entities.
@@ -206,7 +267,7 @@ pub const Commands = struct {
                 defer rel_guard.deinit();
                 try rel_guard.get().remove(mgr, d.entity1, d.entity2, RelationType);
             }
-        }.execute);
+        }.execute, null);
     }
 
     /// Execute all queued commands and clear the buffer (retaining capacity for reuse).
@@ -262,7 +323,7 @@ pub const EntityCommands = struct {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     try mgr.addComponent(d.pending.entity.?, T, d.value);
                 }
-            }.execute);
+            }.execute, null);
         }
         return self;
     }
@@ -279,7 +340,7 @@ pub const EntityCommands = struct {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     try mgr.removeComponent(d.pending.entity.?, T);
                 }
-            }.execute);
+            }.execute, null);
         }
         return self;
     }
@@ -296,7 +357,7 @@ pub const EntityCommands = struct {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     try mgr.destroy(d.pending.entity.?);
                 }
-            }.execute);
+            }.execute, null);
         }
         return self;
     }

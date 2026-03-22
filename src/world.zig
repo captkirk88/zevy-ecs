@@ -42,7 +42,10 @@ pub const World = struct {
     pub fn add(self: *World, entity: Entity, values: anytype) error{OutOfMemory}!void {
         var storage_guard = self.archetypes.writeGuard();
         defer storage_guard.deinit();
-        const storage = storage_guard.get();
+        try self.addWithStorage(storage_guard.get(), entity, values);
+    }
+
+    fn addWithStorage(self: *World, storage: *ArchetypeStorage.Inner, entity: Entity, values: anytype) error{OutOfMemory}!void {
 
         const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
@@ -323,6 +326,155 @@ pub const World = struct {
         }
     }
 
+    pub fn addSingleComponentBatch(self: *World, entities: []const Entity, comptime T: type, values: []const T) error{OutOfMemory}!void {
+        std.debug.assert(entities.len == values.len);
+
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
+
+        const BatchItem = struct {
+            entity: Entity,
+            src_idx: usize,
+            value: T,
+        };
+        const BatchGroup = struct {
+            src_arch: *@import("archetype.zig").Archetype,
+            items: std.ArrayListUnmanaged(BatchItem),
+        };
+
+        const new_info = reflect.getReflectInfo(T).type;
+        var groups = std.ArrayListUnmanaged(BatchGroup).empty;
+        defer {
+            for (groups.items) |*group| group.items.deinit(self.allocator);
+            groups.deinit(self.allocator);
+        }
+
+        for (entities, values) |entity, value| {
+            if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
+                const src_arch = entry.archetype;
+                const src_idx = entry.index;
+                const src_types = src_arch.signature.types;
+
+                var existing_idx: ?usize = null;
+                for (src_types, 0..) |h, i| {
+                    if (h == new_info.hash) {
+                        existing_idx = i;
+                        break;
+                    }
+                }
+
+                if (existing_idx) |i| {
+                    const arr = &src_arch.component_arrays[i];
+                    const offset = src_idx * new_info.size;
+                    var runtime_value: T = value;
+                    @memcpy(arr.items[offset .. offset + new_info.size], std.mem.asBytes(&runtime_value));
+                    continue;
+                }
+
+                var group_index: ?usize = null;
+                for (groups.items, 0..) |group, i| {
+                    if (group.src_arch == src_arch) {
+                        group_index = i;
+                        break;
+                    }
+                }
+                if (group_index == null) {
+                    try groups.append(self.allocator, .{ .src_arch = src_arch, .items = .empty });
+                    group_index = groups.items.len - 1;
+                }
+
+                try groups.items[group_index.?].items.append(self.allocator, .{
+                    .entity = entity,
+                    .src_idx = src_idx,
+                    .value = value,
+                });
+            } else {
+                try self.addWithStorage(storage, entity, .{value});
+            }
+        }
+
+        for (groups.items) |*group| {
+            const src_arch = group.src_arch;
+            const src_types = src_arch.signature.types;
+            const src_sizes = src_arch.component_sizes;
+            const src_arrays = src_arch.component_arrays;
+
+            var dst_hashes: [max_inline_migration_components]u64 = undefined;
+            var dst_sizes: [max_inline_migration_components]usize = undefined;
+            var insert_idx: usize = src_types.len;
+            var src_i: usize = 0;
+            var dst_i: usize = 0;
+            var inserted = false;
+            while (src_i < src_types.len) : (src_i += 1) {
+                if (!inserted and new_info.hash < src_types[src_i]) {
+                    dst_hashes[dst_i] = new_info.hash;
+                    dst_sizes[dst_i] = new_info.size;
+                    insert_idx = dst_i;
+                    dst_i += 1;
+                    inserted = true;
+                }
+                dst_hashes[dst_i] = src_types[src_i];
+                dst_sizes[dst_i] = src_sizes[src_i];
+                dst_i += 1;
+            }
+            if (!inserted) {
+                dst_hashes[dst_i] = new_info.hash;
+                dst_sizes[dst_i] = new_info.size;
+                insert_idx = dst_i;
+                dst_i += 1;
+            }
+
+            const dst_len = dst_i;
+            const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
+            const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+
+            const SortCtx = struct {
+                items: []BatchItem,
+
+                pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                    return ctx.items[a_index].src_idx > ctx.items[b_index].src_idx;
+                }
+
+                pub fn swap(ctx: @This(), a_index: usize, b_index: usize) void {
+                    std.mem.swap(BatchItem, &ctx.items[a_index], &ctx.items[b_index]);
+                }
+            };
+            std.sort.pdqContext(0, group.items.items.len, SortCtx{ .items = group.items.items });
+
+            const dst_start = dst_arch.entities.items.len;
+            try dst_arch.entities.ensureTotalCapacity(self.allocator, dst_start + group.items.items.len);
+            for (dst_arch.component_arrays, 0..) |*arr, i| {
+                try arr.ensureTotalCapacity(self.allocator, arr.items.len + group.items.items.len * dst_sizes[i]);
+            }
+
+            for (group.items.items, 0..) |item, group_offset| {
+                const dst_idx = dst_start + group_offset;
+                dst_arch.entities.items.ptr[dst_idx] = item.entity;
+                dst_arch.entities.items.len += 1;
+
+                var src_comp_i: usize = 0;
+                for (dst_sizes[0..dst_len], 0..) |comp_size, i| {
+                    const dst_arr = &dst_arch.component_arrays[i];
+                    const dest = dst_arr.items.ptr + dst_arr.items.len;
+                    if (i == insert_idx) {
+                        var runtime_value: T = item.value;
+                        @memcpy(dest[0..comp_size], std.mem.asBytes(&runtime_value));
+                    } else {
+                        const src_arr = &src_arrays[src_comp_i];
+                        const src_offset = item.src_idx * comp_size;
+                        @memcpy(dest[0..comp_size], src_arr.items[src_offset .. src_offset + comp_size]);
+                        src_comp_i += 1;
+                    }
+                    dst_arr.items.len += comp_size;
+                }
+
+                removeWithStorage(storage, item.entity);
+                try ArchetypeStorage.setWithStorage(storage, item.entity, .{ .archetype = dst_arch, .index = dst_idx });
+            }
+        }
+    }
+
     /// Add an entity from an array of ComponentInstance
     /// This is used for deserializing entities
     pub fn addFromComponentInstances(self: *World, entity: Entity, components: []const ComponentInstance) error{OutOfMemory}!void {
@@ -591,7 +743,10 @@ pub const World = struct {
     pub fn removeComponent(self: *World, entity: Entity, comptime T: type) error{OutOfMemory}!bool {
         var storage_guard = self.archetypes.writeGuard();
         defer storage_guard.deinit();
-        const storage = storage_guard.get();
+        return try self.removeComponentWithStorage(storage_guard.get(), entity, T);
+    }
+
+    fn removeComponentWithStorage(self: *World, storage: *ArchetypeStorage.Inner, entity: Entity, comptime T: type) error{OutOfMemory}!bool {
         if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const src_arch = entry.archetype;
             const src_idx = entry.index;
@@ -697,6 +852,135 @@ pub const World = struct {
             return true;
         }
         return false;
+    }
+
+    pub fn removeSingleComponentBatch(self: *World, entities: []const Entity, comptime T: type, removed_mask: []bool) error{OutOfMemory}!void {
+        std.debug.assert(entities.len == removed_mask.len);
+
+        var storage_guard = self.archetypes.writeGuard();
+        defer storage_guard.deinit();
+        const storage = storage_guard.get();
+
+        const BatchItem = struct {
+            entity: Entity,
+            src_idx: usize,
+            mask_idx: usize,
+        };
+        const BatchGroup = struct {
+            src_arch: *@import("archetype.zig").Archetype,
+            remove_idx: usize,
+            items: std.ArrayListUnmanaged(BatchItem),
+        };
+
+        const t_info = reflect.getReflectInfo(T).type;
+        var groups = std.ArrayListUnmanaged(BatchGroup).empty;
+        defer {
+            for (groups.items) |*group| group.items.deinit(self.allocator);
+            groups.deinit(self.allocator);
+        }
+
+        @memset(removed_mask, false);
+
+        for (entities, 0..) |entity, mask_idx| {
+            if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
+                const src_arch = entry.archetype;
+                const src_types = src_arch.signature.types;
+
+                var remove_idx: ?usize = null;
+                for (src_types, 0..) |h, i| {
+                    if (h == t_info.hash) {
+                        remove_idx = i;
+                        break;
+                    }
+                }
+                if (remove_idx == null) continue;
+
+                var group_index: ?usize = null;
+                for (groups.items, 0..) |group, i| {
+                    if (group.src_arch == src_arch) {
+                        group_index = i;
+                        break;
+                    }
+                }
+                if (group_index == null) {
+                    try groups.append(self.allocator, .{
+                        .src_arch = src_arch,
+                        .remove_idx = remove_idx.?,
+                        .items = .empty,
+                    });
+                    group_index = groups.items.len - 1;
+                }
+
+                try groups.items[group_index.?].items.append(self.allocator, .{
+                    .entity = entity,
+                    .src_idx = entry.index,
+                    .mask_idx = mask_idx,
+                });
+            }
+        }
+
+        for (groups.items) |*group| {
+            const src_arch = group.src_arch;
+            const src_types = src_arch.signature.types;
+            const src_sizes = src_arch.component_sizes;
+            const src_arrays = src_arch.component_arrays;
+            const remove_idx = group.remove_idx;
+
+            var dst_hashes: [max_inline_migration_components]u64 = undefined;
+            var dst_sizes: [max_inline_migration_components]usize = undefined;
+            var dst_len: usize = 0;
+            for (src_types, 0..) |h, i| {
+                if (i == remove_idx) continue;
+                dst_hashes[dst_len] = h;
+                dst_sizes[dst_len] = src_sizes[i];
+                dst_len += 1;
+            }
+
+            const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
+            const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+
+            const SortCtx = struct {
+                items: []BatchItem,
+
+                pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                    return ctx.items[a_index].src_idx > ctx.items[b_index].src_idx;
+                }
+
+                pub fn swap(ctx: @This(), a_index: usize, b_index: usize) void {
+                    std.mem.swap(BatchItem, &ctx.items[a_index], &ctx.items[b_index]);
+                }
+            };
+            std.sort.pdqContext(0, group.items.items.len, SortCtx{ .items = group.items.items });
+
+            const dst_start = dst_arch.entities.items.len;
+            try dst_arch.entities.ensureTotalCapacity(self.allocator, dst_start + group.items.items.len);
+            for (dst_arch.component_arrays, 0..) |*arr, i| {
+                try arr.ensureTotalCapacity(self.allocator, arr.items.len + group.items.items.len * dst_sizes[i]);
+            }
+
+            for (group.items.items, 0..) |item, group_offset| {
+                const dst_idx = dst_start + group_offset;
+                dst_arch.entities.items.ptr[dst_idx] = item.entity;
+                dst_arch.entities.items.len += 1;
+
+                var dst_i: usize = 0;
+                for (src_types, 0..) |_, src_i| {
+                    if (src_i == remove_idx) continue;
+                    const comp_size = src_sizes[src_i];
+                    const src_arr = &src_arrays[src_i];
+                    const src_offset = item.src_idx * comp_size;
+                    const dst_arr = &dst_arch.component_arrays[dst_i];
+                    const dest = dst_arr.items.ptr + dst_arr.items.len;
+                    @memcpy(dest[0..comp_size], src_arr.items[src_offset .. src_offset + comp_size]);
+                    dst_arr.items.len += comp_size;
+                    dst_i += 1;
+                }
+
+                removeWithStorage(storage, item.entity);
+                try ArchetypeStorage.setWithStorage(storage, item.entity, .{ .archetype = dst_arch, .index = dst_idx });
+                removed_mask[item.mask_idx] = true;
+            }
+        }
     }
 
     /// Query: iterate all entities with a given component set (returns iterator)

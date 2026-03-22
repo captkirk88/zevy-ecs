@@ -316,12 +316,26 @@ pub const Manager = struct {
         return _addComponent(self, entity, T, value);
     }
 
+    pub fn addComponentBatch(self: *Manager, entities: []const Entity, comptime T: type, values: []const T) error{ EntityNotAlive, OutOfMemory }!void {
+        if (@hasDecl(T, "relation_config")) {
+            std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}", .{comptime reflect.TypeInfo.from(T).toStringEx(true)});
+        }
+        try _addComponentBatch(self, entities, T, values);
+    }
+
     /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
     pub fn removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
         if (@hasDecl(T, "relation_config")) {
             std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}, entity: {d}", .{ comptime reflect.TypeInfo.from(T).toStringEx(true), entity.id });
         }
         return _removeComponent(self, entity, T);
+    }
+
+    pub fn removeComponentBatch(self: *Manager, entities: []const Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
+        if (@hasDecl(T, "relation_config")) {
+            std.debug.panic("Use RelationManager methods to add/remove Relation components. type: {s}", .{comptime reflect.TypeInfo.from(T).toStringEx(true)});
+        }
+        try _removeComponentBatch(self, entities, T);
     }
 
     /// Get a mutable pointer to a component of type T for the given entity, or an error if entity is not alive.
@@ -631,6 +645,20 @@ pub fn _addComponent(self: *Manager, entity: Entity, comptime T: type, value: T)
     try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
 }
 
+pub fn _addComponentBatch(self: *Manager, entities: []const Entity, comptime T: type, values: []const T) error{ EntityNotAlive, OutOfMemory }!void {
+    std.debug.assert(entities.len == values.len);
+    for (entities) |entity| {
+        if (!self.isAlive(entity)) return error.EntityNotAlive;
+    }
+
+    try self.world.addSingleComponentBatch(entities, T, values);
+
+    const type_hash = reflect.typeHash(T);
+    for (entities) |entity| {
+        try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
+    }
+}
+
 /// Remove a component of type T from the given entity, or an error if not found or entity is dead.
 pub fn _removeComponent(self: *Manager, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
     if (!self.isAlive(entity)) {
@@ -640,6 +668,24 @@ pub fn _removeComponent(self: *Manager, entity: Entity, comptime T: type) error{
     if (removed) {
         const type_hash = comptime reflect.typeHash(T);
         try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+    }
+}
+
+pub fn _removeComponentBatch(self: *Manager, entities: []const Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
+    for (entities) |entity| {
+        if (!self.isAlive(entity)) return error.EntityNotAlive;
+    }
+
+    const removed_mask = try self.allocator.alloc(bool, entities.len);
+    defer self.allocator.free(removed_mask);
+
+    try self.world.removeSingleComponentBatch(entities, T, removed_mask);
+
+    const type_hash = reflect.typeHash(T);
+    for (entities, 0..) |entity, i| {
+        if (removed_mask[i]) {
+            try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+        }
     }
 }
 
