@@ -1399,12 +1399,6 @@ This now outperforms [Bevy's ECS](https://bevy.org/).
 | Deserialize 100000 Entities | 3 | 15.649 ms/op | 0 B/op | 0/op |
 | Deserialize 1000000 Entities | 3 | 145.880 ms/op | 0 B/op | 0/op |
 
-## Projects
-
-- [zevy-raylib](https://github.com/captkirk88/zevy-raylib)
-  - A game engine built on top of zevy_ecs and raylib for graphics and input handling.
-  - Uses plugins. Either call plug() or add the plugins manually.
-
 ## Dependencies
 - [zevy-reflect](https://github.com/captkirk88/zevy-reflect) - Reflection utilities for Zig.
 - [zevy-mem](https://github.com/captkirk88/zevy-mem) - Memory allocators and utilities for Zig.
