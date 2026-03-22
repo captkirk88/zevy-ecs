@@ -9,7 +9,7 @@ A high-performance, archetype-based Entity-Component-System (ECS) framework writ
 
 ## Why Zig?
 
-Good question.  The std API has changed to the point I don't even know anymore.  Ultimately, Zig has it's advantages over Rust BUT the ecosystem is still very young and *rapidly* changing.  I would recommend using this library if you want to learn about ECS architecture and are comfortable with Zig's current state.  If you want a more stable, battle-tested ECS for production use, I would recommend using a Rust library like [Bevy's ECS](https://bevyengine.org/), if you can tolerate the compilation time.
+Good question.  The std API has changed to the point I don't even know anymore.  Ultimately, Zig has it's advantages over Rust (especially it's async approach) BUT the ecosystem is still very young and *rapidly* changing.  I would recommend using this library if you want to learn about ECS architecture and are comfortable with Zig's current state.
 
 
 ## Features
@@ -1324,6 +1324,8 @@ pub fn main() !void {
 zevy_ecs includes a simple benchmarking utility to measure the performance of various operations. Below are some benchmark results for entity creation and system execution.
 
 ### Benchmarks
+
+This now outperforms [Bevy's ECS](https://bevy.org/).
 
 #### 4GHz CPU, --release=fast
 
