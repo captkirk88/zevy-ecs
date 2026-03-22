@@ -9,13 +9,31 @@ pub const OutputFormat = enum {
     plain,
     markdown,
     html,
+
+    pub fn fileExtension(self: OutputFormat) []const u8 {
+        return switch (self) {
+            .plain => "txt",
+            .markdown => "md",
+            .html => "html",
+        };
+    }
+};
+
+pub const ReportOptions = struct {
+    directory: []const u8 = "reports",
+    basename: []const u8 = "benchmark_report",
+    file_name: ?[]const u8 = null,
+    title: []const u8 = "Benchmark Results",
 };
 
 base_allocator: std.mem.Allocator,
 counting_allocator: CountingAllocator,
+output_format: OutputFormat,
+current_section: ?[]const u8,
 results: std.ArrayList(BenchmarkResult),
 
 pub const BenchmarkResult = struct {
+    section: ?[]const u8,
     name: []const u8,
     duration_ns: u64,
     iterations: usize,
@@ -26,20 +44,8 @@ pub const BenchmarkResult = struct {
     bytes_per_op: usize,
     allocs_per_op: usize,
 
-    pub fn format(self: *const BenchmarkResult, writer: *std.io.Writer) []const u8 {
-        return writer.print(
-            "{s}: {d} ns total, {d} ns/op, {f} total, {f}/op, {d} allocs/op",
-            .{
-                self.name,
-                self.duration_ns,
-                self.avg_ns,
-                mem.byteSize(self.total_bytes),
-                mem.byteSize(self.avg_bytes),
-                self.allocs_per_op,
-            },
-        ) catch |err| {
-            "Error formatting benchmark result: " ++ @errorName(err);
-        };
+    pub fn print(self: *const BenchmarkResult, writer: *std.Io.Writer, format: OutputFormat) !void {
+        try writeResult(writer, self.*, format);
     }
 };
 
@@ -48,19 +54,23 @@ pub fn allocator(self: *Self) std.mem.Allocator {
     return self.counting_allocator.allocator();
 }
 
-/// Initialize a Benchmark instance with the given allocator
-pub fn init(base_allocator: std.mem.Allocator) Self {
+/// Initialize a Benchmark instance with the given allocator and output format.
+pub fn init(base_allocator: std.mem.Allocator, output_format: OutputFormat) Self {
     return Self{
         .base_allocator = base_allocator,
         .counting_allocator = CountingAllocator.init(base_allocator),
+        .output_format = output_format,
+        .current_section = null,
         .results = std.ArrayList(BenchmarkResult).initCapacity(base_allocator, 0) catch @panic("Failed to init benchmark"),
     };
 }
 
-pub fn initWithAllocator(base_allocator: std.mem.Allocator, counting_allocator: CountingAllocator) Self {
+pub fn initWithAllocator(base_allocator: std.mem.Allocator, counting_allocator: CountingAllocator, output_format: OutputFormat) Self {
     return Self{
         .base_allocator = base_allocator,
         .counting_allocator = counting_allocator,
+        .output_format = output_format,
+        .current_section = null,
         .results = std.ArrayList(BenchmarkResult).initCapacity(base_allocator, 0) catch @panic("Failed to init benchmark"),
     };
 }
@@ -68,16 +78,41 @@ pub fn initWithAllocator(base_allocator: std.mem.Allocator, counting_allocator: 
 pub fn deinit(self: *Self) void {
     // Free each name string before deiniting the array
     for (self.results.items) |result| {
+        if (result.section) |section| self.base_allocator.free(section);
         self.base_allocator.free(result.name);
     }
+    if (self.current_section) |section| self.base_allocator.free(section);
     self.results.deinit(self.base_allocator);
     self.counting_allocator.reset();
+}
+
+pub fn beginSection(self: *Self, title: []const u8) !void {
+    const title_copy = try self.base_allocator.dupe(u8, title);
+    errdefer self.base_allocator.free(title_copy);
+
+    if (self.current_section) |existing| {
+        self.base_allocator.free(existing);
+    }
+    self.current_section = title_copy;
+}
+
+pub fn clearSection(self: *Self) void {
+    if (self.current_section) |section| {
+        self.base_allocator.free(section);
+        self.current_section = null;
+    }
 }
 
 /// Run a benchmark function multiple times and record the results
 pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, args: anytype) !BenchmarkResult {
     const name_copy = try self.base_allocator.dupe(u8, name);
     errdefer self.base_allocator.free(name_copy);
+
+    const section_copy = if (self.current_section) |section|
+        try self.base_allocator.dupe(u8, section)
+    else
+        null;
+    errdefer if (section_copy) |section| self.base_allocator.free(section);
 
     self.counting_allocator.reset();
     // std.Io.Threaded.now() ignores the Threaded userdata pointer, so an
@@ -106,6 +141,7 @@ pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, ar
     const per_op_bytes = if (ops > 0) total_bytes / ops else 0;
 
     const result = BenchmarkResult{
+        .section = section_copy,
         .name = name_copy,
         .duration_ns = total_duration,
         .iterations = 1,
@@ -122,6 +158,56 @@ pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, ar
 
 pub fn getResults(self: *Self) []const BenchmarkResult {
     return self.results.items;
+}
+
+pub fn print(self: *const Self, writer: *std.Io.Writer) !void {
+    try self.printWithTitle(writer, "Benchmark Results");
+}
+
+pub fn printWithTitle(self: *const Self, writer: *std.Io.Writer, title: []const u8) !void {
+    switch (self.output_format) {
+        .html => try self.printHtml(writer, title),
+        else => try self.printText(writer, title),
+    }
+}
+
+pub fn writeReport(self: *const Self, io: std.Io) !void {
+    try self.writeReportWithOptions(io, .{});
+}
+
+pub fn writeReportWithOptions(self: *const Self, io: std.Io, options: ReportOptions) !void {
+    try std.Io.Dir.cwd().createDirPath(io, options.directory);
+
+    const resolved_file_name = blk: {
+        if (options.file_name) |file_name| {
+            const expected_ext = self.output_format.fileExtension();
+            if (std.fs.path.extension(file_name).len == 0) {
+                break :blk try std.fmt.allocPrint(self.base_allocator, "{s}.{s}", .{ file_name, expected_ext });
+            }
+            break :blk try self.base_allocator.dupe(u8, file_name);
+        }
+        break :blk try std.fmt.allocPrint(
+            self.base_allocator,
+            "{s}.{s}",
+            .{ options.basename, self.output_format.fileExtension() },
+        );
+    };
+    defer self.base_allocator.free(resolved_file_name);
+
+    const path = try std.fmt.allocPrint(
+        self.base_allocator,
+        "{s}/{s}",
+        .{ options.directory, resolved_file_name },
+    );
+    defer self.base_allocator.free(path);
+
+    var buf: [65536]u8 = undefined;
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    defer file.close(io);
+
+    var file_writer = file.writer(io, &buf);
+    try self.printWithTitle(&file_writer.interface, options.title);
+    try file_writer.flush();
 }
 
 /// Format time value with appropriate unit
@@ -143,12 +229,163 @@ fn formatTime(time_ns: u64) struct { value: f64, unit: []const u8 } {
     return .{ .value = time_val, .unit = unit };
 }
 
-fn printResultPlain(result: BenchmarkResult) void {
+fn sectionEql(a: ?[]const u8, b: ?[]const u8) bool {
+    if (a == null and b == null) return true;
+    if (a == null or b == null) return false;
+    return std.mem.eql(u8, a.?, b.?);
+}
+
+fn writeResult(writer: *std.Io.Writer, result: BenchmarkResult, format: OutputFormat) !void {
+    switch (format) {
+        .plain => try writeResultPlain(writer, result),
+        .markdown => try writeResultMarkdown(writer, result),
+        .html => try writeResultHtml(writer, result),
+    }
+}
+
+fn writePlainSectionHeader(writer: *std.Io.Writer, title: []const u8) !void {
+    try writer.print("{s}\n", .{title});
+}
+
+fn writeMarkdownHeader(writer: *std.Io.Writer) !void {
+    try writer.writeAll("| Benchmark | Operations | Time/op | Memory/op | Allocs/op\n");
+    try writer.writeAll("|-----------|------------|---------|----------|----------|\n");
+}
+
+fn writeMarkdownSectionHeader(writer: *std.Io.Writer, title: []const u8) !void {
+    try writer.print("#### {s}\n\n", .{title});
+    try writeMarkdownHeader(writer);
+}
+
+fn writeHtmlDocumentHeader(writer: *std.Io.Writer, title: []const u8) !void {
+    try writer.writeAll("<!DOCTYPE html>\n");
+    try writer.writeAll("<html>\n");
+    try writer.writeAll("<head>\n");
+    try writer.print("  <title>{s}</title>\n", .{title});
+    try writer.writeAll("  <style>\n");
+    try writer.writeAll("    table { border-collapse: collapse; width: 100%; }\n");
+    try writer.writeAll("    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }\n");
+    try writer.writeAll("    th { background-color: #4CAF50; color: white; }\n");
+    try writer.writeAll("    tr:nth-child(even) { background-color: #f2f2f2; }\n");
+    try writer.writeAll("  </style>\n");
+    try writer.writeAll("</head>\n");
+    try writer.writeAll("<body>\n");
+    try writer.print("  <h1>{s}</h1>\n", .{title});
+}
+
+fn writeHtmlTableStart(writer: *std.Io.Writer) !void {
+    try writer.writeAll("  <table>\n");
+    try writer.writeAll("    <tr>\n");
+    try writer.writeAll("      <th>Benchmark</th>\n");
+    try writer.writeAll("      <th>Operations</th>\n");
+    try writer.writeAll("      <th>Time/op</th>\n");
+    try writer.writeAll("      <th>Memory/op</th>\n");
+    try writer.writeAll("      <th>Allocs/op</th>\n");
+    try writer.writeAll("    </tr>\n");
+}
+
+fn writeHtmlTableEnd(writer: *std.Io.Writer) !void {
+    try writer.writeAll("  </table>\n");
+}
+
+fn writeHtmlSectionHeader(writer: *std.Io.Writer, title: []const u8) !void {
+    try writer.print("  <h2>{s}</h2>\n", .{title});
+    try writeHtmlTableStart(writer);
+}
+
+fn writeHtmlDocumentFooter(writer: *std.Io.Writer) !void {
+    try writer.writeAll("</body>\n");
+    try writer.writeAll("</html>\n");
+}
+
+fn printText(self: *const Self, writer: *std.Io.Writer, title: []const u8) !void {
+    _ = title;
+
+    if (self.results.items.len == 0) return;
+
+    if (self.output_format == .markdown) {
+        var last_section: ?[]const u8 = null;
+        var wrote_header_without_section = false;
+
+        for (self.results.items, 0..) |result, index| {
+            if (!sectionEql(last_section, result.section)) {
+                if (index != 0) try writer.writeAll("\n");
+                if (result.section) |section| {
+                    try writeMarkdownSectionHeader(writer, section);
+                } else {
+                    try writeMarkdownHeader(writer);
+                    wrote_header_without_section = true;
+                }
+                last_section = result.section;
+            } else if (result.section == null and !wrote_header_without_section) {
+                try writeMarkdownHeader(writer);
+                wrote_header_without_section = true;
+            }
+
+            try writeResult(writer, result, self.output_format);
+        }
+        try writer.writeAll("\n");
+        return;
+    }
+
+    var last_section: ?[]const u8 = null;
+    for (self.results.items, 0..) |result, index| {
+        if (!sectionEql(last_section, result.section)) {
+            if (index != 0) try writer.writeAll("\n");
+            if (result.section) |section| {
+                try writePlainSectionHeader(writer, section);
+            }
+            last_section = result.section;
+        }
+        try writeResult(writer, result, self.output_format);
+    }
+}
+
+fn printHtml(self: *const Self, writer: *std.Io.Writer, title: []const u8) !void {
+    try writeHtmlDocumentHeader(writer, title);
+
+    if (self.results.items.len == 0) {
+        try writeHtmlDocumentFooter(writer);
+        return;
+    }
+
+    var open_table = false;
+    var last_section: ?[]const u8 = null;
+
+    for (self.results.items, 0..) |result, index| {
+        if (!sectionEql(last_section, result.section)) {
+            if (open_table) {
+                try writeHtmlTableEnd(writer);
+                try writer.writeAll("\n");
+            }
+
+            if (result.section) |section| {
+                try writeHtmlSectionHeader(writer, section);
+            } else {
+                if (index == 0) {
+                    try writeHtmlTableStart(writer);
+                } else {
+                    try writeHtmlTableStart(writer);
+                }
+            }
+
+            open_table = true;
+            last_section = result.section;
+        }
+
+        try writeResult(writer, result, self.output_format);
+    }
+
+    if (open_table) try writeHtmlTableEnd(writer);
+    try writeHtmlDocumentFooter(writer);
+}
+
+fn writeResultPlain(writer: *std.Io.Writer, result: BenchmarkResult) !void {
     const time = formatTime(result.avg_ns);
     const mem_size = mem.utils.byteSize(result.avg_bytes);
 
-    std.debug.print("{s}\n", .{result.name});
-    std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {f}/op {d}/op\n", .{
+    try writer.print("{s}\n", .{result.name});
+    try writer.print("ops: {d:>8} {d:>9.3} {s}/op {f}/op {d}/op\n", .{
         result.ops_per_iter,
         time.value,
         time.unit,
@@ -168,11 +405,11 @@ pub fn printMarkdownHeaderWithTitle(title: []const u8) void {
     Self.printMarkdownHeader();
 }
 
-fn printResultMarkdown(result: BenchmarkResult) void {
+fn writeResultMarkdown(writer: *std.Io.Writer, result: BenchmarkResult) !void {
     const time = formatTime(result.avg_ns);
     const mem_size = mem.utils.byteSize(result.avg_bytes);
 
-    std.debug.print("| {s} | {d} | {d:.3} {s}/op | {f}/op | {d}/op |\n", .{
+    try writer.print("| {s} | {d} | {d:.3} {s}/op | {f}/op | {d}/op |\n", .{
         result.name,
         result.ops_per_iter,
         time.value,
@@ -216,6 +453,47 @@ pub fn printHtmlFooter() void {
     std.debug.print("  </table>\n", .{});
     std.debug.print("</body>\n", .{});
     std.debug.print("</html>\n", .{});
+}
+
+fn writeResultHtml(writer: *std.Io.Writer, result: BenchmarkResult) !void {
+    const time = formatTime(result.avg_ns);
+    const mem_size = mem.utils.byteSize(result.avg_bytes);
+
+    try writer.writeAll("    <tr>\n");
+    try writer.print("      <td>{s}</td>\n", .{result.name});
+    try writer.print("      <td>{d}</td>\n", .{result.ops_per_iter});
+    try writer.print("      <td>{d:.3} {s}/op</td>\n", .{ time.value, time.unit });
+    try writer.print("      <td>{f}/op</td>\n", .{mem_size});
+    try writer.print("      <td>{d}/op</td>\n", .{result.allocs_per_op});
+    try writer.writeAll("    </tr>\n");
+}
+
+fn printResultPlain(result: BenchmarkResult) void {
+    const time = formatTime(result.avg_ns);
+    const mem_size = mem.utils.byteSize(result.avg_bytes);
+
+    std.debug.print("{s}\n", .{result.name});
+    std.debug.print("ops: {d:>8} {d:>9.3} {s}/op {f}/op {d}/op\n", .{
+        result.ops_per_iter,
+        time.value,
+        time.unit,
+        mem_size,
+        result.allocs_per_op,
+    });
+}
+
+fn printResultMarkdown(result: BenchmarkResult) void {
+    const time = formatTime(result.avg_ns);
+    const mem_size = mem.utils.byteSize(result.avg_bytes);
+
+    std.debug.print("| {s} | {d} | {d:.3} {s}/op | {f}/op | {d}/op |\n", .{
+        result.name,
+        result.ops_per_iter,
+        time.value,
+        time.unit,
+        mem_size,
+        result.allocs_per_op,
+    });
 }
 
 fn printResultHtml(result: BenchmarkResult) void {

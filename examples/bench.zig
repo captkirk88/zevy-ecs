@@ -20,7 +20,7 @@ pub fn main(init: std.process.Init) !void {
     //if (builtin.mode == .Debug) return;
 
     const allocator = init.gpa;
-    var bench = Benchmark.init(allocator);
+    var bench = Benchmark.init(allocator, .markdown);
     defer bench.deinit();
     try runBenchmarks(&bench, allocator, init.io);
 }
@@ -29,7 +29,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     const counts = [_]usize{ 100, 1_000, 10_000, 100_000, 1_000_000 };
 
     // Non-batch Creation
-    Benchmark.printMarkdownHeaderWithTitle("Creation");
+    try bench.beginSection("Creation");
     for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -37,14 +37,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchCreateEntities, .{ &manager, count });
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchCreateEntities, .{ &manager, count });
     }
-
-    std.debug.print("\n", .{});
 
     // Batch Creation
-    Benchmark.printMarkdownHeaderWithTitle("Batch Creation");
+    try bench.beginSection("Batch Creation");
     for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -52,14 +49,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, batchCreateEntities, .{ &manager, count, allocator });
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, batchCreateEntities, .{ &manager, count, allocator });
     }
 
-    std.debug.print("\n", .{});
-
     // Mixed Systems
-    Benchmark.printMarkdownHeaderWithTitle("Mixed Systems");
+    try bench.beginSection("Mixed Systems");
     inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -73,15 +67,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Run 7 Systems on {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystems, .{ &manager, &systems });
-
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchMixedSystems, .{ &manager, &systems });
     }
 
-    std.debug.print("\n", .{});
-
     // Scheduler
-    Benchmark.printMarkdownHeaderWithTitle("Scheduler");
+    try bench.beginSection("Scheduler");
     inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -97,14 +87,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Run Scheduler Stage on {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerMixedSystems, .{ &scheduler, &manager });
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerMixedSystems, .{ &scheduler, &manager });
     }
 
-    std.debug.print("\n", .{});
-
     // CRUD Systems
-    Benchmark.printMarkdownHeaderWithTitle("CRUD System");
+    try bench.beginSection("CRUD System");
     inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -117,14 +104,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Run CRUD System on {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchRunCrudSystem, .{ &manager, crud_system.eraseType() });
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchRunCrudSystem, .{ &manager, crud_system.eraseType() });
     }
 
-    std.debug.print("\n", .{});
-
     // Relations
-    Benchmark.printMarkdownHeaderWithTitle("Relations");
+    try bench.beginSection("Relations");
     for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -153,14 +137,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         defer allocator.free(label);
 
         // Benchmark running the system (acquires its own write lock on RelationManager)
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchRunTransformSystem, .{ &manager, system_handle });
     }
 
-    std.debug.print("\n", .{});
-
     // Serialization
-    Benchmark.printMarkdownHeaderWithTitle("Serialization");
+    try bench.beginSection("Serialization");
     inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -171,15 +152,11 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Serialize {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchSerialize, .{ &manager, allocator, io, entities });
-
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchSerialize, .{ &manager, allocator, io, entities });
     }
 
-    std.debug.print("\n", .{});
-
     // Deserialization
-    Benchmark.printMarkdownHeaderWithTitle("Deserialization");
+    try bench.beginSection("Deserialization");
     inline for (counts) |count| {
         var manager = try Manager.init(bench.allocator());
         defer manager.deinit();
@@ -190,12 +167,18 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "Deserialize {d} Entities", .{count});
         defer allocator.free(label);
 
-        const result = try bench.run(label, BENCH_OPT_COUNT, benchDeserialize, .{ &manager, allocator, io, count });
-
-        Benchmark.printResult(result, .markdown);
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchDeserialize, .{ &manager, allocator, io, count });
     }
 
-    std.debug.print("\n", .{});
+    var stdout_buf: [65536]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
+    try bench.print(&stdout_writer.interface);
+    try stdout_writer.flush();
+
+    try bench.writeReportWithOptions(io, .{
+        .directory = ".",
+        .file_name = "BENCHMARK.md",
+    });
 }
 
 // Test components
