@@ -407,6 +407,10 @@ pub const Scheduler = struct {
             if (first_err == null) first_err = err;
         };
 
+        // Discard consumed events once per stage instead of per-component-change.
+        ecs.component_added.discardHandled();
+        ecs.component_removed.discardHandled();
+
         if (first_err) |err| return err;
     }
 

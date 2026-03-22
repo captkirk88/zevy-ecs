@@ -564,7 +564,12 @@ pub const Manager = struct {
     pub fn runSystemUntyped(self: *Manager, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
         const sys_ptr = self.systems.get(sys_handle.handle) orelse return error.InvalidSystemHandle;
         const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr));
-        return try s.run(self, s.ctx);
+        const result = try s.run(self, s.ctx);
+        // Discard events that were consumed (marked handled) during this system run.
+        // Called once here instead of per-component-change to avoid O(n²) scans.
+        self.component_added.discardHandled();
+        self.component_removed.discardHandled();
+        return result;
     }
 
     /// Cache an existing system value.
@@ -623,7 +628,6 @@ pub fn _addComponent(self: *Manager, entity: Entity, comptime T: type, value: T)
     try self.world.add(entity, tuple);
 
     const type_hash = reflect.typeHash(T);
-    self.component_removed.discardHandled();
     try self.component_added.push(.{ .entity = entity, .type_hash = type_hash });
 }
 
@@ -632,10 +636,11 @@ pub fn _removeComponent(self: *Manager, entity: Entity, comptime T: type) error{
     if (!self.isAlive(entity)) {
         return error.EntityNotAlive;
     }
-    const type_hash = reflect.typeHash(T);
-    try self.world.removeComponent(entity, T);
-    self.component_removed.discardHandled();
-    try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+    const removed = try self.world.removeComponent(entity, T);
+    if (removed) {
+        const type_hash = comptime reflect.typeHash(T);
+        try self.component_removed.push(.{ .entity = entity, .type_hash = type_hash });
+    }
 }
 
 test "Query with just Entity" {

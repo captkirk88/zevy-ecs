@@ -721,9 +721,8 @@ pub const CommandsSystemParam = struct {
     }
 
     pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Commands {
-        const commands = try Commands.init(e.allocator, e);
         const commands_ptr = try e.allocator.create(Commands);
-        commands_ptr.* = commands;
+        commands_ptr.* = Commands.init(e.allocator, e);
         return commands_ptr;
     }
 

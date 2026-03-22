@@ -22,7 +22,7 @@ test "World.removeComponent migrates archetype and keeps other components" {
     try std.testing.expect(world.has(entity, A));
     try std.testing.expect(world.has(entity, B));
 
-    try world.removeComponent(entity, B);
+    _ = try world.removeComponent(entity, B);
 
     try std.testing.expect(world.has(entity, A));
     try std.testing.expect(!world.has(entity, B));
@@ -38,7 +38,7 @@ test "World.removeComponent is no-op when component not present" {
     try std.testing.expect(world.has(entity, A));
     try std.testing.expect(!world.has(entity, B));
 
-    try world.removeComponent(entity, B);
+    _ = try world.removeComponent(entity, B);
 
     try std.testing.expect(world.has(entity, A));
     try std.testing.expect(!world.has(entity, B));
@@ -53,7 +53,7 @@ test "World.removeComponent on last component leaves entity with no components" 
 
     try std.testing.expect(world.has(entity, A));
 
-    try world.removeComponent(entity, A);
+    _ = try world.removeComponent(entity, A);
 
     try std.testing.expect(!world.has(entity, A));
 

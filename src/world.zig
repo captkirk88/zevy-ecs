@@ -13,6 +13,8 @@ const ComponentReader = serialize.ComponentReader;
 const ComponentWriter = serialize.ComponentWriter;
 const EntityMapEntry = @import("archetype_storage.zig").EntityMapEntry;
 
+const max_inline_migration_components = 16;
+
 /// The World is the main interface for managing entities and components
 pub const World = struct {
     allocator: std.mem.Allocator,
@@ -49,7 +51,126 @@ pub const World = struct {
 
         // Check if entity exists (migration path)
         if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
-            // Slow: Gather new component info, using heap-allocated buffers for data
+            const src_arch = entry.archetype;
+            const src_idx = entry.index;
+            const src_types = src_arch.signature.types;
+            const src_sizes = src_arch.component_sizes;
+            const src_arrays = src_arch.component_arrays;
+
+            // Optimization: if all new components already exist in this archetype,
+            // update values in place without a migration (avoids N allocs + N memcpys).
+            {
+                var all_present = true;
+                inline for (info.@"struct".fields) |field| {
+                    const nh = comptime reflect.typeHash(field.type);
+                    var found_this = false;
+                    for (src_types) |sh| {
+                        if (sh == nh) {
+                            found_this = true;
+                            break;
+                        }
+                    }
+                    if (!found_this) all_present = false;
+                }
+                if (all_present) {
+                    inline for (info.@"struct".fields, 0..) |field, fi| {
+                        const FieldType = field.type;
+                        const nh = comptime reflect.typeHash(FieldType);
+                        const comp_sz = @sizeOf(FieldType);
+                        for (src_types, 0..) |sh, j| {
+                            if (sh == nh) {
+                                const arr = &src_arrays[j];
+                                const offset = src_idx * comp_sz;
+                                var v: FieldType = values[fi];
+                                @memcpy(arr.items[offset .. offset + comp_sz], std.mem.asBytes(&v));
+                                break;
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+
+            if (field_count == 1 and src_types.len + 1 <= max_inline_migration_components) {
+                const field = info.@"struct".fields[0];
+                const FieldType = field.type;
+                const new_info = reflect.getReflectInfo(FieldType).type;
+
+                var dst_hashes: [max_inline_migration_components]u64 = undefined;
+                var dst_sizes: [max_inline_migration_components]usize = undefined;
+
+                var insert_idx: usize = src_types.len;
+                var src_i: usize = 0;
+                var dst_i: usize = 0;
+                var inserted = false;
+                while (src_i < src_types.len) : (src_i += 1) {
+                    if (!inserted and new_info.hash < src_types[src_i]) {
+                        dst_hashes[dst_i] = new_info.hash;
+                        dst_sizes[dst_i] = new_info.size;
+                        insert_idx = dst_i;
+                        dst_i += 1;
+                        inserted = true;
+                    }
+                    dst_hashes[dst_i] = src_types[src_i];
+                    dst_sizes[dst_i] = src_sizes[src_i];
+                    dst_i += 1;
+                }
+                if (!inserted) {
+                    dst_hashes[dst_i] = new_info.hash;
+                    dst_sizes[dst_i] = new_info.size;
+                    insert_idx = dst_i;
+                    dst_i += 1;
+                }
+
+                var runtime_value: FieldType = values[0];
+                const new_bytes = std.mem.asBytes(&runtime_value);
+                const dst_len = dst_i;
+                const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
+                const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+                const dst_idx = dst_arch.entities.items.len;
+
+                if (dst_idx == 0) {
+                    const reserve_entities = @max(@as(usize, 1), src_arch.entities.items.len);
+                    try dst_arch.entities.ensureTotalCapacity(self.allocator, reserve_entities);
+                    for (dst_arch.component_arrays, 0..) |*arr, i| {
+                        try arr.ensureTotalCapacity(self.allocator, reserve_entities * dst_sizes[i]);
+                    }
+                }
+
+                try dst_arch.entities.ensureUnusedCapacity(self.allocator, 1);
+                for (dst_arch.component_arrays, 0..) |*arr, i| {
+                    try arr.ensureUnusedCapacity(self.allocator, dst_sizes[i]);
+                }
+
+                dst_arch.entities.items.ptr[dst_idx] = entity;
+                dst_arch.entities.items.len += 1;
+
+                src_i = 0;
+                for (dst_sizes[0..dst_len], 0..) |comp_size, i| {
+                    const arr = &dst_arch.component_arrays[i];
+                    const dest = arr.items.ptr + arr.items.len;
+                    if (i == insert_idx) {
+                        @memcpy(dest[0..comp_size], new_bytes[0..comp_size]);
+                    } else {
+                        const src_arr = &src_arrays[src_i];
+                        const src_offset = src_idx * comp_size;
+                        @memcpy(dest[0..comp_size], src_arr.items[src_offset .. src_offset + comp_size]);
+                        src_i += 1;
+                    }
+                    arr.items.len += comp_size;
+                }
+
+                removeWithStorage(storage, entity);
+                try ArchetypeStorage.setWithStorage(storage, entity, .{ .archetype = dst_arch, .index = dst_idx });
+                return;
+            }
+
+            // Scratch arena: all temp migration buffers come from a single page alloc,
+            // freed in one shot via defer instead of N individual frees.
+            var scratch = std.heap.ArenaAllocator.init(self.allocator);
+            defer scratch.deinit();
+            const tmp = scratch.allocator();
+
             var new_components: [field_count]ComponentInstance = undefined;
             var heap_data: [field_count][]u8 = undefined;
             inline for (info.@"struct".fields, 0..) |field, i| {
@@ -57,7 +178,7 @@ pub const World = struct {
                 const comp_info = reflect.getReflectInfo(FieldType).type;
                 var runtime_value: FieldType = values[i];
                 const bytes = std.mem.asBytes(&runtime_value);
-                heap_data[i] = try self.allocator.alloc(u8, comp_info.size);
+                heap_data[i] = try tmp.alloc(u8, comp_info.size);
                 @memmove(heap_data[i], bytes);
                 new_components[i] = ComponentInstance{
                     .hash = comp_info.hash,
@@ -65,42 +186,23 @@ pub const World = struct {
                     .data = heap_data[i][0..comp_info.size],
                 };
             }
-            defer for (heap_data) |d| self.allocator.free(d);
-
-            const src_arch = entry.archetype;
-            const src_idx = entry.index;
-            const src_types = src_arch.signature.types;
-            const src_sizes = src_arch.component_sizes;
-            const src_arrays = src_arch.component_arrays;
 
             // Build new signature: merge old and new component hashes, deduped
-            var all_hashes = try std.ArrayList(u64).initCapacity(self.allocator, src_types.len + field_count);
-            defer all_hashes.deinit(self.allocator);
-            for (src_types) |h| try all_hashes.append(self.allocator, h);
+            var all_hashes = try std.ArrayList(u64).initCapacity(tmp, src_types.len + field_count);
+            for (src_types) |h| try all_hashes.append(tmp, h);
             for (new_components) |comp| {
                 var found = false;
                 for (src_types) |h| {
                     if (h == comp.hash) found = true;
                 }
-                if (!found) try all_hashes.append(self.allocator, comp.hash);
+                if (!found) try all_hashes.append(tmp, comp.hash);
             }
             const hashes = all_hashes.items;
             std.sort.insertion(u64, hashes, {}, std.sort.asc(u64));
 
             // Build new sizes and data arrays in signature order
-            var sizes_mig = try self.allocator.alloc(usize, hashes.len);
-            var data_mig = try self.allocator.alloc([]const u8, hashes.len);
-            defer self.allocator.free(sizes_mig);
-            defer self.allocator.free(data_mig);
-
-            // Temporary storage for copied component data to avoid aliasing
-            var temp_data = try self.allocator.alloc([]u8, hashes.len);
-            defer {
-                for (temp_data) |data| {
-                    if (data.len > 0) self.allocator.free(data);
-                }
-                self.allocator.free(temp_data);
-            }
+            var sizes_mig = try tmp.alloc(usize, hashes.len);
+            var data_mig = try tmp.alloc([]const u8, hashes.len);
 
             for (hashes, 0..) |h, i| {
                 // If this is a new component, use new_components
@@ -108,39 +210,34 @@ pub const World = struct {
                 for (new_components) |comp| {
                     if (comp.hash == h) {
                         sizes_mig[i] = comp.size;
-                        // Copy new component data to temp storage
-                        temp_data[i] = try self.allocator.alloc(u8, comp.size);
-                        @memcpy(temp_data[i], comp.data[0..comp.size]);
-                        data_mig[i] = temp_data[i];
+                        const copy = try tmp.alloc(u8, comp.size);
+                        @memcpy(copy, comp.data[0..comp.size]);
+                        data_mig[i] = copy;
                         found_new = true;
                         break;
                     }
                 }
                 if (!found_new) {
-                    // Copy from old archetype to temp storage to avoid aliasing
+                    // Copy from old archetype into scratch to avoid aliasing after removeWithStorage
                     for (src_types, 0..) |src_h, j| {
                         if (src_h == h) {
                             sizes_mig[i] = src_sizes[j];
                             const comp_size = src_sizes[j];
                             const arr = &src_arrays[j];
                             const offset = src_idx * comp_size;
-                            // Copy to temporary storage instead of referencing arr.items directly
-                            temp_data[i] = try self.allocator.alloc(u8, comp_size);
-                            @memcpy(temp_data[i], arr.items[offset .. offset + comp_size]);
-                            data_mig[i] = temp_data[i];
+                            const copy = try tmp.alloc(u8, comp_size);
+                            @memcpy(copy, arr.items[offset .. offset + comp_size]);
+                            data_mig[i] = copy;
                             break;
                         }
                     }
                 }
             }
-            // Always heap-allocate hashes for migration signature
-            const hashes_heap = try self.allocator.alloc(u64, hashes.len);
-            @memmove(hashes_heap, hashes);
-            const signature_mig = ArchetypeSignature{ .types = hashes_heap };
+            // Signature uses scratch memory; getOrCreateWithStorage makes its own heap copy if needed
+            const signature_mig = ArchetypeSignature{ .types = hashes };
             removeWithStorage(storage, entity); // Remove from old archetype before adding to new
             try self.archetypes.addWithStorage(storage, entity, signature_mig, sizes_mig, data_mig);
-            // Free the migration signature's types after use
-            self.allocator.free(signature_mig.types);
+            // scratch.deinit() (deferred above) frees all temp buffers in one shot
         } else {
             if (field_count == 0) {
                 // Empty entity - special case
@@ -489,49 +586,117 @@ pub const World = struct {
         }
     }
 
-    /// Remove a single component T from an entity by migrating it to a new archetype without T
-    pub fn removeComponent(self: *World, entity: Entity, comptime T: type) error{OutOfMemory}!void {
+    /// Remove a single component T from an entity by migrating it to a new archetype without T.
+    /// Returns true if the component was present and removed, false if the entity had no such component.
+    pub fn removeComponent(self: *World, entity: Entity, comptime T: type) error{OutOfMemory}!bool {
         var storage_guard = self.archetypes.writeGuard();
         defer storage_guard.deinit();
         const storage = storage_guard.get();
         if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const src_arch = entry.archetype;
             const src_idx = entry.index;
-            // Build new signature: remove T's hash from the current signature
             const t_info = reflect.getReflectInfo(T).type;
             const src_types = src_arch.signature.types;
-            var new_types = try std.ArrayList(u64).initCapacity(self.allocator, src_types.len);
-            defer new_types.deinit(self.allocator);
-            var new_sizes = try std.ArrayList(usize).initCapacity(self.allocator, src_types.len);
-            defer new_sizes.deinit(self.allocator);
-            var new_data = try std.ArrayList([]const u8).initCapacity(self.allocator, src_types.len);
-            defer new_data.deinit(self.allocator);
+
+            // Early exit: avoid any allocation if T is not in this archetype
+            var t_found = false;
+            for (src_types) |h| {
+                if (h == t_info.hash) {
+                    t_found = true;
+                    break;
+                }
+            }
+            if (!t_found) return false;
+
+            if (src_types.len <= max_inline_migration_components) {
+                var dst_hashes: [max_inline_migration_components]u64 = undefined;
+                var dst_sizes: [max_inline_migration_components]usize = undefined;
+
+                var remove_idx: usize = 0;
+                var dst_len: usize = 0;
+                for (src_types, 0..) |h, i| {
+                    if (h == t_info.hash) {
+                        remove_idx = i;
+                        continue;
+                    }
+                    dst_hashes[dst_len] = h;
+                    dst_sizes[dst_len] = src_arch.component_sizes[i];
+                    dst_len += 1;
+                }
+
+                const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
+                const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+                const dst_idx = dst_arch.entities.items.len;
+
+                if (dst_idx == 0) {
+                    const reserve_entities = @max(@as(usize, 1), src_arch.entities.items.len);
+                    try dst_arch.entities.ensureTotalCapacity(self.allocator, reserve_entities);
+                    for (dst_arch.component_arrays, 0..) |*arr, i| {
+                        try arr.ensureTotalCapacity(self.allocator, reserve_entities * dst_sizes[i]);
+                    }
+                }
+
+                try dst_arch.entities.ensureUnusedCapacity(self.allocator, 1);
+                for (dst_arch.component_arrays, 0..) |*arr, i| {
+                    try arr.ensureUnusedCapacity(self.allocator, dst_sizes[i]);
+                }
+
+                dst_arch.entities.items.ptr[dst_idx] = entity;
+                dst_arch.entities.items.len += 1;
+
+                var dst_i: usize = 0;
+                for (src_types, 0..) |_, src_i| {
+                    if (src_i == remove_idx) continue;
+                    const comp_size = src_arch.component_sizes[src_i];
+                    const src_arr = &src_arch.component_arrays[src_i];
+                    const src_offset = src_idx * comp_size;
+                    const dst_arr = &dst_arch.component_arrays[dst_i];
+                    const dest = dst_arr.items.ptr + dst_arr.items.len;
+                    @memcpy(dest[0..comp_size], src_arr.items[src_offset .. src_offset + comp_size]);
+                    dst_arr.items.len += comp_size;
+                    dst_i += 1;
+                }
+
+                removeWithStorage(storage, entity);
+                try ArchetypeStorage.setWithStorage(storage, entity, .{ .archetype = dst_arch, .index = dst_idx });
+                return true;
+            }
+
+            // Scratch arena: all temp buffers freed in one shot via defer
+            var scratch = std.heap.ArenaAllocator.init(self.allocator);
+            defer scratch.deinit();
+            const tmp = scratch.allocator();
+
+            var new_types = try std.ArrayList(u64).initCapacity(tmp, src_types.len);
+            var new_sizes = try std.ArrayList(usize).initCapacity(tmp, src_types.len);
+            var new_data = try std.ArrayList([]const u8).initCapacity(tmp, src_types.len);
             var n: usize = 0;
             for (src_types, 0..) |h, i| {
                 if (h != t_info.hash) {
-                    try new_types.append(self.allocator, h);
-                    try new_sizes.append(self.allocator, src_arch.component_sizes[i]);
+                    try new_types.append(tmp, h);
+                    try new_sizes.append(tmp, src_arch.component_sizes[i]);
                     const comp_size = src_arch.component_sizes[i];
                     const arr = &src_arch.component_arrays[i];
                     const offset = src_idx * comp_size;
-                    try new_data.append(self.allocator, arr.items[offset .. offset + comp_size]);
+                    // Copy data NOW before removeWithStorage does a swap-and-pop at src_idx
+                    const copy = try tmp.alloc(u8, comp_size);
+                    @memcpy(copy, arr.items[offset .. offset + comp_size]);
+                    try new_data.append(tmp, copy);
                     n += 1;
                 }
             }
-            if (n == src_types.len) return; // T not found, nothing to do
-            // Create new signature with heap-allocated types array
-            const dst_types_heap = try self.allocator.alloc(u64, n);
-            @memmove(dst_types_heap, new_types.items[0..n]);
+            // Use scratch-backed signature; getOrCreateWithStorage makes its own heap copy if new
+            const dst_signature = ArchetypeSignature{ .types = new_types.items[0..n] };
             const dst_sizes = new_sizes.items[0..n];
             const dst_data = new_data.items[0..n];
-            const dst_signature = ArchetypeSignature{ .types = dst_types_heap };
-            // Remove from old archetype first
+            // Remove entity from old archetype (swap-and-pop) - data already copied above
             removeWithStorage(storage, entity);
             // Add to new archetype
-            self.archetypes.addWithStorage(storage, entity, dst_signature, dst_sizes, dst_data) catch return;
-            // Free the heap-allocated signature.types after use
-            self.allocator.free(dst_signature.types);
+            try self.archetypes.addWithStorage(storage, entity, dst_signature, dst_sizes, dst_data);
+            // scratch.deinit() (deferred above) frees all temp buffers
+            return true;
         }
+        return false;
     }
 
     /// Query: iterate all entities with a given component set (returns iterator)

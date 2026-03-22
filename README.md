@@ -4,6 +4,9 @@ A high-performance, archetype-based Entity-Component-System (ECS) framework writ
 
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0.dev-blue.svg)](https://ziglang.org/)
 
+> [!NOTE]
+> Work-in-progress - asynchronous systems scheduling and backend optimizations in the works.  The API is mostly stable but may still see some changes as I optimize. See the `zig-1.51` branch (yes I messed up the branch name) for a more stable version compatible with Zig 0.15.x but I'll probably delete it because the new zevy-ecs version is much better and Zig 0.16-dev has been out for a while now.
+
 ## Why Zig?
 
 Good question.  The std API has changed to the point I don't even know anymore.  Ultimately, Zig has it's advantages over Rust BUT the ecosystem is still very young and *rapidly* changing.  I would recommend using this library if you want to learn about ECS architecture and are comfortable with Zig's current state.  If you want a more stable, battle-tested ECS for production use, I would recommend using a Rust library like [Bevy's ECS](https://bevyengine.org/), if you can tolerate the compilation time.
