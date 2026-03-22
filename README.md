@@ -1050,9 +1050,12 @@ pub const RenderPlugin = struct {
 
 The Scheduler manages system execution order through stages. Systems are organized into predefined or custom stages that run in a specific order, allowing you to control the flow of your game loop or application.
 
+> [!NOTE]
+> The Scheduler runs stage work internally using `io.async`. If you need a specific set of systems to run synchronously and in-order within a stage, wrap them with `chain(...)` and register that chained system instead of registering those systems separately.
+
 #### Predefined Stages
 
-zevy_ecs comes with the following predefined stages (in execution order):
+zevy_ecs comes with the following predefined stages (in execution order) but these are not required and you can create your own custom stages with any priority:
 
 - `Stages.PreStartup` - Runs before startup initialization
 - `Stages.Startup` - Initial setup and initialization
