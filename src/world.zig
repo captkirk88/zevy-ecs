@@ -1047,33 +1047,11 @@ pub const World = struct {
     }
 
     /// Query: iterate all entities with a given component set (returns iterator)
-    pub fn query(self: *World, comptime Components: anytype, comptime Exclude: anytype) Query(Components, Exclude) {
+    pub fn query(self: *World, comptime Components: anytype) Query(Components) {
         const components_type = if (@typeInfo(@TypeOf(Components)) == .type) Components else @TypeOf(Components);
         const info = @typeInfo(components_type);
         comptime if (info != .@"struct") @compileError("Components must be a struct with named fields or tuple of types");
 
-        const field_count = info.@"struct".fields.len;
-        var hashes: [field_count]u64 = undefined;
-        inline for (info.@"struct".fields, 0..) |field, i| {
-            const T = field.type;
-            const comp_info = reflect.getReflectInfo(T).type;
-            hashes[i] = comp_info.hash;
-        }
-        std.sort.insertion(u64, &hashes, {}, std.sort.asc(u64));
-
-        const exclude_type = if (@typeInfo(@TypeOf(Exclude)) == .type) Exclude else @TypeOf(Exclude);
-        const exclude_info = @typeInfo(exclude_type);
-        comptime if (exclude_info != .@"struct") @compileError("Exclude must be a struct with named fields or tuple of types");
-
-        const exclude_count = exclude_info.@"struct".fields.len;
-        var exclude_hashes: [exclude_count]u64 = undefined;
-        inline for (exclude_info.@"struct".fields, 0..) |field, i| {
-            const T = field.type;
-            const comp_info = reflect.getReflectInfo(T).type;
-            exclude_hashes[i] = comp_info.hash;
-        }
-        std.sort.insertion(u64, &exclude_hashes, {}, std.sort.asc(u64));
-
-        return @import("query.zig").Query(Components, Exclude).init(&self.archetypes);
+        return @import("query.zig").Query(Components).init(&self.archetypes);
     }
 };

@@ -500,15 +500,17 @@ pub const Manager = struct {
     ///
     /// Example:
     /// ```zig
-    /// const query = manager.query(struct{pos: Position, vel: Velocity}, struct{});
+    /// const query = manager.query(struct{pos: Position, vel: Velocity});
+    /// // or
+    /// const query = manager.query(.{Position, Velocity});
     /// while (query.next()) |q| {
-    ///     const pos: *Position = q.pos;
-    ///     const vel: *Velocity = q.vel;
+    ///     const pos: *Position = q.pos; // q[0]
+    ///     const vel: *Velocity = q.vel; // q[1]
     ///     // Process components
     /// }
     /// ```
-    pub fn query(self: *Manager, comptime types: anytype, comptime exclude: anytype) qry.Query(types, exclude) {
-        return self.world.query(types, exclude);
+    pub fn query(self: *Manager, comptime types: anytype) qry.Query(types) {
+        return self.world.query(types);
     }
 
     /// Create a system from a function and parameter registry.
@@ -516,7 +518,7 @@ pub const Manager = struct {
     ///
     /// Example:
     /// ```zig
-    /// fn my_system(manager: *Manager, res: Res(MyResourceType), query: Query(.{Position, Velocity}, .{})) void {
+    /// fn my_system(manager: *Manager, res: Res(MyResourceType), query: Query(.{Position, Velocity})) void {
     ///     // System logic here
     /// }
     ///
@@ -694,7 +696,7 @@ test "Query with just Entity" {
         _ = ecs_instance.createEmpty();
     }
 
-    var query = ecs_instance.query(struct { entity: Entity }, struct {});
+    var query = ecs_instance.query(struct { entity: Entity });
     defer query.deinit();
     var count: usize = 0;
     while (query.next()) |q| {
@@ -713,7 +715,7 @@ test "Create entity using create() with null or empty" {
         _ = ecs.create(.{});
     }
 
-    var query = ecs.query(struct { entity: Entity }, struct {});
+    var query = ecs.query(struct { entity: Entity });
     defer query.deinit();
     var count: usize = 0;
     while (query.next()) |q| {

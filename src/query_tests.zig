@@ -1,6 +1,8 @@
 const std = @import("std");
 const query_mod = @import("query.zig");
 const Query = query_mod.Query;
+const With = query_mod.With;
+const Without = query_mod.Without;
 const ecs = @import("ecs.zig");
 const Manager = ecs.Manager;
 const Entity = ecs.Entity;
@@ -38,7 +40,7 @@ test "Query - basic iteration with single component" {
         _ = manager.create(.{pos});
     }
 
-    var q = manager.query(struct { pos: Position }, struct {});
+    var q = manager.query(struct { pos: Position });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
@@ -66,7 +68,7 @@ test "Query - multiple components" {
         _ = manager.create(.{pos});
     }
 
-    var q = manager.query(struct { pos: Position, vel: Velocity }, struct {});
+    var q = manager.query(struct { pos: Position, vel: Velocity });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
@@ -79,7 +81,7 @@ test "Query - multiple components" {
     try std.testing.expect(count == 5);
 }
 
-test "Query - exclude pattern" {
+test "Query - Without(T) filters archetypes without yielding a field" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
 
@@ -98,9 +100,18 @@ test "Query - exclude pattern" {
         _ = manager.create(.{ pos, health, armor });
     }
 
-    // Query for Position and Health, but exclude Armor
-    var q = manager.query(struct { pos: Position, health: Health }, struct { armor: Armor });
+    // Query for Position and Health, but exclude Armor without producing a result field
+    var q = manager.query(struct {
+        pos: Position,
+        health: Health,
+        no_armor: Without(Armor),
+    });
     defer q.deinit();
+    comptime {
+        if (@hasField(@TypeOf(q).IncludeTypesTupleType, "no_armor")) {
+            @compileError("Without markers must not appear in query results.");
+        }
+    }
     var count: usize = 0;
     while (q.next()) |item| {
         try std.testing.expect(item.pos.x == 10.0);
@@ -110,6 +121,62 @@ test "Query - exclude pattern" {
 
     // Should only match the 5 entities without Armor
     try std.testing.expect(count == 5);
+}
+
+test "Query - With(T) filters archetypes without yielding a field" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    for (0..4) |i| {
+        _ = manager.create(.{ Position{ .x = @floatFromInt(i), .y = 0.0 }, Health{ .value = 100 } });
+    }
+    for (0..2) |i| {
+        _ = manager.create(.{Position{ .x = @floatFromInt(i + 10), .y = 0.0 }});
+    }
+
+    var q = manager.query(struct {
+        pos: Position,
+        requires_health: With(Health),
+    });
+    defer q.deinit();
+    comptime {
+        if (@hasField(@TypeOf(q).IncludeTypesTupleType, "requires_health")) {
+            @compileError("With markers must not appear in query results.");
+        }
+    }
+
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expect(item.pos.x < 10.0);
+        count += 1;
+    }
+
+    try std.testing.expectEqual(@as(usize, 4), count);
+}
+
+test "Query - With and Without tuple payloads" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Health{ .value = 100 }, Team{ .id = 1 } });
+    _ = manager.create(.{ Position{ .x = 2.0, .y = 0.0 }, Health{ .value = 100 }, Team{ .id = 1 }, Armor{ .defense = 5 } });
+    _ = manager.create(.{ Position{ .x = 3.0, .y = 0.0 }, Health{ .value = 100 } });
+    _ = manager.create(.{ Position{ .x = 4.0, .y = 0.0 }, Team{ .id = 1 } });
+
+    var q = manager.query(struct {
+        pos: Position,
+        required: With(.{ Health, Team }),
+        rejected: Without(.{ Armor, Velocity }),
+    });
+    defer q.deinit();
+
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expectEqual(@as(f32, 1.0), item.pos.x);
+        count += 1;
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), count);
 }
 
 test "Query - with Entity field" {
@@ -122,7 +189,7 @@ test "Query - with Entity field" {
         e.* = manager.create(.{pos});
     }
 
-    var q = manager.query(struct { entity: Entity, pos: Position }, struct {});
+    var q = manager.query(struct { entity: Entity, pos: Position });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
@@ -142,7 +209,7 @@ test "Query - only Entity" {
         _ = manager.createEmpty();
     }
 
-    var q = manager.query(struct { entity: Entity }, struct {});
+    var q = manager.query(struct { entity: Entity });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
@@ -164,7 +231,7 @@ test "Query - empty query (no entities match)" {
     }
 
     // Query for Velocity (no entities have it)
-    var q = manager.query(struct { vel: Velocity }, struct {});
+    var q = manager.query(struct { vel: Velocity });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |_| {
@@ -184,7 +251,7 @@ test "Query - mutation through query" {
     }
 
     // First pass: mutate all positions
-    var q1 = manager.query(struct { pos: Position }, struct {});
+    var q1 = manager.query(struct { pos: Position });
     defer q1.deinit();
     while (q1.next()) |item| {
         item.pos.x += 100.0;
@@ -192,7 +259,7 @@ test "Query - mutation through query" {
     }
 
     // Second pass: verify mutations
-    var q2 = manager.query(struct { pos: Position }, struct {});
+    var q2 = manager.query(struct { pos: Position });
     defer q2.deinit();
     var count: usize = 0;
     while (q2.next()) |item| {
@@ -214,7 +281,7 @@ test "Query - entity() returns the last yielded entity" {
         entity.* = manager.create(.{pos});
     }
 
-    var q = manager.query(struct { pos: Position }, struct {});
+    var q = manager.query(struct { pos: Position });
     defer q.deinit();
 
     var index: usize = 0;
@@ -244,7 +311,7 @@ test "Query - optional components" {
     }
 
     // Query with optional Velocity
-    var q = manager.query(struct { pos: Position, vel: ?Velocity }, struct {});
+    var q = manager.query(struct { pos: Position, vel: ?Velocity });
     defer q.deinit();
     var count_with_vel: usize = 0;
     var count_without_vel: usize = 0;
@@ -295,7 +362,7 @@ test "Query - multiple archetypes" {
     }
 
     // Query for Position across all archetypes
-    var q = manager.query(struct { pos: Position }, struct {});
+    var q = manager.query(struct { pos: Position });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |_| {
@@ -305,7 +372,7 @@ test "Query - multiple archetypes" {
     try std.testing.expect(count == 20);
 }
 
-test "Query - complex exclude pattern" {
+test "Query - complex Without tuple pattern" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
 
@@ -333,7 +400,11 @@ test "Query - complex exclude pattern" {
     }
 
     // Query for Position and Velocity, but exclude both Team and Armor
-    var q = manager.query(struct { pos: Position, vel: Velocity }, struct { team: Team, armor: Armor });
+    var q = manager.query(struct {
+        pos: Position,
+        vel: Velocity,
+        filtered: Without(.{ Team, Armor }),
+    });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
@@ -356,7 +427,7 @@ test "Query - large dataset iteration" {
         _ = manager.create(.{ pos, vel });
     }
 
-    var q = manager.query(struct { pos: Position, vel: Velocity }, struct {});
+    var q = manager.query(struct { pos: Position, vel: Velocity });
     defer q.deinit();
     var iteration_count: usize = 0;
     while (q.next()) |item| {
@@ -380,7 +451,7 @@ test "Query - entity and multiple components" {
         e.* = manager.create(.{ pos, vel, health });
     }
 
-    var q = manager.query(struct { entity: Entity, pos: Position, vel: Velocity, health: Health }, struct {});
+    var q = manager.query(struct { entity: Entity, pos: Position, vel: Velocity, health: Health });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |item| {
@@ -414,7 +485,7 @@ test "Query - mixed optional and required components" {
     }
 
     // Query with required Position, Velocity and optional Health
-    var q = manager.query(struct { pos: Position, vel: Velocity, health: ?Health }, struct {});
+    var q = manager.query(struct { pos: Position, vel: Velocity, health: ?Health });
     defer q.deinit();
     var count_with_health: usize = 0;
     var count_without_health: usize = 0;
@@ -439,7 +510,7 @@ test "Query - empty entity set" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
 
-    var q = manager.query(struct { pos: Position }, struct {});
+    var q = manager.query(struct { pos: Position });
     defer q.deinit();
     var count: usize = 0;
     while (q.next()) |_| {
@@ -459,7 +530,7 @@ test "Query - query result consistency across multiple iterations" {
     }
 
     // First iteration
-    var q1 = manager.query(struct { pos: Position }, struct {});
+    var q1 = manager.query(struct { pos: Position });
     defer q1.deinit();
     var count1: usize = 0;
     while (q1.next()) |_| {
@@ -467,7 +538,7 @@ test "Query - query result consistency across multiple iterations" {
     }
 
     // Second iteration with new query
-    var q2 = manager.query(struct { pos: Position }, struct {});
+    var q2 = manager.query(struct { pos: Position });
     defer q2.deinit();
     var count2: usize = 0;
     while (q2.next()) |_| {
@@ -508,7 +579,7 @@ test "Query - component with pointer field" {
     try std.testing.expect(manager.isAlive(e3));
 
     // Query for components with pointers
-    var q = manager.query(struct { comp: ComponentWithPointer }, struct {});
+    var q = manager.query(struct { comp: ComponentWithPointer });
     defer q.deinit();
     var count: usize = 0;
     var sum: i32 = 0;
@@ -530,7 +601,7 @@ test "Query - component with pointer field" {
     try std.testing.expect(value_sum == 1.0 + 2.0 + 3.0);
 
     // Test mutation through the pointer
-    var q2 = manager.query(struct { comp: ComponentWithPointer }, struct {});
+    var q2 = manager.query(struct { comp: ComponentWithPointer });
     defer q2.deinit();
     while (q2.next()) |item| {
         item.comp.data.* += 1000;
@@ -566,7 +637,7 @@ test "Query - component with slice field" {
     _ = manager.create(.{comp3});
 
     // Query and verify slices are intact
-    var q = manager.query(struct { comp: ComponentWithSlice }, struct {});
+    var q = manager.query(struct { comp: ComponentWithSlice });
     defer q.deinit();
     var count: usize = 0;
     var total_len: usize = 0;
@@ -614,7 +685,7 @@ test "Query - component with multiple pointer types" {
     _ = manager.create(.{comp});
 
     // Query and verify all pointer types work correctly
-    var q = manager.query(struct { comp: ComplexComponent }, .{});
+    var q = manager.query(struct { comp: ComplexComponent });
     defer q.deinit();
     var found = false;
 
@@ -647,7 +718,7 @@ test "Query - hasNext" {
         _ = manager.create(.{pos});
     }
 
-    var q = manager.query(struct { pos: Position }, struct {});
+    var q = manager.query(struct { pos: Position });
     defer q.deinit();
     var count: usize = 0;
 

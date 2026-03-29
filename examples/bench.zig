@@ -6,6 +6,7 @@ const Manager = zevy_ecs.Manager;
 const Entity = zevy_ecs.Entity;
 const Commands = zevy_ecs.params.Commands;
 const Query = zevy_ecs.params.Query;
+const Without = zevy_ecs.Without;
 const Scheduler = zevy_ecs.schedule.Scheduler;
 const Stage = zevy_ecs.schedule.Stage;
 const StageId = zevy_ecs.schedule.StageId;
@@ -229,8 +230,7 @@ const Target = struct {
 
 // Query types
 const MovementQueryInclude = struct { pos: Position, vel: Velocity };
-const DamageNoArmorQueryInclude = struct { health: Health, damage: Damage };
-const DamageNoArmorQueryExclude = struct { armor: Armor };
+const DamageNoArmorQueryInclude = struct { health: Health, damage: Damage, no_armor: Without(Armor) };
 const TeamCollisionQueryInclude = struct { pos: Position, team: Team };
 const TargetTrackingQueryInclude = struct { pos: Position, target: Target };
 const VelocityDampingQueryInclude = struct { vel: Velocity };
@@ -264,7 +264,7 @@ fn batchCreateEntities(manager: *Manager, count: usize, allocator: std.mem.Alloc
 
 // Benchmark 2: Mixed System Operations
 // System 1: Movement - Update positions based on velocity
-fn systemMovement(query: Query(MovementQueryInclude, .{})) void {
+fn systemMovement(query: Query(MovementQueryInclude)) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const vel: *Velocity = item.vel;
@@ -275,7 +275,7 @@ fn systemMovement(query: Query(MovementQueryInclude, .{})) void {
 }
 
 // System 2: Health Regeneration - Regenerate health over time
-fn systemHealthRegen(query: Query(.{Health}, .{})) void {
+fn systemHealthRegen(query: Query(.{Health})) void {
     while (query.next()) |item| {
         const health: *Health = item[0];
         if (health.current < health.max) {
@@ -285,7 +285,7 @@ fn systemHealthRegen(query: Query(.{Health}, .{})) void {
 }
 
 // System 3: Damage Application - Apply damage to entities with armor
-fn systemDamageWithArmor(query: Query(.{ Health, Damage, Armor }, struct {})) void {
+fn systemDamageWithArmor(query: Query(.{ Health, Damage, Armor })) void {
     while (query.next()) |item| {
         const health: *Health = item[0];
         const armor: *Armor = item[2];
@@ -300,7 +300,7 @@ fn systemDamageWithArmor(query: Query(.{ Health, Damage, Armor }, struct {})) vo
 }
 
 // System 4: Damage Application - Apply damage to entities without armor
-fn systemDamageNoArmor(query: Query(DamageNoArmorQueryInclude, DamageNoArmorQueryExclude)) void {
+fn systemDamageNoArmor(query: Query(DamageNoArmorQueryInclude)) void {
     while (query.next()) |item| {
         const health: *Health = item.health;
         const damage: *Damage = item.damage;
@@ -315,7 +315,7 @@ fn systemDamageNoArmor(query: Query(DamageNoArmorQueryInclude, DamageNoArmorQuer
 // System 5: Team Collision - Check collisions within same team
 
 // System 5: Team Collision - Check collisions within same team
-fn systemTeamCollision(query: Query(TeamCollisionQueryInclude, .{})) void {
+fn systemTeamCollision(query: Query(TeamCollisionQueryInclude)) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const team: *Team = item.team;
@@ -327,7 +327,7 @@ fn systemTeamCollision(query: Query(TeamCollisionQueryInclude, .{})) void {
 }
 
 // System 6: Target Tracking - Steer toward a deterministic target position
-fn systemTargetTracking(query: Query(TargetTrackingQueryInclude, .{})) void {
+fn systemTargetTracking(query: Query(TargetTrackingQueryInclude)) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const target: *Target = item.target;
@@ -339,7 +339,7 @@ fn systemTargetTracking(query: Query(TargetTrackingQueryInclude, .{})) void {
 }
 
 // CRUD System: collect work from a query, explicitly release it, then mutate the world.
-fn systemCrudAddRemoveComponents(commands: *Commands, query: Query(TargetTrackingQueryInclude, .{})) !void {
+fn systemCrudAddRemoveComponents(commands: *Commands, query: Query(TargetTrackingQueryInclude)) !void {
     var released_query = query;
     defer released_query.deinit();
 
@@ -382,7 +382,7 @@ fn systemCrudAddRemoveComponents(commands: *Commands, query: Query(TargetTrackin
 }
 
 // System 7: Velocity Damping - Apply friction/damping to velocity
-fn systemVelocityDamping(query: Query(VelocityDampingQueryInclude, .{})) void {
+fn systemVelocityDamping(query: Query(VelocityDampingQueryInclude)) void {
     while (query.next()) |item| {
         const vel: *Velocity = item.vel;
         vel.dx *= 0.99;
@@ -558,7 +558,7 @@ fn setupSceneGraph(manager: *Manager, rel: *zevy_ecs.relations.RelationManager, 
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
     commands: *Commands,
-    query: Query(.{ Transform, relations.Relation(relations.kinds.Child) }, .{}),
+    query: Query(.{ Transform, relations.Relation(relations.kinds.Child) }),
 ) void {
     // Query all entities that have Transform and a Child relation (children with parents)
     while (query.next()) |item| {

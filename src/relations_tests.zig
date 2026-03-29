@@ -342,7 +342,6 @@ test "RelationManager - query entities with relations" {
     // Query all entities with ChildOf relation
     var query = manager.query(
         struct { transform: Transform, rel: Relation(ChildOf) },
-        .{},
     );
     defer query.deinit();
 

@@ -340,7 +340,7 @@ fn SystemParamArgs(comptime system_fn: anytype) type {
 ///
 /// Example:
 /// ```zig
-/// fn mySystem(ecs: *ECS, value: i32, name: []const u8, query: Query(struct{pos: Position}, struct{})) void {
+/// fn mySystem(ecs: *ECS, value: i32, name: []const u8, query: Query(struct{pos: Position})) void {
 ///     // value and name are injected args, query is resolved by registry
 /// }
 ///
@@ -492,12 +492,12 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 ///
 /// Example:
 /// ```zig
-/// fn shouldRunSystem(query: Query(.{pos: Position, vel: Velocity},.{})) bool {
+/// fn shouldRunSystem(query: Query(.{pos: Position, vel: Velocity})) bool {
 ///     // Check some condition, e.g., if there are entities with a specific component
 ///     return query.hasNext();
 /// }
 ///
-/// fn updatePositions(commands: *Commands, query: Query(.{pos: Position, vel: Velocity}, .{})) void {
+/// fn updatePositions(commands: *Commands, query: Query(.{pos: Position, vel: Velocity})) void {
 ///     // System logic to update positions
 ///     while (query.next()) |q| {
 ///         // Update position based on velocity

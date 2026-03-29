@@ -5,7 +5,7 @@ const Entity = ecs.Entity;
 const relations = @import("relations.zig");
 const Query = @import("query.zig").Query;
 
-fn pointerSystem(query: Query(struct { pcA: ?PointerComp, pcB: ?PointerCompToPointerComp }, struct {})) void {
+fn pointerSystem(query: Query(struct { pcA: ?PointerComp, pcB: ?PointerCompToPointerComp })) void {
     while (query.next()) |item| {
         // Modify the pointed value to demonstrate components may contain pointers to externally-managed memory
         if (item.pcA) |pcA| {
@@ -382,7 +382,7 @@ test "Manager - query basic" {
     _ = manager.create(.{pos1});
     _ = manager.create(.{pos2});
 
-    var query = manager.query(struct { pos: Position }, struct {});
+    var query = manager.query(struct { pos: Position });
     defer query.deinit();
     var count: usize = 0;
     while (query.next()) |item| {

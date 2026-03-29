@@ -127,10 +127,9 @@ pub fn main() !void {
     // Query and iterate over entities
     var query = manager.query(
         struct { pos: Position, vel: Velocity },
-        .{},
     );
 
-    // var query = manager.query(.{Position, Velocity}, struct {}); // Alternative syntax
+    // var query = manager.query(.{Position, Velocity}); // Alternative syntax
 
     while (query.next()) |item| {
         // item.pos is *Position, item.vel is *Velocity
@@ -145,8 +144,7 @@ pub fn main() !void {
 
 fn movementSystem(
     query: zevy_ecs.Query(
-        struct { pos: Position, vel: Velocity }, // Include components
-        .{}, // No exclusions
+        struct { pos: Position, vel: Velocity },
     ),
 ) void {
     while (query.next()) |item| {
@@ -228,10 +226,16 @@ defer allocator.free(components);
 Queries allow you to iterate over entities with specific component combinations.
 
 ```zig
-// Query entities with Position and Velocity
+// Query entities with Position and Velocity while requiring Health and Team
+// and excluding entities that have Armor. The marker fields only affect
+// archetype filtering and do not appear in the query result.
 var query = manager.query(
-    struct { pos: Position, vel: Velocity },
-    struct {}, // No exclusions
+    struct {
+        pos: Position,
+        vel: Velocity,
+        living: zevy_ecs.With(.{ Health, Team }),
+        no_armor: zevy_ecs.Without(Armor),
+    },
 );
 
 while (query.next()) |item| {
@@ -240,19 +244,12 @@ while (query.next()) |item| {
     item.pos.y += item.vel.dy;
 }
 
-// Query with exclusions (entities that DON'T have Armor)
-var no_armor_query = manager.query(
-    struct { health: Health },
-    struct { armor: Armor },
-);
-
 // Query with optional components
 var optional_query = manager.query(
     struct {
         pos: Position,
         vel: ?Velocity,  // Optional - may be null
     },
-    struct {},
 );
 
 while (optional_query.next()) |item| {
@@ -269,7 +266,6 @@ var entity_query = manager.query(
         entity: zevy_ecs.Entity,
         pos: Position,
     },
-    struct {},
 );while (entity_query.next()) |item| {
     std.debug.print("Entity {d} at ({d}, {d})\n",
         .{ item.entity.id, item.pos.x, item.pos.y });
@@ -287,7 +283,6 @@ const DeltaTime = struct { value: f32 };
 fn movementSystem(
     query: zevy_ecs.Query(
         struct { pos: Position, vel: Velocity },
-        struct {},
     ),
 ) void {
     while (query.next()) |item| {
@@ -301,7 +296,6 @@ fn damageSystem(
     dt: zevy_ecs.Res(DeltaTime),
     query: zevy_ecs.Query(
         struct { health: Health },
-        struct {},
     ),
 ) void {
     _ = dt;
@@ -317,7 +311,6 @@ fn spawnSystem(
     commands: *zevy_ecs.Commands,
     query: zevy_ecs.Query(
         struct { spawner: Spawner },
-        struct {},
     ),
 ) !void {
     while (query.next()) |item| {
@@ -380,7 +373,8 @@ if (@import("builtin").mode == .Debug) {
 The debug info provides clean, readable type names for all system parameters including:
 
 - `Res(T)` - Resource types
-- `Query(Include, Exclude)` - Query types with component names
+- `Query(Include)` - Query types with component names
+- `With(T)` / `Without(T)` - Filter-only query markers that do not appear in results
 - `Local(T)` - Local storage types
 - `EventReader(T)` / `EventWriter(T)` - Event types
 - `OnAdded(T)` / `OnRemoved(T)` - Component lifecycle types
@@ -747,7 +741,7 @@ A few small helpers are provided for composing systems succinctly:
 // Systems with injected arguments
 fn damageSystemWithMultiplier(
     multiplier: f32,
-    query: zevy_ecs.Query(struct { health: Health }, .{}),
+    query: zevy_ecs.Query(struct { health: Health }),
 ) void {
     while (query.next()) |item| {
         item.health.current = @intFromFloat(
@@ -775,7 +769,7 @@ const zevy_ecs = @import("zevy_ecs");
 pub const ComplexType = struct {
     /// Unfortunately with the way zig handles anonymous structs we need to define this separately
     pub const IncludeTypes = struct { a: ComponentA, b: ComponentB };
-    query: zevy_ecs.Query(IncludeTypes, .{}),
+    query: zevy_ecs.Query(IncludeTypes),
     res: params.Res(i32),
     local: *params.Local(u64),
 };
@@ -793,7 +787,7 @@ const CustomComplexParam = struct {
         return null;
     }
     pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
-        const query_val = e.query(ComplexType.IncludeTypes, .{});
+        const query_val = e.query(ComplexType.IncludeTypes);
         const res_value = try params.ResourceSystemParam.apply(e, i32);
         const local_ptr = try params.LocalSystemParam.apply(e, u64);
         return ComplexType{
@@ -1099,7 +1093,7 @@ pub fn main() !void {
 }
 
 fn movementSystem(
-    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
+    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }),
 ) void {
     while (query.next()) |item| {
         item.pos.x += item.vel.dx;
@@ -1108,7 +1102,7 @@ fn movementSystem(
 }
 
 fn renderSystem(
-    query: zevy_ecs.Query(struct { pos: Position }, .{}),
+    query: zevy_ecs.Query(struct { pos: Position }),
 ) void {
     while (query.next()) |item| {
         std.debug.print("Render at ({d}, {d})\n", .{ item.pos.x, item.pos.y });
@@ -1161,7 +1155,7 @@ pub fn main() !void {
 }
 
 fn physicsSystem(
-    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
+    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }),
 ) void {
     while (query.next()) |item| {
         item.vel.dy += 9.8; // gravity
@@ -1169,7 +1163,7 @@ fn physicsSystem(
 }
 
 fn aiSystem(
-    query: zevy_ecs.Query(struct { pos: Position }, .{}),
+    query: zevy_ecs.Query(struct { pos: Position }),
 ) void {
     // AI logic here
     _ = query;
@@ -1233,7 +1227,7 @@ fn menuSystem(
 }
 
 fn gameplaySystem(
-    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }, .{}),
+    query: zevy_ecs.Query(struct { pos: Position, vel: Velocity }),
 ) void {
     while (query.next()) |item| {
         item.pos.x += item.vel.dx;

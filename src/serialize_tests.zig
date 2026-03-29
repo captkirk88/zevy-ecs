@@ -230,7 +230,7 @@ test "EntityInstance - roundtrip serialization" {
     }
 
     // Verify we now have 6 entities total (3 original + 3 restored)
-    var query_iter = manager.query(.{Position}, .{});
+    var query_iter = manager.query(.{Position});
     defer query_iter.deinit();
     var pos_count: usize = 0;
     while (query_iter.next()) |_| {

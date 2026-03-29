@@ -451,14 +451,14 @@ pub const QuerySystemParam = struct {
         if (type_info == .pointer) {
             const Child = type_info.pointer.child;
             return analyze(Child);
-        } else if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasDecl(T, "ExcludeTypesParam")) {
+        } else if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and !@hasField(T, "item")) {
             return T;
         }
         return null;
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
-        var query = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+        var query = e.query(T.IncludeTypesParam);
         const released = try e.allocator.create(bool);
         query.shareDeinitState(released);
         return query;
@@ -476,12 +476,11 @@ pub const QuerySystemParam = struct {
 
 /// Single(...) returns exactly one matching item from a Query
 /// Use as a system parameter like:
-/// fn foo(ecs: *Manager, single: Single(struct{pos: Position}, .{})) void { ... }
-pub fn Single(comptime IncludeTypes: anytype, comptime ExcludeTypes: anytype) type {
-    const Q = @import("query.zig").Query(IncludeTypes, ExcludeTypes);
+/// fn foo(ecs: *Manager, single: Single(struct{pos: Position})) void { ... }
+pub fn Single(comptime IncludeTypes: anytype) type {
+    const Q = @import("query.zig").Query(IncludeTypes);
     return struct {
         pub const IncludeTypesParam = IncludeTypes;
-        pub const ExcludeTypesParam = ExcludeTypes;
         pub const Item = Q.IncludeTypesTupleType;
 
         item: Item,
@@ -505,14 +504,14 @@ pub const SingleSystemParam = struct {
             const Child = type_info.pointer.child;
             return analyze(Child);
         }
-        if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasDecl(T, "ExcludeTypesParam") and @hasField(T, "item")) {
+        if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasField(T, "item")) {
             return T;
         }
         return null;
     }
 
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
-        var q = e.query(T.IncludeTypesParam, T.ExcludeTypesParam);
+        var q = e.query(T.IncludeTypesParam);
         defer q.deinit();
         const first = q.next() orelse return error.SingleFoundNoMatches;
         // Ensure there is exactly one match
@@ -875,7 +874,7 @@ test "SingleSystemParam basic" {
     const Position = struct { x: f32, y: f32 };
     _ = manager.create(.{Position{ .x = 1.0, .y = 2.0 }});
 
-    const single = try SingleSystemParam.apply(&manager, Single(struct { pos: Position }, .{}));
+    const single = try SingleSystemParam.apply(&manager, Single(struct { pos: Position }));
 
     try std.testing.expectEqual(single.item.pos.*.x, 1.0);
     try std.testing.expectEqual(single.item.pos.*.y, 2.0);

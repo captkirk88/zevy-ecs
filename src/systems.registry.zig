@@ -212,7 +212,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
     const ComplexType = struct {
         /// Unfortunately with the way zig handles anonymous structs we need to define this separately
         pub const IncludeTypes = struct { a: TestComponentA, b: TestComponentB };
-        query: query.Query(IncludeTypes, .{}),
+        query: query.Query(IncludeTypes),
         res: *params.Res(i32),
         local: *params.Local(u64),
     };
@@ -229,7 +229,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
             return null;
         }
         pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
-            const query_val = e.query(ComplexType.IncludeTypes, .{});
+            const query_val = e.query(ComplexType.IncludeTypes);
             const res_value = try params.ResourceSystemParam.apply(e, i32);
             const local_ptr = try params.LocalSystemParam.apply(e, u64);
             return ComplexType{

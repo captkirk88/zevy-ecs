@@ -15,7 +15,9 @@ const EventWriter = params.EventWriter;
 const registry = @import("systems.registry.zig");
 const DefaultRegistry = registry.DefaultParamRegistry;
 const events = @import("events.zig");
-const Query = @import("query.zig").Query;
+const query_mod = @import("query.zig");
+const Query = query_mod.Query;
+const Without = query_mod.Without;
 const Commands = @import("commands.zig").Commands;
 const relations = @import("relations.zig");
 
@@ -46,7 +48,7 @@ fn resourceSystem(res: *Res(DeltaTime)) void {
     std.testing.expect(res.get().value == 0.016) catch unreachable;
 }
 
-fn querySystem(query: Query(struct { pos: Position }, struct {})) void {
+fn querySystem(query: Query(struct { pos: Position })) void {
     var count: usize = 0;
     while (query.next()) |_| {
         count += 1;
@@ -54,7 +56,7 @@ fn querySystem(query: Query(struct { pos: Position }, struct {})) void {
     std.testing.expect(count == 5) catch unreachable;
 }
 
-fn multiParamSystem(res: *Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity }, struct {})) void {
+fn multiParamSystem(res: *Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity })) void {
     while (query.next()) |item| {
         item.pos.x += item.vel.dx * res.get().value;
         item.pos.y += item.vel.dy * res.get().value;
@@ -84,7 +86,7 @@ fn eventReaderSystem(reader: EventReader(u32)) void {
     std.testing.expect(count == 2) catch unreachable;
 }
 
-fn queryEarlyDeinitSystem(commands: *Commands, query: Query(struct { pos: Position }, struct {})) !void {
+fn queryEarlyDeinitSystem(commands: *Commands, query: Query(struct { pos: Position })) !void {
     var released_query = query;
     defer released_query.deinit();
 
@@ -141,8 +143,8 @@ fn actualFuncSystem(
     commands: *Commands,
     res: *Res(DeltaTime),
     local: *Local(u32),
-    query: Query(struct { pos: Position }, .{Velocity}),
-    single: params.Single(struct { vel: Velocity }, .{}),
+    query: Query(struct { pos: Position, no_velocity: Without(Velocity) }),
+    single: params.Single(struct { vel: Velocity }),
     event_reader: EventReader(u32),
     event_writer: EventWriter(u32),
     on_added: params.OnAdded(Position),
@@ -240,7 +242,7 @@ test "System - query parameter can be explicitly deinited before writes" {
     const system = ToSystem(queryEarlyDeinitSystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
 
-    var verify = manager.query(struct { pos: Position, vel: Velocity }, struct {});
+    var verify = manager.query(struct { pos: Position, vel: Velocity });
     defer verify.deinit();
 
     var count: usize = 0;
