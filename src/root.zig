@@ -27,6 +27,8 @@ pub const runIf = sys.runIf;
 pub const chain = scheduler.chain;
 pub const With = qry.With;
 pub const Without = qry.Without;
+pub const Res = params_mod.Res;
+pub const ResMut = params_mod.ResMut;
 
 // System parameter types
 /// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter
@@ -42,6 +44,8 @@ pub const params = struct {
     pub const Commands = commands.Commands;
     /// Resource parameter type for accessing resources
     pub const Res = params_mod.Res;
+    /// Mutable resource parameter type for exclusive resource access
+    pub const ResMut = params_mod.ResMut;
     /// Local parameter type for per-system-instance local state
     pub const Local = params_mod.Local;
     /// EventReader parameter type for reading events
@@ -66,6 +70,7 @@ pub const params = struct {
         pub const CommandsSystemParam = params_mod.CommandsSystemParam;
         pub const QuerySystemParam = params_mod.QuerySystemParam;
         pub const ResourceSystemParam = params_mod.ResourceSystemParam;
+        pub const ResourceMutSystemParam = params_mod.ResourceMutSystemParam;
         pub const LocalSystemParam = params_mod.LocalSystemParam;
         pub const EventReaderSystemParam = params_mod.EventReaderSystemParam;
         pub const EventWriterSystemParam = params_mod.EventWriterSystemParam;

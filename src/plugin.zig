@@ -259,7 +259,7 @@ test "Plugin basic functionality" {
     try plugin_manager.build(&manager);
     var res_ref = manager.getResource(bool).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expect(res_guard.get().* == true);
 }
@@ -295,7 +295,7 @@ test "PluginManager add single plugin" {
     try plugin_manager.build(&manager);
     var res_ref = manager.getResource(i32).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expectEqual(@as(i32, 42), res_guard.get().*);
 }
@@ -316,7 +316,7 @@ test "PluginManager add multiple plugins" {
         pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) !void {
             const ref = manager.getResource(i32).?;
             defer ref.deinit();
-            var res_guard = ref.lock();
+            var res_guard = ref.lockWrite();
             defer res_guard.deinit();
             res_guard.get().* = 20;
         }
@@ -347,7 +347,7 @@ test "PluginManager add multiple plugins" {
     try plugin_manager.build(&manager);
     var res_ref2 = manager.getResource(i32).?;
     defer res_ref2.deinit();
-    var res_guard2 = res_ref2.lock();
+    var res_guard2 = res_ref2.lockRead();
     defer res_guard2.deinit();
     try std.testing.expectEqual(@as(i32, 20), res_guard2.get().*);
 }
@@ -391,7 +391,7 @@ test "PluginManager prevents duplicate plugins" {
     // Should only have been added and built once
     var res_ref = manager.getResource(i32).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expectEqual(@as(i32, 42), res_guard.get().*);
     try std.testing.expectEqual(@as(usize, 1), plugin_manager.plugins.items.len);
@@ -422,7 +422,7 @@ test "Plugin with deinit for proper memory cleanup" {
             // Mark that cleanup was called
             if (manager.getResource(CleanupTracker)) |ref| {
                 defer ref.deinit();
-                var tracker_guard = ref.lock();
+                var tracker_guard = ref.lockWrite();
                 defer tracker_guard.deinit();
                 tracker_guard.get().cleanup_called = true;
             }
@@ -443,7 +443,7 @@ test "Plugin with deinit for proper memory cleanup" {
 
     // Verify build ran
     var tracker_ref = manager.getResource(CleanupTracker).?;
-    var tracker_guard = tracker_ref.lock();
+    var tracker_guard = tracker_ref.lockRead();
     try std.testing.expect(!tracker_guard.get().cleanup_called);
     tracker_guard.deinit();
     tracker_ref.deinit();
@@ -460,7 +460,7 @@ test "Plugin with deinit for proper memory cleanup" {
 
     // Verify deinit was called (tracker is still valid since manager hasn't been deinited)
     var tracker_ref2 = manager.getResource(CleanupTracker).?;
-    var tracker_guard2 = tracker_ref2.lock();
+    var tracker_guard2 = tracker_ref2.lockRead();
     try std.testing.expect(tracker_guard2.get().cleanup_called);
     tracker_guard2.deinit();
     tracker_ref2.deinit();
@@ -489,7 +489,7 @@ test "PluginManager continues deinit on plugin error" {
             _ = allocator;
             if (manager.getResource(bool)) |b_ref| {
                 defer b_ref.deinit();
-                var b_guard = b_ref.lock();
+                var b_guard = b_ref.lockWrite();
                 defer b_guard.deinit();
                 b_guard.get().* = true;
             }
@@ -530,7 +530,7 @@ test "PluginManager continues deinit on plugin error" {
 
     var res_ref = manager.getResource(bool).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expect(res_guard.get().* == true);
 }
@@ -611,7 +611,7 @@ test "PluginManager addPlugin" {
     try plugin_manager.build(&manager);
     var res_ref = manager.getResource(u8).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expectEqual(@as(u8, 255), res_guard.get().*);
 }
@@ -655,13 +655,13 @@ test "PluginManager addBundle" {
     try plugin_manager.build(&manager);
     var res_ref_i16 = manager.getResource(i16).?;
     defer res_ref_i16.deinit();
-    var res_guard_i16 = res_ref_i16.lock();
+    var res_guard_i16 = res_ref_i16.lockRead();
     defer res_guard_i16.deinit();
     try std.testing.expectEqual(@as(i16, 16), res_guard_i16.get().*);
 
     var res_ref_f64 = manager.getResource(f64).?;
     defer res_ref_f64.deinit();
-    var res_guard_f64 = res_ref_f64.lock();
+    var res_guard_f64 = res_ref_f64.lockRead();
     defer res_guard_f64.deinit();
     try std.testing.expectEqual(3.14, res_guard_f64.get().*);
 }

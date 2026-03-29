@@ -287,7 +287,7 @@ test "Manager - addResource" {
 
     var res_ref = manager.getResource(GameConfig).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expect(res_guard.get().difficulty == 5);
     try std.testing.expect(res_guard.get().max_players == 10);
@@ -317,7 +317,7 @@ test "Manager - getResource returns resource" {
     defer retrieved.?.deinit();
     var retrieved_ref = manager.getResource(GameConfig).?;
     defer retrieved_ref.deinit();
-    var retrieved_guard = retrieved_ref.lock();
+    var retrieved_guard = retrieved_ref.lockRead();
     defer retrieved_guard.deinit();
     try std.testing.expect(retrieved_guard.get().difficulty == 7);
     try std.testing.expect(retrieved_guard.get().max_players == 15);
@@ -478,7 +478,7 @@ test "Manager - resource mutation through pointer" {
     // Mutate through write guard
     var res_ref = manager.getResource(GameConfig).?;
     defer res_ref.deinit();
-    var res_guard = res_ref.lock();
+    var res_guard = res_ref.lockWrite();
     res_guard.get().difficulty = 10;
     res_guard.get().max_players = 20;
     res_guard.deinit();
@@ -486,7 +486,7 @@ test "Manager - resource mutation through pointer" {
     // Get resource again and verify mutation
     var retrieved_ref = manager.getResource(GameConfig).?;
     defer retrieved_ref.deinit();
-    var retrieved_guard = retrieved_ref.lock();
+    var retrieved_guard = retrieved_ref.lockRead();
     defer retrieved_guard.deinit();
     try std.testing.expect(retrieved_guard.get().difficulty == 10);
     try std.testing.expect(retrieved_guard.get().max_players == 20);

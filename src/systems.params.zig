@@ -15,6 +15,31 @@ const commands_mod = @import("commands.zig");
 const Commands = commands_mod.Commands;
 const EntityCommands = commands_mod.EntityCommands;
 
+fn BaseType(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .pointer => |pointer_info| BaseType(pointer_info.child),
+        else => T,
+    };
+}
+
+fn typeHasDecls(comptime T: type, comptime decl_names: []const []const u8) bool {
+    switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return false,
+    }
+    inline for (decl_names) |decl_name| {
+        if (!@hasDecl(T, decl_name)) return false;
+    }
+    return true;
+}
+
+fn typeHasFields(comptime T: type, comptime field_names: []const []const u8) bool {
+    inline for (field_names) |field_name| {
+        if (!zevy_reflect.hasField(T, field_name)) return false;
+    }
+    return true;
+}
+
 /// Local: Provides per-system-function persistent storage, accessible only to the declaring system.
 /// Value persists across system invocations (lifetime: ECS instance or until explicitly cleared).
 pub fn Local(comptime T: type) type {
@@ -61,16 +86,13 @@ pub fn Local(comptime T: type) type {
 
 pub const LocalSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
         if (type_info == .@"struct" and
-            @hasField(T, "_value") and
-            @hasField(T, "_set") and
+            typeHasFields(Base, &.{ "_value", "_set" }) and
             type_info.@"struct".fields.len == 2)
         {
             return type_info.@"struct".fields[0].type;
-        } else if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
         }
         return null;
     }
@@ -98,7 +120,7 @@ pub fn EventReader(comptime T: type) type {
         pub const EventType = T;
         pub const is_event_reader = true;
         _ref: ecs.Ref(events.EventStore(T)),
-        _guard: zevy_mem.lock.Mutex(events.EventStore(T)).Guard,
+        _guard: zevy_mem.lock.RwLock(events.EventStore(T)).WriteGuard,
         event_store: *events.EventStore(T),
         iterator: ?events.EventStore(T).Iterator = null,
 
@@ -161,13 +183,9 @@ pub fn EventReader(comptime T: type) type {
 /// EventReader(T) SystemParam analyzer and applier
 pub const EventReaderSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .@"struct" and @hasDecl(T, "EventType") and @hasDecl(T, "is_event_reader")) {
-            return T.EventType;
-        }
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
+        const Base = BaseType(T);
+        if (typeHasDecls(Base, &.{ "EventType", "is_event_reader" })) {
+            return Base.EventType;
         }
         return null;
     }
@@ -178,7 +196,7 @@ pub const EventReaderSystemParam = struct {
             _ = try e.addResource(events.EventStore(T), store);
             break :blk e.getResource(events.EventStore(T)) orelse return error.ResourceNotFound;
         };
-        const guard = ref.lock();
+        const guard = ref.lockWrite();
         return EventReader(T){ ._ref = ref, ._guard = guard, .event_store = guard.get() };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
@@ -196,7 +214,7 @@ pub fn EventWriter(comptime T: type) type {
         pub const EventType = T;
         pub const is_event_writer = true;
         _ref: ecs.Ref(events.EventStore(T)),
-        _guard: zevy_mem.lock.Mutex(events.EventStore(T)).Guard,
+        _guard: zevy_mem.lock.RwLock(events.EventStore(T)).WriteGuard,
         event_store: *events.EventStore(T),
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
@@ -226,13 +244,9 @@ pub fn EventWriter(comptime T: type) type {
 /// EventWriter(T) SystemParam analyzer and applier
 pub const EventWriterSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .@"struct" and @hasDecl(T, "EventType") and @hasDecl(T, "is_event_writer")) {
-            return T.EventType;
-        }
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
+        const Base = BaseType(T);
+        if (typeHasDecls(Base, &.{ "EventType", "is_event_writer" })) {
+            return Base.EventType;
         }
         return null;
     }
@@ -243,7 +257,7 @@ pub const EventWriterSystemParam = struct {
             _ = try e.addResource(events.EventStore(T), store);
             break :blk e.getResource(events.EventStore(T)) orelse return error.ResourceNotFound;
         };
-        const guard = ref.lock();
+        const guard = ref.lockWrite();
         return EventWriter(T){ ._ref = ref, ._guard = guard, .event_store = guard.get() };
     }
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
@@ -288,17 +302,13 @@ pub fn State(comptime StateEnum: type) type {
 /// System parameter handler for State(StateEnum) - checks if a specific state is active
 pub const StateSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
         if (type_info == .@"struct" and
-            @hasDecl(T, "StateEnum_") and
-            @hasDecl(T, "_is_state_param") and
-            @hasField(T, "state_mgr"))
+            typeHasDecls(Base, &.{ "StateEnum_", "_is_state_param" }) and
+            typeHasFields(Base, &.{"state_mgr"}))
         {
-            return T.StateEnum_;
-        }
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
+            return Base.StateEnum_;
         }
         return null;
     }
@@ -309,7 +319,7 @@ pub const StateSystemParam = struct {
         // Get or create the StateManager resource for this specific enum type
         if (e.getResource(StateManagerType)) |ref| {
             defer ref.deinit();
-            var guard = ref.lock();
+            var guard = ref.lockRead();
             defer guard.deinit();
             const state_mgr = guard.get().*;
             return State(StateEnum){ .state_mgr = state_mgr };
@@ -349,19 +359,13 @@ pub fn NextState(comptime StateEnum: type) type {
 /// System parameter handler for NextState(StateEnum) - allows immediate state transitions
 pub const NextStateSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        // Check for pointer to NextState
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        }
-        // Also check for non-pointer (though we'll return a pointer)
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
         if (type_info == .@"struct" and
-            @hasDecl(T, "StateEnum_") and
-            @hasDecl(T, "_is_next_state_param") and
-            @hasField(T, "state_mgr"))
+            typeHasDecls(Base, &.{ "StateEnum_", "_is_next_state_param" }) and
+            typeHasFields(Base, &.{"state_mgr"}))
         {
-            return T.StateEnum_;
+            return Base.StateEnum_;
         }
         return null;
     }
@@ -370,7 +374,7 @@ pub const NextStateSystemParam = struct {
         const StateManagerType = state.StateManager(StateEnum);
         const ref = e.getResource(StateManagerType) orelse return error.StateManagerNotFound;
         defer ref.deinit();
-        var guard = ref.lock();
+        var guard = ref.lockRead();
         const state_mgr = guard.get().*;
         guard.deinit();
         const next_state_ptr = try e.allocator.create(NextState(StateEnum));
@@ -383,9 +387,9 @@ pub const NextStateSystemParam = struct {
     }
 };
 
-/// Opaque system parameter providing exclusive Mutex-guarded access to a resource of type T.
-/// Fields are hidden – use `res.get()` to obtain a mutable pointer to the value.
-/// The lock is held for the entire duration of the system invocation and released automatically.
+/// Opaque system parameter providing shared read access to a resource of type T.
+/// Fields are hidden – use `res.get()` to obtain a const pointer to the value.
+/// The read lock is held for the entire duration of the system invocation and released automatically.
 pub fn Res(comptime T: type) type {
     return opaque {
         const Self = @This();
@@ -398,7 +402,7 @@ pub fn Res(comptime T: type) type {
         /// Internal heap layout – do not use directly outside this file
         pub const _Inner = struct {
             ref: ecs.Ref(T),
-            guard: zevy_mem.lock.Mutex(T).Guard,
+            guard: zevy_mem.lock.RwLock(T).ReadGuard,
         };
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
@@ -407,8 +411,36 @@ pub fn Res(comptime T: type) type {
             }
         }.get else void;
 
-        /// Get a mutable pointer to the resource value.
+        /// Get a const pointer to the resource value.
         /// Valid only while this `Res` is alive (i.e. within the system function).
+        pub fn get(self: *Self) *const T {
+            const inner: *_Inner = @ptrCast(@alignCast(self));
+            return inner.guard.get();
+        }
+    };
+}
+
+/// Opaque system parameter providing exclusive write access to a resource of type T.
+/// Fields are hidden – use `res.get()` to obtain a mutable pointer to the value.
+/// The write lock is held for the entire duration of the system invocation and released automatically.
+pub fn ResMut(comptime T: type) type {
+    return opaque {
+        const Self = @This();
+
+        pub const is_res_mut = true;
+        pub const ResMutType = T;
+
+        pub const _Inner = struct {
+            ref: ecs.Ref(T),
+            guard: zevy_mem.lock.RwLock(T).WriteGuard,
+        };
+
+        pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+            pub fn get() []const u8 {
+                return "ResMut(" ++ @typeName(T) ++ ")";
+            }
+        }.get else void;
+
         pub fn get(self: *Self) *T {
             const inner: *_Inner = @ptrCast(@alignCast(self));
             return inner.guard.get();
@@ -419,12 +451,9 @@ pub fn Res(comptime T: type) type {
 /// Res(T) SystemParam analyzer and applier
 pub const ResourceSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            if (@hasDecl(Child, "is_res") and @hasDecl(Child, "ResType")) {
-                return Child.ResType;
-            }
+        const Base = BaseType(T);
+        if (typeHasDecls(Base, &.{ "is_res", "ResType" })) {
+            return Base.ResType;
         }
         return null;
     }
@@ -432,7 +461,7 @@ pub const ResourceSystemParam = struct {
     pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!*Res(T) {
         const ref = e.getResource(T) orelse return error.ResourceNotFound;
         const inner = try e.allocator.create(Res(T)._Inner);
-        inner.* = .{ .ref = ref, .guard = ref.lock() };
+        inner.* = .{ .ref = ref, .guard = ref.lockRead() };
         return @ptrCast(inner);
     }
 
@@ -444,15 +473,38 @@ pub const ResourceSystemParam = struct {
     }
 };
 
+/// ResMut(T) SystemParam analyzer and applier
+pub const ResourceMutSystemParam = struct {
+    pub fn analyze(comptime T: type) ?type {
+        const Base = BaseType(T);
+        if (typeHasDecls(Base, &.{ "is_res_mut", "ResMutType" })) {
+            return Base.ResMutType;
+        }
+        return null;
+    }
+
+    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!*ResMut(T) {
+        const ref = e.getResource(T) orelse return error.ResourceNotFound;
+        const inner = try e.allocator.create(ResMut(T)._Inner);
+        inner.* = .{ .ref = ref, .guard = ref.lockWrite() };
+        return @ptrCast(inner);
+    }
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
+        const inner: *ResMut(ResourceType)._Inner = @ptrCast(@alignCast(ptr));
+        inner.guard.deinit();
+        inner.ref.deinit();
+        e.allocator.destroy(inner);
+    }
+};
+
 /// Query(...) SystemParam analyzer and applier
 pub const QuerySystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        } else if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and !@hasField(T, "item")) {
-            return T;
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
+        if (type_info == .@"struct" and @hasDecl(Base, "IncludeTypesParam") and !@hasField(Base, "item")) {
+            return Base;
         }
         return null;
     }
@@ -499,13 +551,10 @@ pub fn Single(comptime IncludeTypes: anytype) type {
 /// Single SystemParam analyzer and applier
 pub const SingleSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        }
-        if (type_info == .@"struct" and @hasDecl(T, "IncludeTypesParam") and @hasField(T, "item")) {
-            return T;
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
+        if (type_info == .@"struct" and @hasDecl(Base, "IncludeTypesParam") and @hasField(Base, "item")) {
+            return Base;
         }
         return null;
     }
@@ -528,12 +577,12 @@ pub const SingleSystemParam = struct {
     }
 };
 
-/// Mutex-guarded handle to the RelationManager resource.
+/// Write-guarded handle to the RelationManager resource.
 /// Use `rel.get()` to access the `RelationManager`.
 /// Call `rel.deinit()` to release the lock and Arc reference (done automatically by the system runner).
 pub const Relations = struct {
     ref: ecs.Ref(relations_mod.RelationManager),
-    _guard: zevy_mem.lock.Mutex(relations_mod.RelationManager).Guard,
+    _guard: zevy_mem.lock.RwLock(relations_mod.RelationManager).WriteGuard,
 
     /// Get a pointer to the RelationManager. Valid only while this Relations struct is alive.
     pub fn get(self: *Relations) *relations_mod.RelationManager {
@@ -550,14 +599,8 @@ fn deinit_releations(self: *Relations) void {
 /// Use as `rel: *params.Relations` in system functions.
 pub const RelationsSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            // Accept *Relations
-            if (Child == Relations) return Relations;
-            // Accept *RelationManager for convenience/backward compat
-            if (Child == relations_mod.RelationManager) return Relations;
-        }
+        const Base = BaseType(T);
+        if (Base == Relations or Base == relations_mod.RelationManager) return Relations;
         return null;
     }
 
@@ -567,7 +610,7 @@ pub const RelationsSystemParam = struct {
             _ = try e.addResource(relations_mod.RelationManager, rel_mgr);
         }
         const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
-        const guard = ref.lock();
+        const guard = ref.lockWrite();
         const rel_ptr = try e.allocator.create(Relations);
         rel_ptr.* = .{ .ref = ref, ._guard = guard };
         return rel_ptr;
@@ -611,13 +654,10 @@ pub fn OnAdded(comptime T: type) type {
 /// to constrain which entities are actually considered "added".
 pub const OnAddedSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        }
-        if (type_info == .@"struct" and @hasDecl(T, "ComponentType") and @hasDecl(T, "is_on_added")) {
-            return T.ComponentType;
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
+        if (type_info == .@"struct" and typeHasDecls(Base, &.{ "ComponentType", "is_on_added" })) {
+            return Base.ComponentType;
         }
         return null;
     }
@@ -678,13 +718,10 @@ pub fn OnRemoved(comptime T: type) type {
 /// EventStore of Entity generated elsewhere (e.g. by scheduler).
 pub const OnRemovedSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        }
-        if (type_info == .@"struct" and @hasDecl(T, "ComponentType") and @hasDecl(T, "is_on_removed")) {
-            return T.ComponentType;
+        const Base = BaseType(T);
+        const type_info = @typeInfo(Base);
+        if (type_info == .@"struct" and typeHasDecls(Base, &.{ "ComponentType", "is_on_removed" })) {
+            return Base.ComponentType;
         }
         return null;
     }
@@ -715,51 +752,24 @@ pub const OnRemovedSystemParam = struct {
 /// Commands SystemParam analyzer and applier
 pub const CommandsSystemParam = struct {
     pub fn analyze(comptime T: type) ?type {
-        const type_info = @typeInfo(T);
-        if (type_info == .pointer) {
-            const Child = type_info.pointer.child;
-            return analyze(Child);
-        }
-        if (T == Commands) {
+        if (BaseType(T) == Commands) {
             return T;
         }
         return null;
     }
 
     pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Commands {
-        const commands_ptr = try e.allocator.create(Commands);
-        commands_ptr.* = Commands.init(e.allocator, e);
-        return commands_ptr;
+        return try Commands.init(e.allocator, e);
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
         _ = T;
         const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
-        if (e.deferred_flusher) |flusher| {
-            // Concurrent mode: called from a worker thread. Defer flushing to
-            // after all stage futures are awaited (flush is not thread-safe).
-            const Callbacks = struct {
-                fn flush(ctx: *anyopaque, manager: *ecs.Manager) anyerror!void {
-                    const cmds: *Commands = @ptrCast(@alignCast(ctx));
-                    try cmds.flush(manager);
-                }
-                fn cleanup(ctx: *anyopaque, allocator: std.mem.Allocator) void {
-                    const cmds: *Commands = @ptrCast(@alignCast(ctx));
-                    cmds.deinit();
-                    allocator.destroy(cmds);
-                }
-            };
-            flusher.append(.{
-                .ctx = commands,
-                .flush_fn = Callbacks.flush,
-                .cleanup_fn = Callbacks.cleanup,
-            }) catch @panic("CommandsSystemParam: DeferredFlusher OOM");
-        } else {
-            // Sequential mode: flush immediately (original behavior).
-            commands.flush(e) catch |err| @panic(@errorName(err));
-            commands.deinit();
-            e.allocator.destroy(commands);
+        commands.queue() catch |err| @panic(@errorName(err));
+        if (!e.defer_command_flush.load(.acquire)) {
+            e.flushQueuedCommands() catch |err| @panic(@errorName(err));
         }
+        commands.destroy();
     }
 };
 
@@ -772,6 +782,25 @@ test "ResourceSystemParam basic" {
     const res = try ResourceSystemParam.apply(&ecs_instance, i32);
     defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), i32);
     try std.testing.expect(res.get().* == 42);
+}
+
+test "ResourceMutSystemParam basic" {
+    const allocator = std.testing.allocator;
+    var ecs_instance = try ecs.Manager.init(allocator);
+    defer ecs_instance.deinit();
+    _ = try ecs_instance.addResource(i32, 1);
+
+    {
+        const res = try ResourceMutSystemParam.apply(&ecs_instance, i32);
+        defer ResourceMutSystemParam.deinit(&ecs_instance, @ptrCast(res), i32);
+        res.get().* = 99;
+    }
+
+    const verify = ecs_instance.getResource(i32).?;
+    defer verify.deinit();
+    var guard = verify.lockRead();
+    defer guard.deinit();
+    try std.testing.expectEqual(@as(i32, 99), guard.get().*);
 }
 
 test "LocalSystemParam basic" {
@@ -926,7 +955,8 @@ test "CommandsSystemParam advanced" {
     try std.testing.expectError(error.EntityNotAlive, vel_after);
 
     // Check entity2 has position added via EntityCommands
-    const pos2_opt = try manager.getComponent(entity2, Position);
+    var ent2_view = try commands.entity(entity2);
+    const pos2_opt = try ent2_view.get(Position);
     try std.testing.expect(pos2_opt != null);
     const pos2 = pos2_opt.?;
     try std.testing.expect(pos2.*.x == 5.0);
@@ -939,7 +969,7 @@ test "CommandsSystemParam advanced" {
     // Check relation was added then removed (not present)
     const rel_ref = manager.getResource(relations_mod.RelationManager).?;
     defer rel_ref.deinit();
-    var rel_guard = rel_ref.lock();
+    var rel_guard = rel_ref.lockWrite();
     defer rel_guard.deinit();
     try std.testing.expect(!(try rel_guard.get().has(&manager, entity2, entity3, Child)));
 }
@@ -982,13 +1012,15 @@ test "Commands deferred entity creation" {
     const entity = pending.get();
 
     // Verify components were added
-    const pos = try manager.getComponent(entity, Position);
+    const pos = try ent_cmds.get(Position);
     try std.testing.expect(pos != null);
     try std.testing.expect(pos.?.*.x == 10.0);
     try std.testing.expect(pos.?.*.y == 20.0);
 
-    const vel = try manager.getComponent(entity, Velocity);
+    const vel = try ent_cmds.get(Velocity);
     try std.testing.expect(vel != null);
     try std.testing.expect(vel.?.*.dx == 1.0);
     try std.testing.expect(vel.?.*.dy == 2.0);
+
+    try std.testing.expect(ent_cmds.entity().eql(entity));
 }

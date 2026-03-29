@@ -372,7 +372,8 @@ if (@import("builtin").mode == .Debug) {
 
 The debug info provides clean, readable type names for all system parameters including:
 
-- `Res(T)` - Resource types
+- `Res(T)` - Read-only resource types
+- `ResMut(T)` - Mutable resource types
 - `Query(Include)` - Query types with component names
 - `With(T)` / `Without(T)` - Filter-only query markers that do not appear in results
 - `Local(T)` - Local storage types
@@ -388,7 +389,8 @@ Systems can request various parameters that are automatically injected. All para
 
 - **`*Commands`**: Deferred command buffer for entity/component/resource operations (executed after system completes)
 - **`Query(Include, Exclude)`**: Query entities with specific components or **`Single`** to get a single entity with specific components
-- **`Res(T)`**: Access to a global resource of type T
+- **`Res(T)`**: Shared read-only access to a global resource of type T
+- **`ResMut(T)`**: Exclusive mutable access to a global resource of type T
 - **`Local(T)`**: Per-system persistent local state
 - **`State(T)`**: Read-only access to check the current state (where T is an enum)
 - **`NextState(T)`**: Trigger state transitions (where T is an enum)

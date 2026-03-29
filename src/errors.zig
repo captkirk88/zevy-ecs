@@ -16,7 +16,7 @@ pub const ECSError = error{
 pub const SystemParamError = error{
     /// A system parameter type is not registered in the ParamRegistry
     UnknownSystemParam,
-    /// A required resource was not found for a Res() parameter
+    /// A required resource was not found for a Res() or ResMut() parameter
     ResourceNotFound,
     /// A Single() parameter expected exactly one entity but found none
     SingleComponentNotFound,

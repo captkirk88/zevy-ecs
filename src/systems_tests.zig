@@ -9,6 +9,7 @@ const ToSystem = systems.ToSystem;
 const ToSystemWithArgs = systems.ToSystemWithArgs;
 const params = @import("systems.params.zig");
 const Res = params.Res;
+const ResMut = params.ResMut;
 const Local = params.Local;
 const EventReader = params.EventReader;
 const EventWriter = params.EventWriter;
@@ -91,10 +92,10 @@ fn queryEarlyDeinitSystem(commands: *Commands, query: Query(struct { pos: Positi
     defer released_query.deinit();
 
     var captured_entities = std.ArrayList(ecs_mod.Entity).empty;
-    defer captured_entities.deinit(commands.manager.allocator);
+    defer captured_entities.deinit(commands.allocator());
 
     while (released_query.next()) |_| {
-        try captured_entities.append(commands.manager.allocator, released_query.entity());
+        try captured_entities.append(commands.allocator(), released_query.entity());
     }
 
     released_query.deinit();
@@ -111,11 +112,11 @@ fn systemWithArgs(multiplier: i32, offset: i32) void {
     std.testing.expect(result == 14) catch unreachable; // 5 * 2 + 4 = 14
 }
 
-fn chainIncrementCounter(res: *Res(ChainCounter)) void {
+fn chainIncrementCounter(res: *ResMut(ChainCounter)) void {
     res.get().value += 1;
 }
 
-fn chainMultiplyCounter(res: *Res(ChainCounter)) void {
+fn chainMultiplyCounter(res: *ResMut(ChainCounter)) void {
     res.get().value *= 3;
 }
 
@@ -163,7 +164,7 @@ fn actualFuncSystem(
     _ = relation_mgr;
 }
 
-fn mutateRes(res: *Res(DeltaTime)) void {
+fn mutateRes(res: *ResMut(DeltaTime)) void {
     res.get().value = 2.0;
 }
 
@@ -357,13 +358,13 @@ test "System - chain runs systems sequentially" {
     const counter = ChainCounter{ .value = 2 };
     _ = try manager.addResource(ChainCounter, counter);
 
-    const ChainSystems: [2]fn (res: *Res(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
+    const ChainSystems: [2]fn (res: *ResMut(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
     const chained = systems.chain(ChainSystems, DefaultRegistry);
     _ = try chained.run(&manager, chained.ctx);
 
     var result_ref = manager.getResource(ChainCounter).?;
     defer result_ref.deinit();
-    var result_guard = result_ref.lock();
+    var result_guard = result_ref.lockRead();
     defer result_guard.deinit();
     try std.testing.expect(result_guard.get().value == 9);
 }

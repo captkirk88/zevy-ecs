@@ -133,7 +133,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
             const rel = manager.getResource(relations.RelationManager);
             if (rel) |r| {
                 defer r.deinit(); // release Arc ref when block exits
-                var rel_lock = r.lock();
+                var rel_lock = r.lockWrite();
                 defer rel_lock.deinit();
                 break :blk try setupSceneGraph(&manager, rel_lock.get(), count);
             } else {
@@ -313,7 +313,7 @@ fn benchTransferEntities(state: *TransferBenchmarkState) void {
 
 // Benchmark 2: Mixed System Operations
 // System 1: Movement - Update positions based on velocity
-fn systemMovement(query: Query(MovementQueryInclude)) void {
+fn systemMovement(query: Query(struct { pos: Position, vel: Velocity })) void {
     while (query.next()) |item| {
         const pos: *Position = item.pos;
         const vel: *Velocity = item.vel;
@@ -397,9 +397,10 @@ fn systemCrudAddRemoveComponents(commands: *Commands, query: Query(TargetTrackin
     while (released_query.next()) |item| {
         const pos: *Position = item.pos;
         const target = item.target.entity;
+        var target_commands = try commands.entity(target);
 
         // Read from the target entity and update the current entity inline while the query is alive.
-        if (try commands.manager.getComponent(target, Position)) |target_pos| {
+        if (try target_commands.get(Position)) |target_pos| {
             pos.x += (target_pos.x - pos.x) * 0.01;
             pos.y += (target_pos.y - pos.y) * 0.01;
             pos.z += (target_pos.z - pos.z) * 0.01;
@@ -627,7 +628,8 @@ fn systemUpdateTransforms(
         var parent_world_z: f32 = 0;
 
         const parent_entity = child_relation.target;
-        if (commands.manager.getComponent(parent_entity, Transform) catch null) |parent_transform| {
+        var parent_commands = commands.entity(parent_entity) catch continue;
+        if (parent_commands.get(Transform) catch null) |parent_transform| {
             parent_world_x = parent_transform.world_x;
             parent_world_y = parent_transform.world_y;
             parent_world_z = parent_transform.world_z;

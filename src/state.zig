@@ -256,7 +256,7 @@ test "OnEnter and OnExit systems" {
         fn value(manager: *ecs_mod.Manager, comptime T: type) bool {
             var ref = manager.getResource(T).?;
             defer ref.deinit();
-            var guard = ref.lock();
+            var guard = ref.lockRead();
             defer guard.deinit();
             return guard.get().value;
         }
@@ -266,7 +266,7 @@ test "OnEnter and OnExit systems" {
         fn value(manager: *ecs_mod.Manager, comptime T: type, v: bool) void {
             var ref = manager.getResource(T).?;
             defer ref.deinit();
-            var guard = ref.lock();
+            var guard = ref.lockWrite();
             defer guard.deinit();
             guard.get().value = v;
         }
@@ -275,28 +275,28 @@ test "OnEnter and OnExit systems" {
     // Create OnEnter system for Menu state
     const params = @import("systems.params.zig");
     const menu_enter_system = struct {
-        pub fn run(flag: *params.Res(MenuEntered)) void {
+        pub fn run(flag: *params.ResMut(MenuEntered)) void {
             flag.get().value = true;
         }
     }.run;
 
     // Create OnExit system for Menu state
     const menu_exit_system = struct {
-        pub fn run(flag: *params.Res(MenuExited)) void {
+        pub fn run(flag: *params.ResMut(MenuExited)) void {
             flag.get().value = true;
         }
     }.run;
 
     // Create OnEnter system for Playing state
     const playing_enter_system = struct {
-        pub fn run(flag: *params.Res(PlayingEntered)) void {
+        pub fn run(flag: *params.ResMut(PlayingEntered)) void {
             flag.get().value = true;
         }
     }.run;
 
     // Create OnExit system for Playing state
     const playing_exit_system = struct {
-        pub fn run(flag: *params.Res(PlayingExited)) void {
+        pub fn run(flag: *params.ResMut(PlayingExited)) void {
             flag.get().value = true;
         }
     }.run;
@@ -380,7 +380,7 @@ test "InState systems" {
         fn value(manager: *ecs_mod.Manager, comptime T: type) bool {
             var ref = manager.getResource(T).?;
             defer ref.deinit();
-            var guard = ref.lock();
+            var guard = ref.lockRead();
             defer guard.deinit();
             return guard.get().value;
         }
@@ -390,7 +390,7 @@ test "InState systems" {
         fn value(manager: *ecs_mod.Manager, comptime T: type, v: bool) void {
             var ref = manager.getResource(T).?;
             defer ref.deinit();
-            var guard = ref.lock();
+            var guard = ref.lockWrite();
             defer guard.deinit();
             guard.get().value = v;
         }
@@ -399,19 +399,19 @@ test "InState systems" {
     // Create InState systems for each state
     const params = @import("systems.params.zig");
     const menu_system = struct {
-        pub fn run(flag: *params.Res(MenuSystemRan)) void {
+        pub fn run(flag: *params.ResMut(MenuSystemRan)) void {
             flag.get().value = true;
         }
     }.run;
 
     const playing_system = struct {
-        pub fn run(flag: *params.Res(PlayingSystemRan)) void {
+        pub fn run(flag: *params.ResMut(PlayingSystemRan)) void {
             flag.get().value = true;
         }
     }.run;
 
     const paused_system = struct {
-        pub fn run(flag: *params.Res(PausedSystemRan)) void {
+        pub fn run(flag: *params.ResMut(PausedSystemRan)) void {
             flag.get().value = true;
         }
     }.run;

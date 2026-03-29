@@ -403,12 +403,8 @@ pub const Scheduler = struct {
             return;
         }
 
-        // Set up DeferredFlusher so Commands params on worker threads defer
-        // flushing instead of executing immediately (not thread-safe for Manager).
-        var flusher = ecs_mod.DeferredFlusher.init(ecs.allocator);
-        defer flusher.deinit();
-        ecs.deferred_flusher = &flusher;
-        defer ecs.deferred_flusher = null;
+        ecs.defer_command_flush.store(true, .release);
+        defer ecs.defer_command_flush.store(false, .release);
 
         const io = self.threaded.io();
 
@@ -436,11 +432,10 @@ pub const Scheduler = struct {
             }
         }
 
-        // Disable deferred mode before flushing.
-        ecs.deferred_flusher = null;
+        ecs.defer_command_flush.store(false, .release);
 
-        // Flush all deferred Commands serially on the main thread.
-        flusher.flushAll(ecs) catch |err| {
+        // Flush all queued Commands serially on the main thread.
+        ecs.flushQueuedCommands() catch |err| {
             if (first_err == null) first_err = err;
         };
 
@@ -497,7 +492,7 @@ pub const Scheduler = struct {
 
         // Create cleanup system that discards handled and unhandled events (consumes them)
         const cleanup_system = struct {
-            pub fn cleanup(store_res: *params.Res(events.EventStore(T))) void {
+            pub fn cleanup(store_res: *params.ResMut(events.EventStore(T))) void {
                 store_res.get().discardHandled();
                 store_res.get().discardUnhandled();
             }
@@ -917,7 +912,7 @@ test "Scheduler assign outside scope" {
     _ = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
-        pub fn run(out: *params.Res(bool)) void {
+        pub fn run(out: *params.ResMut(bool)) void {
             out.get().* = true;
         }
     }.run;
@@ -929,7 +924,7 @@ test "Scheduler assign outside scope" {
 
     var out_ref = ecs.getResource(bool).?;
     defer out_ref.deinit();
-    var out_guard = out_ref.lock();
+    var out_guard = out_ref.lockRead();
     defer out_guard.deinit();
     try std.testing.expect(out_guard.get().* == true);
 }
@@ -960,21 +955,21 @@ test "Scheduler runStages executes custom stages in sorted order" {
     const late_stage = StageId.init(350_000);
 
     const record_early = struct {
-        fn run(trace: *params.Res(ExecutionTrace), _: *params.Res(EarlyMarker)) void {
+        fn run(trace: *params.ResMut(ExecutionTrace), _: *params.Res(EarlyMarker)) void {
             const trace_data = trace.get();
             trace_data.values[trace_data.len] = 150_000;
             trace_data.len += 1;
         }
     }.run;
     const record_middle = struct {
-        fn run(trace: *params.Res(ExecutionTrace), _: *params.Res(MiddleMarker)) void {
+        fn run(trace: *params.ResMut(ExecutionTrace), _: *params.Res(MiddleMarker)) void {
             const trace_data = trace.get();
             trace_data.values[trace_data.len] = 250_000;
             trace_data.len += 1;
         }
     }.run;
     const record_late = struct {
-        fn run(trace: *params.Res(ExecutionTrace), _: *params.Res(LateMarker)) void {
+        fn run(trace: *params.ResMut(ExecutionTrace), _: *params.Res(LateMarker)) void {
             const trace_data = trace.get();
             trace_data.values[trace_data.len] = 350_000;
             trace_data.len += 1;
@@ -989,7 +984,7 @@ test "Scheduler runStages executes custom stages in sorted order" {
 
     const trace_res = ecs.getResource(ExecutionTrace).?;
     defer trace_res.deinit();
-    var trace_guard = trace_res.lock();
+    var trace_guard = trace_res.lockRead();
     defer trace_guard.deinit();
 
     try std.testing.expectEqual(@as(usize, 3), trace_guard.get().len);
@@ -1020,7 +1015,7 @@ test "Scheduler discards handled component events in Last stage" {
         }
     }.run;
     const count_added = struct {
-        fn run(count: *params.Res(AddedCount), added: params.OnAdded(Tag)) void {
+        fn run(count: *params.ResMut(AddedCount), added: params.OnAdded(Tag)) void {
             count.get().value = added.items.len;
         }
     }.run;
@@ -1194,13 +1189,13 @@ test "Concurrent stage: two independent systems both run" {
     _ = try ecs.addResource(BValue, .{ .v = 0 });
 
     const sysA = struct {
-        fn run(res: *params.Res(AValue)) void {
+        fn run(res: *params.ResMut(AValue)) void {
             res.get().v = 111;
         }
     }.run;
 
     const sysB = struct {
-        fn run(res: *params.Res(BValue)) void {
+        fn run(res: *params.ResMut(BValue)) void {
             res.get().v = 222;
         }
     }.run;
@@ -1216,14 +1211,14 @@ test "Concurrent stage: two independent systems both run" {
     {
         const ra = ecs.getResource(AValue).?;
         defer ra.deinit();
-        var ga = ra.lock();
+        var ga = ra.lockRead();
         defer ga.deinit();
         try std.testing.expectEqual(@as(u32, 111), ga.get().v);
     }
     {
         const rb = ecs.getResource(BValue).?;
         defer rb.deinit();
-        var gb = rb.lock();
+        var gb = rb.lockRead();
         defer gb.deinit();
         try std.testing.expectEqual(@as(u32, 222), gb.get().v);
     }
@@ -1247,17 +1242,17 @@ test "chain(): systems within a chain run in order" {
     // sys2 reads A.v, writes B.v = A.v + 10  (proves sys2 runs after sys1)
     // sys3 reads B.v, writes C.v = B.v + 100  (proves sys3 runs after sys2)
     const sys1 = struct {
-        fn run(a: *params.Res(A)) void {
+        fn run(a: *params.ResMut(A)) void {
             a.get().v = 1;
         }
     }.run;
     const sys2 = struct {
-        fn run(a: *params.Res(A), b: *params.Res(B)) void {
+        fn run(a: *params.Res(A), b: *params.ResMut(B)) void {
             b.get().v = a.get().v + 10;
         }
     }.run;
     const sys3 = struct {
-        fn run(b: *params.Res(B), c: *params.Res(C)) void {
+        fn run(b: *params.Res(B), c: *params.ResMut(C)) void {
             c.get().v = b.get().v + 100;
         }
     }.run;
@@ -1271,19 +1266,19 @@ test "chain(): systems within a chain run in order" {
 
     const ra = ecs.getResource(A).?;
     defer ra.deinit();
-    var ga = ra.lock();
+    var ga = ra.lockRead();
     defer ga.deinit();
     try std.testing.expectEqual(@as(u32, 1), ga.get().v);
 
     const rb = ecs.getResource(B).?;
     defer rb.deinit();
-    var gb = rb.lock();
+    var gb = rb.lockRead();
     defer gb.deinit();
     try std.testing.expectEqual(@as(u32, 11), gb.get().v); // 1 + 10
 
     const rc = ecs.getResource(C).?;
     defer rc.deinit();
-    var gc = rc.lock();
+    var gc = rc.lockRead();
     defer gc.deinit();
     try std.testing.expectEqual(@as(u32, 111), gc.get().v); // 11 + 100
 }

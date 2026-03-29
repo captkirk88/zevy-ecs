@@ -1,6 +1,9 @@
 ### What to do...
 
-- [ ] Improve SystemParam.analyze to make it easier to analyze the type passed in
+- [x] Improve SystemParam.analyze to make it easier to analyze the type passed in using zevy-reflect or make SystemParam a generic function that can infer the type at compile time rather than having to analyze it at runtime which eliminates the analyze function entirely and simplifies it to just calling apply.
+- [x] Commands should have a queue method to enqueue commands to be executed later by the ECS, this would eliminate the need for DeferredFlusher and allow commands to be queued up and executed at a later point in the ECS update loop rather than immediately.
+- [x] Commands needs to be opaque, maybe a struct that hides the internal representation and only exposes the API needed to queue commands.
+- [x] Modify Res to be const return with only read-lock access and implement a ResMut with Read/Write lock access for mutable access.
 - [x] Move setupExamples to zevy-buildtools repo
 - [x] Explore threading when Zig's threading model is more mature
   - Specifically the newer std.Io APIs

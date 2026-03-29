@@ -6,13 +6,14 @@ const reflect = @import("zevy_reflect");
 
 const errors = @import("errors.zig");
 
-/// Default system parameter registry including Query, Res, Local, EventReader, EventWriter, State, and NextState
+/// Default system parameter registry including Query, Res, ResMut, Local, EventReader, EventWriter, State, and NextState
 pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
     params.StateSystemParam,
     params.NextStateSystemParam,
     params.EventReaderSystemParam,
     params.EventWriterSystemParam,
     params.ResourceSystemParam,
+    params.ResourceMutSystemParam,
     params.SingleSystemParam,
     params.QuerySystemParam,
     params.LocalSystemParam,
@@ -165,7 +166,7 @@ test "merged SystemParamRegistry" {
     };
     const CustomRegistry = SystemParamRegistry(&[_]type{CustomParam});
     const merge = MergedSystemParamRegistry(.{ DefaultParamRegistry, CustomRegistry });
-    try std.testing.expect(merge.len() == 13); // State, NextState, EventReader, EventWriter, Resource, Query, Local, Relations, OnAdded, OnRemoved, Single, Commands, CustomParam
+    try std.testing.expect(merge.len() == 14); // State, NextState, EventReader, EventWriter, Res, ResMut, Query, Local, Relations, OnAdded, OnRemoved, Single, Commands, CustomParam
 
     // Test that we can apply a custom param (returns value)
     const custom_val = try merge.apply(&ecs_instance, i32);

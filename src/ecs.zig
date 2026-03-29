@@ -13,6 +13,7 @@ const hash = std.hash;
 const sys = @import("systems.zig");
 const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
+const command_buffer = @import("command_buffer.zig");
 
 const is_debug = builtin.mode == .Debug;
 
@@ -51,60 +52,12 @@ const ResourceEntry = struct {
     }
 };
 
-/// Reference-counted handle to a Mutex-protected resource or shared value.
+/// Reference-counted handle to an RwLock-protected resource or shared value.
 /// Call `deinit()` when done to release the reference.
-/// Call `lock()` to acquire the guard, then `guard.get()` to access the value.
+/// Call `lockRead()` or `lockWrite()` to access the value.
 pub fn Ref(comptime T: type) type {
-    return *zevy_mem.pointers.ArcMutex(T);
+    return *zevy_mem.pointers.ArcRwLock(T);
 }
-
-/// Collects deferred Commands flushers during concurrent stage execution.
-/// Thread-safe: `append()` may be called concurrently from worker threads.
-/// `flushAll()` must only be called from the main thread after all futures are awaited.
-pub const DeferredFlusher = struct {
-    pub const FlushEntry = struct {
-        ctx: *anyopaque,
-        flush_fn: *const fn (ctx: *anyopaque, manager: *Manager) anyerror!void,
-        cleanup_fn: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator) void,
-    };
-
-    mutex: std.Io.Mutex,
-    entries: std.ArrayList(FlushEntry),
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) DeferredFlusher {
-        return .{
-            .mutex = .init,
-            .entries = .empty,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn deinit(self: *DeferredFlusher) void {
-        self.entries.deinit(self.allocator);
-    }
-
-    /// Thread-safe: can be called concurrently from any worker thread.
-    pub fn append(self: *DeferredFlusher, entry: FlushEntry) error{OutOfMemory}!void {
-        std.Io.Threaded.mutexLock(&self.mutex);
-        defer std.Io.Threaded.mutexUnlock(&self.mutex);
-        try self.entries.append(self.allocator, entry);
-    }
-
-    /// Flush all deferred entries serially. NOT thread-safe; call only from
-    /// the main thread after all concurrent stage futures have been awaited.
-    pub fn flushAll(self: *DeferredFlusher, manager: *Manager) anyerror!void {
-        var first_err: ?anyerror = null;
-        for (self.entries.items) |entry| {
-            if (entry.flush_fn(entry.ctx, manager)) |_| {} else |err| {
-                if (first_err == null) first_err = err;
-            }
-            entry.cleanup_fn(entry.ctx, manager.allocator);
-        }
-        self.entries.clearAndFree(self.allocator);
-        if (first_err) |err| return err;
-    }
-};
 
 /// ECS Manager responsible for entity lifecycle, archetype management, resources, and systems.
 pub const Manager = struct {
@@ -122,10 +75,9 @@ pub const Manager = struct {
     component_added: events.EventStore(ComponentEvent),
     component_removed: events.EventStore(ComponentEvent),
 
-    /// Non-null during concurrent stage execution. CommandsSystemParam defers
-    /// flushing to after all stage futures settle instead of flushing immediately.
-    /// Set by the Scheduler; do not modify directly.
-    deferred_flusher: ?*DeferredFlusher = null,
+    command_queue_mutex: std.Io.Mutex,
+    queued_commands: std.ArrayList(command_buffer.CommandBuffer),
+    defer_command_flush: std.atomic.Value(bool),
 
     /// Initialize the ECS with an optional custom allocator.
     /// If no allocator is provided, the default page allocator is used.
@@ -140,6 +92,9 @@ pub const Manager = struct {
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
             .component_added = try events.EventStore(ComponentEvent).init(allocator, 64),
             .component_removed = try events.EventStore(ComponentEvent).init(allocator, 64),
+            .command_queue_mutex = .init,
+            .queued_commands = try std.ArrayList(command_buffer.CommandBuffer).initCapacity(allocator, 4),
+            .defer_command_flush = std.atomic.Value(bool).init(false),
             .relations = undefined,
         };
 
@@ -151,6 +106,8 @@ pub const Manager = struct {
     pub fn deinit(self: *Manager) void {
         self.generations.deinit(self.allocator);
         self.free_ids.deinit(self.allocator);
+        for (self.queued_commands.items) |*buffer| buffer.deinit(self.allocator);
+        self.queued_commands.deinit(self.allocator);
         self.world.deinit();
         var res_guard = self.resources.lock();
         var res_it = res_guard.get().valueIterator();
@@ -170,6 +127,45 @@ pub const Manager = struct {
 
         self.component_added.deinit();
         self.component_removed.deinit();
+    }
+
+    pub fn enqueueCommandBuffer(self: *Manager, buffer: command_buffer.CommandBuffer) error{OutOfMemory}!void {
+        var owned_buffer = buffer;
+        if (owned_buffer.isEmpty()) {
+            owned_buffer.deinit(self.allocator);
+            return;
+        }
+
+        std.Io.Threaded.mutexLock(&self.command_queue_mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.command_queue_mutex);
+        try self.queued_commands.append(self.allocator, owned_buffer);
+    }
+
+    pub fn flushQueuedCommands(self: *Manager) anyerror!void {
+        var first_err: ?anyerror = null;
+        var pending = std.ArrayList(command_buffer.CommandBuffer).empty;
+        defer pending.deinit(self.allocator);
+
+        while (true) {
+            std.Io.Threaded.mutexLock(&self.command_queue_mutex);
+            const has_pending = self.queued_commands.items.len > 0;
+            if (has_pending) {
+                std.mem.swap(std.ArrayList(command_buffer.CommandBuffer), &pending, &self.queued_commands);
+            }
+            std.Io.Threaded.mutexUnlock(&self.command_queue_mutex);
+
+            if (!has_pending) break;
+
+            for (pending.items) |*buffer| {
+                if (buffer.flush(self.allocator, @ptrCast(self))) |_| {} else |err| {
+                    if (first_err == null) first_err = err;
+                }
+                buffer.deinit(self.allocator);
+            }
+            pending.clearAndFree(self.allocator);
+        }
+
+        if (first_err) |err| return err;
     }
 
     pub const ComponentEvent = struct {
@@ -287,7 +283,7 @@ pub const Manager = struct {
         }
 
         // Remove all relations involving this entity
-        var rel_guard = self.relations.lock();
+        var rel_guard = self.relations.lockWrite();
         rel_guard.get().removeEntity(entity);
         rel_guard.deinit();
 
@@ -393,7 +389,9 @@ pub const Manager = struct {
     ///     // Handle error
     ///     return;
     /// };
-    /// var guard = res.get().*.lock(); defer guard.deinit(); guard.get().field = newValue;
+    /// var guard = res.lockWrite();
+    /// defer guard.deinit();
+    /// guard.get().field = newValue;
     /// ```
     pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
         // Reject pointer types to avoid complexity
@@ -407,7 +405,7 @@ pub const Manager = struct {
         const result = try guard.get().getOrPut(type_hash);
         if (result.found_existing) return error.ResourceAlreadyExists;
 
-        const arc_ptr = try zevy_mem.pointers.ArcMutex(T).init(self.allocator, value);
+        const arc_ptr = try zevy_mem.pointers.ArcRwLock(T).init(self.allocator, value);
         const deinit_fn = struct {
             pub fn deinit(resource_ptr: *anyopaque) void {
                 const typed_ptr: Ref(T) = @ptrCast(@alignCast(resource_ptr));
@@ -423,18 +421,19 @@ pub const Manager = struct {
         return arc_ptr;
     }
 
-    /// Get a mutable pointer to a resource of type T, or null if it doesn't exist.
+    /// Get a reference-counted handle to a resource of type T, or null if it doesn't exist.
     ///
     /// Example:
     /// ```zig
     /// if (manager.getResource(MyResourceType)) |r| {
-    ///     // Use resource
-    ///     r.* = MyResourceType{ .value = 100 }; // Update resource
+    ///     var guard = r.lockRead();
+    ///     defer guard.deinit();
+    ///     _ = guard.get();
     /// } else {
     ///     // Resource not found
     /// }
     /// Returns a cloned `Ref(T)` handle. Caller must call `.deinit()` when done.
-    /// Use `.get().*.lock()` to acquire mutable access to the value.
+    /// Use `.lockRead()` for shared access or `.lockWrite()` for mutable access.
     pub fn getResource(self: *Manager, comptime T: type) ?Ref(T) {
         const type_hash = reflect.typeHash(T);
         var guard = self.resources.lock();
@@ -791,7 +790,7 @@ test "removeSystem removes cached system" {
 
     // Define a test system that increments the counter
     const test_system = struct {
-        pub fn run(res: *params.Res(TestCounter)) void {
+        pub fn run(res: *params.ResMut(TestCounter)) void {
             res.get().count += 1;
         }
     }.run;
@@ -804,7 +803,7 @@ test "removeSystem removes cached system" {
     _ = try ecs.runSystem(handle);
     const ctr_ref = ecs.getResource(TestCounter).?;
     defer ctr_ref.deinit();
-    var ctr_guard = ctr_ref.lock();
+    var ctr_guard = ctr_ref.lockRead();
     defer ctr_guard.deinit();
     try std.testing.expect(ctr_guard.get().count == 1);
 
@@ -827,7 +826,7 @@ test "removeSystem with same function cached twice returns same handle" {
     _ = try ecs.addResource(TestCounter, .{ .count = 0 });
 
     const test_system = struct {
-        pub fn run(_: *Manager, res: *params.Res(TestCounter)) void {
+        pub fn run(_: *Manager, res: *params.ResMut(TestCounter)) void {
             res.get().count += 1;
         }
     }.run;
