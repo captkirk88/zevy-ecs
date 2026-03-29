@@ -5,7 +5,7 @@ A high-performance, archetype-based Entity-Component-System (ECS) framework writ
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0.dev-blue.svg)](https://ziglang.org/)
 
 > [!NOTE]
-> Work-in-progress - asynchronous systems scheduling and backend optimizations in the works.  The API is mostly stable but may still see some changes as I optimize. See the `zig-1.51` branch (yes I messed up the branch name) for a more stable version compatible with Zig 0.15.x but I'll probably delete it because the new zevy-ecs version is much better and Zig 0.16-dev has been out for a while now.
+> See the `zig-1.51` branch (yes I messed up the branch name) version compatible with Zig 0.15.x but I'll probably delete it because the new zevy-ecs version is much better and Zig 0.16-dev has been out for a while now.
 
 ## Why Zig?
 
