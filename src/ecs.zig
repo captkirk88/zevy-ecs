@@ -234,16 +234,7 @@ pub const Manager = struct {
     /// Create an entity from an array of ComponentInstance
     pub fn createFromComponents(self: *Manager, components: []const serialize.ComponentInstance) !Entity {
         // Allocate entity ID
-        const entity = if (self.free_ids.pop()) |id| blk: {
-            break :blk Entity{ .id = id, .generation = self.generations.items[id] };
-        } else blk: {
-            const id = self.next_entity_id;
-            self.next_entity_id += 1;
-            self.generations.append(self.allocator, 0) catch {
-                @panic("Failed to allocate memory for new entity generation");
-            };
-            break :blk Entity{ .id = id, .generation = 0 };
-        };
+        const entity = try self.allocateEntityId();
 
         if (components.len == 0) {
             // Empty entity
@@ -363,10 +354,13 @@ pub const Manager = struct {
     /// Copy an entity and all of its components from another Manager into this Manager.
     /// Returns the newly created Entity in the destination Manager.
     pub fn copyEntityFrom(self: *Manager, allocator: std.mem.Allocator, src: *Manager, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
-        const components = try src.getAllComponents(allocator, entity);
-        defer allocator.free(components);
+        _ = allocator;
+        if (!src.isAlive(entity)) return error.EntityNotAlive;
 
-        return try self.createFromComponents(components);
+        const new_entity = try self.allocateEntityId();
+        const copied = try src.world.copyEntityTo(entity, &self.world, new_entity);
+        if (!copied) return error.EntityNotAlive;
+        return new_entity;
     }
 
     /// Move an entity and all of its components from this Manager into another Manager.
@@ -375,6 +369,17 @@ pub const Manager = struct {
         const new_entity = try dest.copyEntityFrom(allocator, self, entity);
         try self.destroy(entity);
         return new_entity;
+    }
+
+    fn allocateEntityId(self: *Manager) error{OutOfMemory}!Entity {
+        if (self.free_ids.pop()) |id| {
+            return Entity{ .id = id, .generation = self.generations.items[id] };
+        }
+
+        const id = self.next_entity_id;
+        self.next_entity_id += 1;
+        try self.generations.append(self.allocator, 0);
+        return Entity{ .id = id, .generation = 0 };
     }
 
     /// Add or update a resource.
@@ -916,6 +921,33 @@ test "moveEntityTo moves components and destroys source" {
     try std.testing.expect(pos_dst != null);
     try std.testing.expectEqual(@as(f32, 10), pos_dst.?.x);
     try std.testing.expectEqual(@as(f32, 20), pos_dst.?.y);
+}
+
+test "copyEntityFrom same manager duplicates components" {
+    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    defer ecs.deinit();
+
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { x: f32, y: f32 };
+
+    const source = ecs.create(.{ Position{ .x = 7, .y = 9 }, Velocity{ .x = 1, .y = 2 } });
+    const duplicate = ecs.copyEntityFrom(std.testing.allocator, &ecs, source) catch unreachable;
+
+    try std.testing.expect(ecs.isAlive(source));
+    try std.testing.expect(ecs.isAlive(duplicate));
+    try std.testing.expect(source.id != duplicate.id);
+
+    const src_pos = ecs.getComponent(source, Position) catch unreachable;
+    const dup_pos = ecs.getComponent(duplicate, Position) catch unreachable;
+    const src_vel = ecs.getComponent(source, Velocity) catch unreachable;
+    const dup_vel = ecs.getComponent(duplicate, Velocity) catch unreachable;
+
+    try std.testing.expect(src_pos != null and dup_pos != null);
+    try std.testing.expect(src_vel != null and dup_vel != null);
+    try std.testing.expectEqual(src_pos.?.x, dup_pos.?.x);
+    try std.testing.expectEqual(src_pos.?.y, dup_pos.?.y);
+    try std.testing.expectEqual(src_vel.?.x, dup_vel.?.x);
+    try std.testing.expectEqual(src_vel.?.y, dup_vel.?.y);
 }
 
 test "getOrAddResource" {

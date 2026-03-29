@@ -21,7 +21,7 @@ const CommandHeader = struct {
 /// Append a typed command to `buf` with zero per-command heap allocation.
 /// Data is stored inline; the buffer grows amortized like an ArrayList.
 fn pushCmdToBuf(
-    buf: *std.ArrayListUnmanaged(u8),
+    buf: *std.ArrayList(u8),
     allocator: std.mem.Allocator,
     comptime DataType: type,
     data: DataType,
@@ -47,7 +47,6 @@ fn pushCmdToBuf(
     const next_header = std.mem.alignForward(usize, entry_end, header_align);
 
     try buf.ensureTotalCapacity(allocator, next_header);
-    buf.items.len = next_header;
 
     const header: *CommandHeader = @ptrCast(@alignCast(buf.items[header_offset..].ptr));
     header.* = .{
@@ -65,7 +64,7 @@ fn pushCmdToBuf(
 
 const BatchGroup = struct {
     batch_execute: *const fn ([]const *const anyopaque, *ecs.Manager) anyerror!void,
-    data_ptrs: std.ArrayListUnmanaged(*const anyopaque),
+    data_ptrs: std.ArrayList(*const anyopaque),
 };
 
 /// Execute every command in `buf`, batching component operations between generic barriers,
@@ -75,7 +74,7 @@ fn flushBuf(buf: *std.ArrayList(u8), manager: *ecs.Manager) anyerror!void {
     while (offset < buf.items.len) {
         const header: *const CommandHeader = @ptrCast(@alignCast(buf.items[offset..].ptr));
         if (header.batch_execute) |_| {
-            var groups = std.ArrayListUnmanaged(BatchGroup).empty;
+            var groups = std.ArrayList(BatchGroup).empty;
             defer {
                 for (groups.items) |*group| group.data_ptrs.deinit(manager.allocator);
                 groups.deinit(manager.allocator);

@@ -183,6 +183,31 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         _ = try bench.run(label, BENCH_OPT_COUNT, benchDeserialize, .{ &manager, allocator, io, count });
     }
 
+    // Manager Transfer
+    try bench.beginSection("Manager Transfer");
+    inline for (counts) |count| {
+        var src_manager = try Manager.init(bench.allocator());
+        defer src_manager.deinit();
+
+        var dst_manager = try Manager.init(bench.allocator());
+        defer dst_manager.deinit();
+
+        var entities = try setupMixedEntities(&src_manager, allocator, count);
+        defer entities.deinit(allocator);
+
+        var transfer_state = TransferBenchmarkState{
+            .src = &src_manager,
+            .dst = &dst_manager,
+            .entities = &entities,
+            .allocator = allocator,
+        };
+
+        const label = try std.fmt.allocPrint(allocator, "Transfer {d} Entities Between Managers", .{count});
+        defer allocator.free(label);
+
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchTransferEntities, .{&transfer_state});
+    }
+
     var stdout_buf: [65536]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     try bench.print(&stdout_writer.interface);
@@ -237,6 +262,19 @@ const VelocityDampingQueryInclude = struct { vel: Velocity };
 
 const BENCH_OPT_COUNT = 10;
 
+const TransferBenchmarkState = struct {
+    src: *Manager,
+    dst: *Manager,
+    entities: *std.ArrayList(Entity),
+    allocator: std.mem.Allocator,
+
+    fn swapManagers(self: *@This()) void {
+        const prev_src = self.src;
+        self.src = self.dst;
+        self.dst = prev_src;
+    }
+};
+
 // Benchmark 1: Entity Creation Performance
 fn benchCreateEntities(manager: *Manager, count: usize) void {
     for (0..count) |i| {
@@ -260,6 +298,17 @@ fn batchCreateEntities(manager: *Manager, count: usize, allocator: std.mem.Alloc
         std.debug.panic("Failed to create batch entities: {}\n", .{err});
     };
     allocator.free(ents);
+}
+
+fn benchTransferEntities(state: *TransferBenchmarkState) void {
+    for (state.entities.items) |*entity| {
+        const source_entity = entity.*;
+        entity.* = state.src.moveEntityTo(state.allocator, state.dst, source_entity) catch |err| {
+            std.debug.panic("Failed to transfer entity {d}:{d}: {s}\n", .{ source_entity.id, source_entity.generation, @errorName(err) });
+        };
+    }
+
+    state.swapManagers();
 }
 
 // Benchmark 2: Mixed System Operations
@@ -400,36 +449,43 @@ fn setupMixedEntities(manager: *Manager, allocator: std.mem.Allocator, comptime 
         const health = Health{ .current = 100, .max = 100 };
 
         // Create different archetypes based on index
-        const archetype = i % 7;
-        if (archetype == 0) {
-            // Basic: Position, Velocity, Health
-            entities.append(allocator, manager.create(.{ pos, vel, health })) catch {};
-        } else if (archetype == 1) {
-            // With Armor
-            const armor = Armor{ .value = 10 };
-            entities.append(allocator, manager.create(.{ pos, vel, health, armor })) catch {};
-        } else if (archetype == 2) {
-            // With Damage
-            const damage = Damage{ .value = 5 };
-            entities.append(allocator, manager.create(.{ pos, vel, health, damage })) catch {};
-        } else if (archetype == 3) {
-            // With Armor and Damage
-            const armor = Armor{ .value = 10 };
-            const damage = Damage{ .value = 5 };
-            entities.append(allocator, manager.create(.{ pos, vel, health, armor, damage })) catch {};
-        } else if (archetype == 4) {
-            // With Team
-            const team = Team{ .id = @intCast(i % 4) };
-            entities.append(allocator, manager.create(.{ pos, vel, health, team })) catch {};
-        } else if (archetype == 5) {
-            // With Target
-            const target = Target{ .entity = Entity{ .id = @intCast(i / 2), .generation = 0 } };
-            entities.append(allocator, manager.create(.{ pos, vel, health, target })) catch {};
-        } else {
-            // With Team and Target
-            const team = Team{ .id = @intCast(i % 4) };
-            const target = Target{ .entity = Entity{ .id = @intCast(i / 2), .generation = 0 } };
-            entities.append(allocator, manager.create(.{ pos, vel, health, team, target })) catch {};
+        switch (i % 7) {
+            0 => {
+                // Basic: Position, Velocity, Health
+                entities.append(allocator, manager.create(.{ pos, vel, health })) catch {};
+            },
+            1 => {
+                // With Armor
+                const armor = Armor{ .value = 10 };
+                entities.append(allocator, manager.create(.{ pos, vel, health, armor })) catch {};
+            },
+            2 => {
+                // With Damage
+                const damage = Damage{ .value = 5 };
+                entities.append(allocator, manager.create(.{ pos, vel, health, damage })) catch {};
+            },
+            3 => {
+                // With Armor and Damage
+                const armor = Armor{ .value = 10 };
+                const damage = Damage{ .value = 5 };
+                entities.append(allocator, manager.create(.{ pos, vel, health, armor, damage })) catch {};
+            },
+            4 => {
+                // With Team
+                const team = Team{ .id = @intCast(i % 4) };
+                entities.append(allocator, manager.create(.{ pos, vel, health, team })) catch {};
+            },
+            5 => {
+                // With Target
+                const target = Target{ .entity = Entity{ .id = @intCast(i / 2), .generation = 0 } };
+                entities.append(allocator, manager.create(.{ pos, vel, health, target })) catch {};
+            },
+            else => {
+                // With Team and Target
+                const team = Team{ .id = @intCast(i % 4) };
+                const target = Target{ .entity = Entity{ .id = @intCast(i / 2), .generation = 0 } };
+                entities.append(allocator, manager.create(.{ pos, vel, health, team, target })) catch {};
+            },
         }
     }
     return entities;

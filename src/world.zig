@@ -45,6 +45,78 @@ pub const World = struct {
         try self.addWithStorage(storage_guard.get(), entity, values);
     }
 
+    /// Copy all component bytes for a single entity into another world using the
+    /// source archetype layout directly, avoiding temporary ComponentInstance arrays.
+    pub fn copyEntityTo(self: *World, src_entity: Entity, dest: *World, dest_entity: Entity) error{OutOfMemory}!bool {
+        if (self == dest) {
+            var storage_guard = self.archetypes.writeGuard();
+            defer storage_guard.deinit();
+            return try self.copyEntityToWithStorage(storage_guard.get(), src_entity, dest, storage_guard.get(), dest_entity);
+        }
+
+        const self_lock_addr = @intFromPtr(self.archetypes.inner);
+        const dest_lock_addr = @intFromPtr(dest.archetypes.inner);
+
+        if (self_lock_addr < dest_lock_addr) {
+            var src_guard = self.archetypes.readGuard();
+            defer src_guard.deinit();
+            var dest_guard = dest.archetypes.writeGuard();
+            defer dest_guard.deinit();
+            return try self.copyEntityToWithStorage(src_guard.get(), src_entity, dest, dest_guard.get(), dest_entity);
+        }
+
+        var dest_guard = dest.archetypes.writeGuard();
+        defer dest_guard.deinit();
+        var src_guard = self.archetypes.readGuard();
+        defer src_guard.deinit();
+        return try self.copyEntityToWithStorage(src_guard.get(), src_entity, dest, dest_guard.get(), dest_entity);
+    }
+
+    fn copyEntityToWithStorage(
+        self: *World,
+        src_storage: *const ArchetypeStorage.Inner,
+        src_entity: Entity,
+        dest: *World,
+        dest_storage: *ArchetypeStorage.Inner,
+        dest_entity: Entity,
+    ) error{OutOfMemory}!bool {
+        _ = self;
+
+        const entry = ArchetypeStorage.getWithStorage(src_storage, src_entity) orelse return false;
+        const src_arch = entry.archetype;
+        const src_idx = entry.index;
+        const dst_arch = try dest.archetypes.getOrCreateWithStorage(dest_storage, src_arch.signature, src_arch.component_sizes);
+        const dst_idx = dst_arch.entities.items.len;
+
+        if (dst_idx == 0) {
+            const reserve_entities = @max(@as(usize, 1), src_arch.entities.items.len);
+            try dst_arch.entities.ensureTotalCapacity(dest.allocator, reserve_entities);
+            for (dst_arch.component_arrays, 0..) |*arr, i| {
+                try arr.ensureTotalCapacity(dest.allocator, reserve_entities * src_arch.component_sizes[i]);
+            }
+        }
+
+        try dst_arch.entities.ensureUnusedCapacity(dest.allocator, 1);
+        for (dst_arch.component_arrays, 0..) |*arr, i| {
+            try arr.ensureUnusedCapacity(dest.allocator, src_arch.component_sizes[i]);
+        }
+
+        dst_arch.entities.items.ptr[dst_idx] = dest_entity;
+        dst_arch.entities.items.len += 1;
+
+        for (src_arch.component_arrays, 0..) |*src_arr, i| {
+            const comp_size = src_arch.component_sizes[i];
+            const src_offset = src_idx * comp_size;
+            const dst_arr = &dst_arch.component_arrays[i];
+            const dest_bytes = dst_arr.items.ptr + dst_arr.items.len;
+            @memcpy(dest_bytes[0..comp_size], src_arr.items[src_offset .. src_offset + comp_size]);
+            dst_arr.items.len += comp_size;
+        }
+
+        try ArchetypeStorage.setWithStorage(dest_storage, dest_entity, .{ .archetype = dst_arch, .index = dst_idx });
+        return true;
+    }
+
     fn addWithStorage(self: *World, storage: *ArchetypeStorage.Inner, entity: Entity, values: anytype) error{OutOfMemory}!void {
         const components_type = @TypeOf(values);
         const info = @typeInfo(components_type);
