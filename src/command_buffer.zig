@@ -1,4 +1,5 @@
 const std = @import("std");
+const ecs = @import("ecs.zig");
 
 pub const CommandHeader = struct {
     execute: *const fn (*anyopaque, *anyopaque) anyerror!void,
@@ -78,7 +79,7 @@ pub const CommandBuffer = struct {
         }
     }
 
-    pub fn flush(self: *CommandBuffer, allocator: std.mem.Allocator, manager: *anyopaque) anyerror!void {
+    pub fn flush(self: *CommandBuffer, allocator: std.mem.Allocator, manager: *ecs.Manager) anyerror!void {
         var offset: usize = 0;
         while (offset < self.bytes.items.len) {
             const header: *const CommandHeader = @ptrCast(@alignCast(self.bytes.items[offset..].ptr));
@@ -115,7 +116,7 @@ pub const CommandBuffer = struct {
                 }
 
                 for (groups.items) |group| {
-                    try group.batch_execute(group.data_ptrs.items, manager);
+                    try group.batch_execute(group.data_ptrs.items, @ptrCast(manager));
                 }
                 continue;
             }

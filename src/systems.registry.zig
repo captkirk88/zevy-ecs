@@ -26,7 +26,7 @@ pub const DefaultParamRegistry = SystemParamRegistry(&[_]type{
 const SystemParamTemplate = reflect.Template(struct {
     pub const Name: []const u8 = "SystemParam";
 
-    pub fn analyze(comptime T: type) ?type {
+    pub fn matches(comptime T: type) bool {
         _ = T;
         unreachable;
     }
@@ -58,14 +58,34 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
 
         pub inline fn contains(comptime ParamType: type) bool {
             inline for (registered_params) |SystemParam| {
-                const result = SystemParam.analyze(ParamType);
-                if (result) return true;
+                if (comptime SystemParam.matches(ParamType)) return true;
             }
             return false;
         }
 
-        pub fn get(index: usize) type {
+        /// Get the registered SystemParam type at the given index.
+        pub inline fn get(index: usize) type {
+            if (index >= registered_params.len) {
+                if (@import("builtin").mode == .Debug) {
+                    std.debug.panic("SystemParamRegistry: index out of bounds: {d} (len = {d})", .{ index, registered_params.len });
+                } else {
+                    @compileError("SystemParamRegistry: index out of bounds");
+                }
+            }
+
             return registered_params[index];
+        }
+
+        /// Get the registered SystemParam type that matches the given ParamType at compile time.
+        pub inline fn getFor(comptime ParamType: type) type {
+            inline for (registered_params) |SystemParam| {
+                if (comptime SystemParam.matches(ParamType)) return SystemParam;
+            }
+            if (@import("builtin").mode == .Debug) {
+                std.debug.panic("SystemParamRegistry: Unknown SystemParam type: {s}", .{@typeName(ParamType)});
+            } else {
+                @compileError(std.fmt.comptimePrint("SystemParamRegistry: Unknown SystemParam type: {s}", .{@typeName(ParamType)}));
+            }
         }
 
         pub inline fn params() []const type {
@@ -74,9 +94,8 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
 
         pub inline fn apply(ecs_instance: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
             inline for (registered_params) |SystemParam| {
-                const analyzed = SystemParam.analyze(ParamType);
-                if (analyzed) |param| {
-                    return try SystemParam.apply(ecs_instance, param);
+                if (comptime SystemParam.matches(ParamType)) {
+                    return try SystemParam.apply(ecs_instance, ParamType);
                 }
             }
             if (@import("builtin").mode == .Debug) {
@@ -88,10 +107,9 @@ pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
 
         pub fn deinit(ecs_instance: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
             inline for (registered_params) |SystemParam| {
-                const analyzed = SystemParam.analyze(ParamType);
-                if (analyzed) |param| {
+                if (comptime SystemParam.matches(ParamType)) {
                     if (reflect.hasFuncWithArgs(SystemParam, "deinit", &[_]type{ *ecs.Manager, *anyopaque, type })) {
-                        SystemParam.deinit(ecs_instance, ptr, param);
+                        SystemParam.deinit(ecs_instance, ptr, ParamType);
                     }
                     return;
                 }
@@ -155,9 +173,8 @@ test "merged SystemParamRegistry" {
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
     const CustomParam = struct {
-        pub fn analyze(comptime T: type) ?type {
-            if (@typeInfo(T) == .int) return T;
-            return null;
+        pub fn matches(comptime T: type) bool {
+            return @typeInfo(T) == .int;
         }
         pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!T {
             return 1;
@@ -176,7 +193,7 @@ test "merged SystemParamRegistry" {
     const value: f32 = 42.0;
     _ = try ecs_instance.addResource(f32, value);
     var res = try merge.apply(&ecs_instance, *params.Res(f32));
-    defer params.ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), f32);
+    defer params.ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), *params.Res(f32));
     try std.testing.expect(res.get().* == 42.0);
 }
 
@@ -185,9 +202,8 @@ test "CustomSystemParam basic" {
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
     const CustomParam = struct {
-        pub fn analyze(comptime T: type) ?type {
-            if (@typeInfo(T) == .int) return T;
-            return null;
+        pub fn matches(comptime T: type) bool {
+            return @typeInfo(T) == .int;
         }
         pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!T {
             return 123;
@@ -218,22 +234,19 @@ test "CustomSystemParam with Query, Res, Local fields" {
         local: *params.Local(u64),
     };
     const CustomComplexParam = struct {
-        pub fn analyze(comptime T: type) ?type {
-            const ti = @typeInfo(T);
-            if (ti == .pointer) {
-                const Child = ti.pointer.child;
-                return analyze(Child);
-            }
-            if (ti == .@"struct" and @hasField(T, "query") and @hasField(T, "res") and @hasField(T, "local")) {
-                return T;
-            }
-            return null;
+        pub fn matches(comptime T: type) bool {
+            const Base = switch (@typeInfo(T)) {
+                .pointer => |pointer_info| pointer_info.child,
+                else => T,
+            };
+            const ti = @typeInfo(Base);
+            return ti == .@"struct" and @hasField(Base, "query") and @hasField(Base, "res") and @hasField(Base, "local");
         }
-        pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
+        pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
             const query_val = e.query(ComplexType.IncludeTypes);
-            const res_value = try params.ResourceSystemParam.apply(e, i32);
-            const local_ptr = try params.LocalSystemParam.apply(e, u64);
-            return ComplexType{
+            const res_value = try params.ResourceSystemParam.apply(e, *params.Res(i32));
+            const local_ptr = try params.LocalSystemParam.apply(e, *params.Local(u64));
+            return T{
                 .query = query_val,
                 .res = res_value,
                 .local = local_ptr,
@@ -242,7 +255,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
         pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
             const complex: *T = @ptrCast(@alignCast(ptr));
             complex.query.deinit();
-            params.ResourceSystemParam.deinit(e, @ptrCast(complex.res), i32);
+            params.ResourceSystemParam.deinit(e, @ptrCast(complex.res), *params.Res(i32));
         }
     };
 

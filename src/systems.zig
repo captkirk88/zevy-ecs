@@ -478,7 +478,7 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
                 first_system = ToSystem(first, ParamRegistry);
             }
             // Run first system and get its output
-            const manager = commands.getManager();
+            const manager = commands.manager();
             const first_result = try first_system.?.run(manager, first_system.?.ctx);
             // Create second system with the first system's output as an injected argument
             const second_system = ToSystemWithArgs(second, .{first_result}, ParamRegistry);
@@ -524,7 +524,7 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime Par
                     if (system_handle == null) {
                         system_handle = ToSystem(system, ParamRegistry);
                     }
-                    _ = try system_handle.?.run(commands.getManager(), system_handle.?.ctx);
+                    _ = try system_handle.?.run(commands.manager(), system_handle.?.ctx);
                 }
             }
         }.run,
@@ -547,7 +547,7 @@ pub fn chain(systems: anytype, comptime ParamRegistry: type) System(void) {
 
         pub fn run(commands: *Commands) !void {
             inline for (system_handles) |sys| {
-                _ = try sys.run(commands.getManager(), sys.ctx);
+                _ = try sys.run(commands.manager(), sys.ctx);
             }
         }
     };

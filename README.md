@@ -22,8 +22,8 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 - **Event system**: Built-in event queue with filtering and handling capabilities in a circular buffer
 - **Batch operations**: High-performance batch entity creation
 - **Component serialization**: Built-in support for serializing/deserializing components and entities
-- **Extensible parameter system**: Create custom system parameters by implementing `analyze` and `apply` functions
-- **Zero runtime overhead**: All parameter resolution happens at compile time
+- **Extensible parameter system**: Create custom system parameters by implementing `matches`, `apply`, and optional `deinit` functions
+- **Zero runtime overhead**: All system parameter resolution happens at compile time
 
 ## Table of Contents
 
@@ -293,12 +293,11 @@ fn movementSystem(
 
 // System with resources
 fn damageSystem(
-    dt: zevy_ecs.Res(DeltaTime),
+    dt: *zevy_ecs.Res(DeltaTime),
     query: zevy_ecs.Query(
         struct { health: Health },
     ),
 ) void {
-    _ = dt;
     while (query.next()) |item| {
         if (item.health.current > 0) {
             item.health.current -= 1;
@@ -401,7 +400,7 @@ Systems can request various parameters that are automatically injected. All para
 - **`*Relations`**: Access to the RelationManager for entity relationships
 
 > [!NOTE]
-> Direct `*Manager` access is available via `commands.manager`, _compatibility for now_, when using `*Commands`. For immediate operations during system execution, use `commands.manager` methods directly. For deferred entity creation, use `commands.create()` which returns an `EntityCommands` with a `PendingEntity` - call `entity_cmds.flush()` to create the entity and apply queued components. For deferred operations on existing entities, use `Commands` methods like `addComponent`, `removeComponent`, `destroyEntity`, etc.
+> Use `commands.manager()` when you need direct `*Manager` access inside a system. For deferred creation, call `commands.create()`, queue operations on the returned `EntityCommands`, then call `entity_cmds.flush()` and `entity_cmds.entity()` to access the created entity. For existing entities, use `commands.entity(entity)` and `EntityCommands.get(T)` when you need to read the current component value through the manager.
 
 More can be added by implementing custom parameter types. (see [Custom System Registries](#custom-system-registries))
 
@@ -599,40 +598,40 @@ fn setupHierarchy(
     commands: *zevy_ecs.Commands,
     relations: *zevy_ecs.Relations,
 ) !void {
-    const ecs = commands.manager;
+    const ecs = commands.manager();
 
     // Create entities using deferred creation
     var parent_cmds = try commands.create();
     _ = try parent_cmds.add(Transform, .{});
-    parent_cmds.flush();
-    const parent = parent_cmds.getEntity();
+    try parent_cmds.flush();
+    const parent = parent_cmds.entity();
 
     var child_cmds = try commands.create();
-    _ = try child1_cmds.add(Transform, .{});
-    child1_cmds.flush();
-    const child = child1_cmds.getEntity();
+    _ = try child_cmds.add(Transform, .{});
+    try child_cmds.flush();
+    const child = child_cmds.entity();
 
     // Use RelationManager API
-    try relations.add(ecs, child, parent, Child);
+    try relations.get().add(ecs, child, parent, Child);
 
     // Query children of parent
-    const children = relations.getChildren(parent, Child);
+    const children = relations.get().getChildren(parent, Child);
     for (children) |child| {
         std.debug.print("Child: {d}\n", .{child.id});
     }
 
     // Get parent of child
-    if (try relations.getParent(ecs, child, Child)) |p| {
+    if (try relations.get().getParent(ecs, child, Child)) |p| {
         std.debug.print("Parent: {d}\n", .{p.id});
     }
 
     // Check if relation exists
-    if (try relations.has(ecs, child, parent, Child)) {
+    if (try relations.get().has(ecs, child, parent, Child)) {
         std.debug.print("Child1 has parent relation\n", .{});
     }
 
     // Remove relation
-    try relations.remove(ecs, child, parent, Child);
+    try relations.get().remove(ecs, child, parent, Child);
 }
 
 pub fn main() !void {
@@ -641,8 +640,8 @@ pub fn main() !void {
     var manager = try zevy_ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    // RelationManager is automatically initialized
-    try setupHierarchy(&manager);
+    const setup_system = manager.cacheSystem(zevy_ecs.ToSystem(setupHierarchy, zevy_ecs.DefaultParamRegistry));
+    try manager.runSystem(setup_system);
 }
 ```
 
@@ -653,21 +652,21 @@ fn attachWeapon(
     commands: *zevy_ecs.Commands,
     relations: *zevy_ecs.Relations,
 ) !void {
-    const ecs = commands.manager;
+    const ecs = commands.manager();
 
     // Create entities using deferred creation
     var char_cmds = try commands.create();
     _ = try char_cmds.add(Transform, .{});
-    char_cmds.flush();
-    const character = char_cmds.getEntity();
+    try char_cmds.flush();
+    const character = char_cmds.entity();
 
     var weapon_cmds = try commands.create();
     _ = try weapon_cmds.add(Transform, .{});
-    weapon_cmds.flush();
-    const weapon = weapon_cmds.getEntity();
+    try weapon_cmds.flush();
+    const weapon = weapon_cmds.entity();
 
     // Method 1: Add relation with custom data using RelationManager API
-    try relations.addWithData(
+    try relations.get().addWithData(
         ecs,
         weapon,
         character,
@@ -695,36 +694,36 @@ fn setupInventory(
     commands: *zevy_ecs.Commands,
     relations: *zevy_ecs.Relations,
 ) !void {
-    const ecs = commands.manager;
+    const ecs = commands.manager();
 
     // Create entities using deferred creation
     var player_cmds = try commands.create();
     _ = try player_cmds.add(Transform, .{});
-    player_cmds.flush();
-    const player = player_cmds.getEntity();
+    try player_cmds.flush();
+    const player = player_cmds.entity();
 
     var sword_cmds = try commands.create();
     _ = try sword_cmds.add(Transform, .{});
-    sword_cmds.flush();
-    const sword = sword_cmds.getEntity();
+    try sword_cmds.flush();
+    const sword = sword_cmds.entity();
 
     var shield_cmds = try commands.create();
     _ = try shield_cmds.add(Transform, .{});
-    shield_cmds.flush();
-    const shield = shield_cmds.getEntity();
+    try shield_cmds.flush();
+    const shield = shield_cmds.entity();
 
     var potion_cmds = try commands.create();
     _ = try potion_cmds.add(Transform, .{});
-    potion_cmds.flush();
-    const potion = potion_cmds.getEntity();
+    try potion_cmds.flush();
+    const potion = potion_cmds.entity();
 
     // Add non-exclusive relations (entity can have multiple)
-    try relations.add(ecs, player, sword, Owns);
-    try relations.add(ecs, player, shield, Owns);
-    try relations.add(ecs, player, potion, Owns);
+    try relations.get().add(ecs, player, sword, Owns);
+    try relations.get().add(ecs, player, shield, Owns);
+    try relations.get().add(ecs, player, potion, Owns);
 
     // Get all owned items
-    const items = relations.getParents(player, Owns);
+    const items = relations.get().getParents(player, Owns);
     std.debug.print("Player owns {d} items\n", .{items.len});
 }
 ```
@@ -764,48 +763,52 @@ try system.run(&manager, system.ctx);
 
 ### Custom System Registries
 
-You can create custom system parameter types by implementing the `analyze` and `apply` functions, then merge them with the default registry. Below is an example of a custom system parameter that combines multiple built-in parameters.
+You can create custom system parameter types by implementing `matches`, `apply`, and optional `deinit`, then merge them with the default registry. Below is an example of a custom system parameter that combines multiple built-in parameters.
 
 ```zig
 const zevy_ecs = @import("zevy_ecs");
+const params = zevy_ecs.params;
+const param_systems = zevy_ecs.params.systems;
+
+const ComponentA = struct { a: i32 };
+const ComponentB = struct { b: u32 };
+
 pub const ComplexType = struct {
     /// Unfortunately with the way zig handles anonymous structs we need to define this separately
     pub const IncludeTypes = struct { a: ComponentA, b: ComponentB };
     query: zevy_ecs.Query(IncludeTypes),
-    res: params.Res(i32),
+    res: *params.Res(i32),
     local: *params.Local(u64),
 };
 
 const CustomComplexParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const ti = @typeInfo(T);
-        if (ti == .pointer) {
-            const Child = ti.pointer.child;
-            return analyze(Child);
-        }
-        if (ti == .@"struct" and @hasField(T, "query") and @hasField(T, "res") and @hasField(T, "local")) {
-            return T;
-        }
-        return null;
+    pub fn matches(comptime T: type) bool {
+        const Base = switch (@typeInfo(T)) {
+            .pointer => |pointer_info| pointer_info.child,
+            else => T,
+        };
+        const ti = @typeInfo(Base);
+        return ti == .@"struct" and @hasField(Base, "query") and @hasField(Base, "res") and @hasField(Base, "local");
     }
-    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!ComplexType {
+    pub fn apply(e: *zevy_ecs.Manager, comptime T: type) anyerror!T {
         const query_val = e.query(ComplexType.IncludeTypes);
-        const res_value = try params.ResourceSystemParam.apply(e, i32);
-        const local_ptr = try params.LocalSystemParam.apply(e, u64);
-        return ComplexType{
+        const res_value = try param_systems.ResourceSystemParam.apply(e, *params.Res(i32));
+        const local_ptr = try param_systems.LocalSystemParam.apply(e, *params.Local(u64));
+        return T{
             .query = query_val,
             .res = res_value,
             .local = local_ptr,
         };
     }
 
-    //Optional but required if you have to clean up
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
-        ...
+    pub fn deinit(e: *zevy_ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+        const complex: *T = @ptrCast(@alignCast(ptr));
+        complex.query.deinit();
+        param_systems.ResourceSystemParam.deinit(e, @ptrCast(complex.res), *params.Res(i32));
     }
 };
 
-const CustomParamRegistry = zevy_ecs.MergedSystemParamRegistry(&[_]type{
+const CustomParamRegistry = zevy_ecs.MergedSystemParamRegistry(.{
     zevy_ecs.DefaultParamRegistry,
     CustomComplexParam,
 });

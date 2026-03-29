@@ -40,6 +40,50 @@ fn typeHasFields(comptime T: type, comptime field_names: []const []const u8) boo
     return true;
 }
 
+fn SystemParam(comptime Matcher: type, comptime Impl: type) type {
+    return struct {
+        pub fn matches(comptime ParamType: type) bool {
+            return Matcher.matches(ParamType, BaseType(ParamType));
+        }
+
+        pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+            return try Impl.apply(e, ParamType);
+        }
+
+        pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+            Impl.deinit(e, ptr, ParamType);
+        }
+    };
+}
+
+fn DeclMatcher(comptime require_pointer: bool, comptime decl_names: []const []const u8) type {
+    return struct {
+        pub fn matches(comptime ParamType: type, comptime Base: type) bool {
+            return (@typeInfo(ParamType) == .pointer) == require_pointer and typeHasDecls(Base, decl_names);
+        }
+    };
+}
+
+fn DeclAndFieldMatcher(
+    comptime require_pointer: bool,
+    comptime decl_names: []const []const u8,
+    comptime field_names: []const []const u8,
+) type {
+    return struct {
+        pub fn matches(comptime ParamType: type, comptime Base: type) bool {
+            return (@typeInfo(ParamType) == .pointer) == require_pointer and typeHasDecls(Base, decl_names) and typeHasFields(Base, field_names);
+        }
+    };
+}
+
+fn ExactBaseMatcher(comptime require_pointer: bool, comptime ExpectedBase: type) type {
+    return struct {
+        pub fn matches(comptime ParamType: type, comptime Base: type) bool {
+            return (@typeInfo(ParamType) == .pointer) == require_pointer and Base == ExpectedBase;
+        }
+    };
+}
+
 /// Local: Provides per-system-function persistent storage, accessible only to the declaring system.
 /// Value persists across system invocations (lifetime: ECS instance or until explicitly cleared).
 pub fn Local(comptime T: type) type {
@@ -84,34 +128,34 @@ pub fn Local(comptime T: type) type {
     };
 }
 
-pub const LocalSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
+const LocalSystemParamMatcher = struct {
+    pub fn matches(comptime ParamType: type, comptime Base: type) bool {
         const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and
+        return @typeInfo(ParamType) == .pointer and
+            type_info == .@"struct" and
             typeHasFields(Base, &.{ "_value", "_set" }) and
-            type_info.@"struct".fields.len == 2)
-        {
-            return type_info.@"struct".fields[0].type;
-        }
-        return null;
+            type_info.@"struct".fields.len == 2;
     }
+};
 
-    pub fn apply(_: *ecs.Manager, comptime T: type) anyerror!*Local(T) {
-        // Local params need static storage that persists across system calls
-        // Each unique type T gets its own static storage
+const LocalSystemParamImpl = struct {
+    pub fn apply(_: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const LocalType = BaseType(ParamType);
+        const ValueType = @typeInfo(LocalType).@"struct".fields[0].type;
         const static_storage = struct {
-            var local: Local(T) = .{ ._value = undefined, ._set = false };
+            var local: Local(ValueType) = .{ ._value = undefined, ._set = false };
         };
         return &static_storage.local;
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = e;
         _ = ptr;
-        _ = T;
+        _ = ParamType;
     }
 };
+
+pub const LocalSystemParam = SystemParam(LocalSystemParamMatcher, LocalSystemParamImpl);
 
 /// EventReader provides read-only access to events of type T from the EventStore
 pub fn EventReader(comptime T: type) type {
@@ -180,32 +224,28 @@ pub fn EventReader(comptime T: type) type {
     };
 }
 
-/// EventReader(T) SystemParam analyzer and applier
-pub const EventReaderSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        if (typeHasDecls(Base, &.{ "EventType", "is_event_reader" })) {
-            return Base.EventType;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventReader(T) {
-        var ref = e.getResource(events.EventStore(T)) orelse blk: {
-            const store = try events.EventStore(T).init(e.allocator, 16);
-            _ = try e.addResource(events.EventStore(T), store);
-            break :blk e.getResource(events.EventStore(T)) orelse return error.ResourceNotFound;
+/// EventReader(T) SystemParam matcher and applier
+const EventReaderSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const EventType = BaseType(ParamType).EventType;
+        var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
+            const store = try events.EventStore(EventType).init(e.allocator, 16);
+            _ = try e.addResource(events.EventStore(EventType), store);
+            break :blk e.getResource(events.EventStore(EventType)) orelse return error.ResourceNotFound;
         };
         const guard = ref.lockWrite();
-        return EventReader(T){ ._ref = ref, ._guard = guard, .event_store = guard.get() };
+        return ParamType{ ._ref = ref, ._guard = guard, .event_store = guard.get() };
     }
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = e;
-        const reader: *EventReader(T) = @ptrCast(@alignCast(ptr));
+        const reader: *ParamType = @ptrCast(@alignCast(ptr));
         reader._guard.deinit();
         reader._ref.deinit();
     }
 };
+
+pub const EventReaderSystemParam = SystemParam(DeclMatcher(false, &.{ "EventType", "is_event_reader" }), EventReaderSystemParamImpl);
 
 /// EventWriter provides write access to add events of type T to the EventStore
 pub fn EventWriter(comptime T: type) type {
@@ -241,32 +281,28 @@ pub fn EventWriter(comptime T: type) type {
     };
 }
 
-/// EventWriter(T) SystemParam analyzer and applier
-pub const EventWriterSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        if (typeHasDecls(Base, &.{ "EventType", "is_event_writer" })) {
-            return Base.EventType;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!EventWriter(T) {
-        var ref = e.getResource(events.EventStore(T)) orelse blk: {
-            const store = try events.EventStore(T).init(e.allocator, 16);
-            _ = try e.addResource(events.EventStore(T), store);
-            break :blk e.getResource(events.EventStore(T)) orelse return error.ResourceNotFound;
+/// EventWriter(T) SystemParam matcher and applier
+const EventWriterSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const EventType = BaseType(ParamType).EventType;
+        var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
+            const store = try events.EventStore(EventType).init(e.allocator, 16);
+            _ = try e.addResource(events.EventStore(EventType), store);
+            break :blk e.getResource(events.EventStore(EventType)) orelse return error.ResourceNotFound;
         };
         const guard = ref.lockWrite();
-        return EventWriter(T){ ._ref = ref, ._guard = guard, .event_store = guard.get() };
+        return ParamType{ ._ref = ref, ._guard = guard, .event_store = guard.get() };
     }
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = e;
-        const writer: *EventWriter(T) = @ptrCast(@alignCast(ptr));
+        const writer: *ParamType = @ptrCast(@alignCast(ptr));
         writer._guard.deinit();
         writer._ref.deinit();
     }
 };
+
+pub const EventWriterSystemParam = SystemParam(DeclMatcher(false, &.{ "EventType", "is_event_writer" }), EventWriterSystemParamImpl);
 
 /// State provides a query for checking if a specific state enum value is active
 /// Use as a system parameter: state: State(GameState)
@@ -297,23 +333,12 @@ pub fn State(comptime StateEnum: type) type {
     };
 }
 
-/// States(StateType) SystemParam analyzer and applier
+/// States(StateType) SystemParam matcher and applier
 /// Provides access to state management for checking and transitioning states
 /// System parameter handler for State(StateEnum) - checks if a specific state is active
-pub const StateSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and
-            typeHasDecls(Base, &.{ "StateEnum_", "_is_state_param" }) and
-            typeHasFields(Base, &.{"state_mgr"}))
-        {
-            return Base.StateEnum_;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) anyerror!State(StateEnum) {
+const StateSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const StateEnum = BaseType(ParamType).StateEnum_;
         const StateManagerType = state.StateManager(StateEnum);
 
         // Get or create the StateManager resource for this specific enum type
@@ -322,17 +347,20 @@ pub const StateSystemParam = struct {
             var guard = ref.lockRead();
             defer guard.deinit();
             const state_mgr = guard.get().*;
-            return State(StateEnum){ .state_mgr = state_mgr };
+            return ParamType{ .state_mgr = state_mgr };
         }
 
         return error.StateManagerNotFound;
     }
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = e;
         _ = ptr;
-        _ = StateEnum;
+        _ = ParamType;
     }
 };
+
+pub const StateSystemParam = SystemParam(DeclAndFieldMatcher(false, &.{ "StateEnum_", "_is_state_param" }, &.{"state_mgr"}), StateSystemParamImpl);
 
 /// NextState allows immediate state transitions for a specific enum type
 pub fn NextState(comptime StateEnum: type) type {
@@ -357,35 +385,27 @@ pub fn NextState(comptime StateEnum: type) type {
 }
 
 /// System parameter handler for NextState(StateEnum) - allows immediate state transitions
-pub const NextStateSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and
-            typeHasDecls(Base, &.{ "StateEnum_", "_is_next_state_param" }) and
-            typeHasFields(Base, &.{"state_mgr"}))
-        {
-            return Base.StateEnum_;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime StateEnum: type) anyerror!*NextState(StateEnum) {
+const NextStateSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const StateEnum = BaseType(ParamType).StateEnum_;
         const StateManagerType = state.StateManager(StateEnum);
         const ref = e.getResource(StateManagerType) orelse return error.StateManagerNotFound;
         defer ref.deinit();
         var guard = ref.lockRead();
         const state_mgr = guard.get().*;
         guard.deinit();
-        const next_state_ptr = try e.allocator.create(NextState(StateEnum));
-        next_state_ptr.* = NextState(StateEnum){ .state_mgr = state_mgr };
+        const next_state_ptr = try e.allocator.create(BaseType(ParamType));
+        next_state_ptr.* = BaseType(ParamType){ .state_mgr = state_mgr };
         return next_state_ptr;
     }
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime StateEnum: type) void {
-        const next_state: *NextState(StateEnum) = @ptrCast(@alignCast(ptr));
+
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        const next_state: ParamType = @ptrCast(@alignCast(ptr));
         e.allocator.destroy(next_state);
     }
 };
+
+pub const NextStateSystemParam = SystemParam(DeclAndFieldMatcher(true, &.{ "StateEnum_", "_is_next_state_param" }, &.{"state_mgr"}), NextStateSystemParamImpl);
 
 /// Opaque system parameter providing shared read access to a resource of type T.
 /// Fields are hidden – use `res.get()` to obtain a const pointer to the value.
@@ -394,7 +414,7 @@ pub fn Res(comptime T: type) type {
     return opaque {
         const Self = @This();
 
-        /// Marker for `ResourceSystemParam.analyze`
+        /// Marker for resource system param matching.
         pub const is_res = true;
         /// The wrapped value type
         pub const ResType = T;
@@ -448,24 +468,18 @@ pub fn ResMut(comptime T: type) type {
     };
 }
 
-/// Res(T) SystemParam analyzer and applier
-pub const ResourceSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        if (typeHasDecls(Base, &.{ "is_res", "ResType" })) {
-            return Base.ResType;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!*Res(T) {
-        const ref = e.getResource(T) orelse return error.ResourceNotFound;
-        const inner = try e.allocator.create(Res(T)._Inner);
+/// Res(T) SystemParam matcher and applier
+const ResourceSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const ResourceType = BaseType(ParamType).ResType;
+        const ref = e.getResource(ResourceType) orelse return error.ResourceNotFound;
+        const inner = try e.allocator.create(BaseType(ParamType)._Inner);
         inner.* = .{ .ref = ref, .guard = ref.lockRead() };
         return @ptrCast(inner);
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        const ResourceType = BaseType(ParamType).ResType;
         const inner: *Res(ResourceType)._Inner = @ptrCast(@alignCast(ptr));
         inner.guard.deinit();
         inner.ref.deinit();
@@ -473,24 +487,20 @@ pub const ResourceSystemParam = struct {
     }
 };
 
-/// ResMut(T) SystemParam analyzer and applier
-pub const ResourceMutSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        if (typeHasDecls(Base, &.{ "is_res_mut", "ResMutType" })) {
-            return Base.ResMutType;
-        }
-        return null;
-    }
+pub const ResourceSystemParam = SystemParam(DeclMatcher(true, &.{ "is_res", "ResType" }), ResourceSystemParamImpl);
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!*ResMut(T) {
-        const ref = e.getResource(T) orelse return error.ResourceNotFound;
-        const inner = try e.allocator.create(ResMut(T)._Inner);
+/// ResMut(T) SystemParam matcher and applier
+const ResourceMutSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const ResourceType = BaseType(ParamType).ResMutType;
+        const ref = e.getResource(ResourceType) orelse return error.ResourceNotFound;
+        const inner = try e.allocator.create(BaseType(ParamType)._Inner);
         inner.* = .{ .ref = ref, .guard = ref.lockWrite() };
         return @ptrCast(inner);
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ResourceType: type) void {
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        const ResourceType = BaseType(ParamType).ResMutType;
         const inner: *ResMut(ResourceType)._Inner = @ptrCast(@alignCast(ptr));
         inner.guard.deinit();
         inner.ref.deinit();
@@ -498,26 +508,26 @@ pub const ResourceMutSystemParam = struct {
     }
 };
 
-/// Query(...) SystemParam analyzer and applier
-pub const QuerySystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and @hasDecl(Base, "IncludeTypesParam") and !@hasField(Base, "item")) {
-            return Base;
-        }
-        return null;
-    }
+pub const ResourceMutSystemParam = SystemParam(DeclMatcher(true, &.{ "is_res_mut", "ResMutType" }), ResourceMutSystemParamImpl);
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
-        var query = e.query(T.IncludeTypesParam);
+/// Query(...) SystemParam matcher and applier
+const QuerySystemParamMatcher = struct {
+    pub fn matches(comptime ParamType: type, comptime Base: type) bool {
+        const type_info = @typeInfo(Base);
+        return @typeInfo(ParamType) != .pointer and type_info == .@"struct" and @hasDecl(Base, "IncludeTypesParam") and !@hasField(Base, "item");
+    }
+};
+
+const QuerySystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        var query = e.query(ParamType.IncludeTypesParam);
         const released = try e.allocator.create(bool);
         query.shareDeinitState(released);
         return query;
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
-        const query_ptr: *T = @ptrCast(@alignCast(ptr));
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        const query_ptr: *ParamType = @ptrCast(@alignCast(ptr));
         query_ptr.deinit();
         if (query_ptr.shared_guard_released) |shared_state| {
             query_ptr.shared_guard_released = null;
@@ -525,6 +535,8 @@ pub const QuerySystemParam = struct {
         }
     }
 };
+
+pub const QuerySystemParam = SystemParam(QuerySystemParamMatcher, QuerySystemParamImpl);
 
 /// Single(...) returns exactly one matching item from a Query
 /// Use as a system parameter like:
@@ -548,34 +560,34 @@ pub fn Single(comptime IncludeTypes: anytype) type {
     };
 }
 
-/// Single SystemParam analyzer and applier
-pub const SingleSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
+/// Single SystemParam matcher and applier
+const SingleSystemParamMatcher = struct {
+    pub fn matches(comptime ParamType: type, comptime Base: type) bool {
         const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and @hasDecl(Base, "IncludeTypesParam") and @hasField(Base, "item")) {
-            return Base;
-        }
-        return null;
+        return @typeInfo(ParamType) != .pointer and type_info == .@"struct" and @hasDecl(Base, "IncludeTypesParam") and @hasField(Base, "item");
     }
+};
 
-    pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
-        var q = e.query(T.IncludeTypesParam);
+const SingleSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        var q = e.query(ParamType.IncludeTypesParam);
         defer q.deinit();
         const first = q.next() orelse return error.SingleFoundNoMatches;
         // Ensure there is exactly one match
         if (q.next() != null) {
             return error.SingleFoundMultipleMatches;
         }
-        return T{ .item = first };
+        return ParamType{ .item = first };
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = e;
         _ = ptr;
-        _ = T;
+        _ = ParamType;
     }
 };
+
+pub const SingleSystemParam = SystemParam(SingleSystemParamMatcher, SingleSystemParamImpl);
 
 /// Write-guarded handle to the RelationManager resource.
 /// Use `rel.get()` to access the `RelationManager`.
@@ -594,35 +606,31 @@ fn deinit_releations(self: *Relations) void {
     self.ref.deinit();
 }
 
-/// Relations SystemParam analyzer and applier
+/// Relations SystemParam matcher and applier
 /// Provides access to the RelationManager resource
 /// Use as `rel: *params.Relations` in system functions.
-pub const RelationsSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        if (Base == Relations or Base == relations_mod.RelationManager) return Relations;
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Relations {
+const RelationsSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         if (e.hasResource(relations_mod.RelationManager) == false) {
             const rel_mgr = relations_mod.RelationManager.init(e.allocator);
             _ = try e.addResource(relations_mod.RelationManager, rel_mgr);
         }
         const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
         const guard = ref.lockWrite();
-        const rel_ptr = try e.allocator.create(Relations);
+        const rel_ptr = try e.allocator.create(BaseType(ParamType));
         rel_ptr.* = .{ .ref = ref, ._guard = guard };
         return rel_ptr;
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
-        _ = T;
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        _ = ParamType;
         const rel_ptr: *Relations = @ptrCast(@alignCast(ptr));
         deinit_releations(rel_ptr);
         e.allocator.destroy(rel_ptr);
     }
 };
+
+pub const RelationsSystemParam = SystemParam(ExactBaseMatcher(true, Relations), RelationsSystemParamImpl);
 
 /// OnAdded(T) system param: read-only view of components of type T
 /// that were added since the last system run.
@@ -648,21 +656,13 @@ pub fn OnAdded(comptime T: type) type {
     };
 }
 
-/// OnAdded(T) SystemParam analyzer and applier
+/// OnAdded(T) SystemParam matcher and applier
 /// Currently this is a thin wrapper that just provides a normal Query
 /// for entities with component T. A higher-level scheduler is expected
 /// to constrain which entities are actually considered "added".
-pub const OnAddedSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and typeHasDecls(Base, &.{ "ComponentType", "is_on_added" })) {
-            return Base.ComponentType;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime Component: type) anyerror!OnAdded(Component) {
+const OnAddedSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const Component = BaseType(ParamType).ComponentType;
         const event_type_hash = zevy_reflect.typeHash(Component);
         var results = try std.ArrayList(OnAdded(Component).Item).initCapacity(e.allocator, 16);
         defer results.deinit(e.allocator);
@@ -680,15 +680,18 @@ pub const OnAddedSystemParam = struct {
         }
 
         const slice = try results.toOwnedSlice(e.allocator);
-        return OnAdded(Component){ .items = slice };
+        return ParamType{ .items = slice };
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        const Component = BaseType(ParamType).ComponentType;
         // Cast the opaque pointer back to OnAdded and free its allocated items
         const on_added: *OnAdded(Component) = @ptrCast(@alignCast(ptr));
         e.allocator.free(on_added.items);
     }
 };
+
+pub const OnAddedSystemParam = SystemParam(DeclMatcher(false, &.{ "ComponentType", "is_on_added" }), OnAddedSystemParamImpl);
 
 /// OnRemoved(T) system param: exposes entities from which component T
 /// was removed since last system run. This is a lightweight wrapper
@@ -713,20 +716,12 @@ pub fn OnRemoved(comptime T: type) type {
     };
 }
 
-/// OnRemoved(T) SystemParam analyzer and applier
+/// OnRemoved(T) SystemParam matcher and applier
 /// Exposes entities from which T was removed. For now this uses an
 /// EventStore of Entity generated elsewhere (e.g. by scheduler).
-pub const OnRemovedSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        const Base = BaseType(T);
-        const type_info = @typeInfo(Base);
-        if (type_info == .@"struct" and typeHasDecls(Base, &.{ "ComponentType", "is_on_removed" })) {
-            return Base.ComponentType;
-        }
-        return null;
-    }
-
-    pub fn apply(e: *ecs.Manager, comptime Component: type) anyerror!OnRemoved(Component) {
+const OnRemovedSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
+        const Component = BaseType(ParamType).ComponentType;
         const event_type_hash = zevy_reflect.typeHash(Component);
         var results = try std.ArrayList(ecs.Entity).initCapacity(e.allocator, 16);
         defer results.deinit(e.allocator);
@@ -739,31 +734,27 @@ pub const OnRemovedSystemParam = struct {
         }
 
         const slice = try results.toOwnedSlice(e.allocator);
-        return OnRemoved(Component){ .removed = slice };
+        return ParamType{ .removed = slice };
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime Component: type) void {
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        const Component = BaseType(ParamType).ComponentType;
         // Cast the opaque pointer back to OnRemoved and free its allocated items
         const on_removed: *OnRemoved(Component) = @ptrCast(@alignCast(ptr));
         e.allocator.free(on_removed.removed);
     }
 };
 
-/// Commands SystemParam analyzer and applier
-pub const CommandsSystemParam = struct {
-    pub fn analyze(comptime T: type) ?type {
-        if (BaseType(T) == Commands) {
-            return T;
-        }
-        return null;
-    }
+pub const OnRemovedSystemParam = SystemParam(DeclMatcher(false, &.{ "ComponentType", "is_on_removed" }), OnRemovedSystemParamImpl);
 
-    pub fn apply(e: *ecs.Manager, comptime _: type) anyerror!*Commands {
+/// Commands SystemParam matcher and applier
+const CommandsSystemParamImpl = struct {
+    pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         return try Commands.init(e.allocator, e);
     }
 
-    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
-        _ = T;
+    pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
+        _ = ParamType;
         const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
         commands.queue() catch |err| @panic(@errorName(err));
         if (!e.defer_command_flush.load(.acquire)) {
@@ -773,14 +764,16 @@ pub const CommandsSystemParam = struct {
     }
 };
 
+pub const CommandsSystemParam = SystemParam(ExactBaseMatcher(true, Commands), CommandsSystemParamImpl);
+
 test "ResourceSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
     const value: i32 = 42;
     _ = try ecs_instance.addResource(i32, value);
-    const res = try ResourceSystemParam.apply(&ecs_instance, i32);
-    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), i32);
+    const res = try ResourceSystemParam.apply(&ecs_instance, *Res(i32));
+    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), *Res(i32));
     try std.testing.expect(res.get().* == 42);
 }
 
@@ -791,8 +784,8 @@ test "ResourceMutSystemParam basic" {
     _ = try ecs_instance.addResource(i32, 1);
 
     {
-        const res = try ResourceMutSystemParam.apply(&ecs_instance, i32);
-        defer ResourceMutSystemParam.deinit(&ecs_instance, @ptrCast(res), i32);
+        const res = try ResourceMutSystemParam.apply(&ecs_instance, *ResMut(i32));
+        defer ResourceMutSystemParam.deinit(&ecs_instance, @ptrCast(res), *ResMut(i32));
         res.get().* = 99;
     }
 
@@ -807,7 +800,7 @@ test "LocalSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const local_ptr = try LocalSystemParam.apply(&ecs_instance, i32);
+    const local_ptr = try LocalSystemParam.apply(&ecs_instance, *Local(i32));
     local_ptr._value = 99;
     try std.testing.expect(local_ptr._value == 99);
 }
@@ -816,8 +809,8 @@ test "EventReaderSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    var reader = try EventReaderSystemParam.apply(&ecs_instance, u32);
-    defer EventReaderSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&reader)), u32);
+    var reader = try EventReaderSystemParam.apply(&ecs_instance, EventReader(u32));
+    defer EventReaderSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&reader)), EventReader(u32));
     try std.testing.expect(@intFromPtr(reader.event_store) != 0);
 }
 
@@ -825,8 +818,8 @@ test "EventWriterSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    var writer = try EventWriterSystemParam.apply(&ecs_instance, u32);
-    defer EventWriterSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&writer)), u32);
+    var writer = try EventWriterSystemParam.apply(&ecs_instance, EventWriter(u32));
+    defer EventWriterSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&writer)), EventWriter(u32));
     try std.testing.expect(@intFromPtr(writer.event_store) != 0);
 }
 
@@ -841,12 +834,12 @@ test "OnAddedSystemParam basic" {
     const entity = manager.create(.{});
     try manager.addComponent(entity, Position, Position{ .x = 3.0, .y = 4.0 });
 
-    var on_added = try OnAddedSystemParam.apply(&manager, Position);
+    var on_added = try OnAddedSystemParam.apply(&manager, OnAdded(Position));
     try std.testing.expect(on_added.items.len >= 1);
     try std.testing.expect(on_added.items[0].entity.eql(entity));
 
     // cleanup / free allocated slice
-    OnAddedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_added)), Position);
+    OnAddedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_added)), OnAdded(Position));
 }
 
 test "OnRemovedSystemParam basic" {
@@ -860,11 +853,11 @@ test "OnRemovedSystemParam basic" {
     try manager.addComponent(entity, Position, Position{ .x = 7.0, .y = 8.0 });
     try manager.removeComponent(entity, Position);
 
-    var on_removed = try OnRemovedSystemParam.apply(&manager, Position);
+    var on_removed = try OnRemovedSystemParam.apply(&manager, OnRemoved(Position));
     try std.testing.expect(on_removed.removed.len >= 1);
     try std.testing.expect(on_removed.removed[0].eql(entity));
 
-    OnRemovedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_removed)), Position);
+    OnRemovedSystemParam.deinit(&manager, @ptrCast(@alignCast(&on_removed)), OnRemoved(Position));
 }
 
 test "RelationsSystemParam basic" {
@@ -877,8 +870,8 @@ test "RelationsSystemParam basic" {
     const a = manager.create(.{});
     const b = manager.create(.{});
 
-    const rel = try RelationsSystemParam.apply(&manager, *relations_mod.RelationManager);
-    defer RelationsSystemParam.deinit(&manager, @ptrCast(@alignCast(rel)), *relations_mod.RelationManager);
+    const rel = try RelationsSystemParam.apply(&manager, *Relations);
+    defer RelationsSystemParam.deinit(&manager, @ptrCast(@alignCast(rel)), *Relations);
 
     // Add relation a -> b using Child
     try rel.get().add(&manager, a, b, Child);
@@ -914,8 +907,8 @@ test "CommandsSystemParam advanced" {
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    const commands = try CommandsSystemParam.apply(&manager, Commands);
-    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
+    const commands = try CommandsSystemParam.apply(&manager, *Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), *Commands);
 
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
@@ -979,8 +972,8 @@ test "Commands deferred entity creation" {
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    const commands = try CommandsSystemParam.apply(&manager, Commands);
-    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
+    const commands = try CommandsSystemParam.apply(&manager, *Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), *Commands);
 
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };

@@ -33,11 +33,11 @@ pub const Commands = opaque {
         buffer: CommandBuffer,
     };
 
-    pub fn init(base_allocator: std.mem.Allocator, manager: *ecs.Manager) error{OutOfMemory}!*Commands {
+    pub fn init(base_allocator: std.mem.Allocator, ecsManager: *ecs.Manager) error{OutOfMemory}!*Commands {
         const inner = try base_allocator.create(_Inner);
         inner.* = .{
             .allocator = base_allocator,
-            .manager = manager,
+            .manager = ecsManager,
             .buffer = .init(),
         };
         return @ptrCast(inner);
@@ -54,7 +54,7 @@ pub const Commands = opaque {
         _allocator.destroy(inner);
     }
 
-    pub fn getManager(self: *Commands) *ecs.Manager {
+    pub fn manager(self: *Commands) *ecs.Manager {
         return commandsInner(self).manager;
     }
 
@@ -65,7 +65,7 @@ pub const Commands = opaque {
     /// Create a deferred entity and return EntityCommands for chaining operations.
     /// The entity is NOT created immediately — call EntityCommands.flush() to create it.
     ///
-    /// *DO NOT FORGET TO FLUSH!*
+    /// *Note*: The returned EntityCommands must have flush() called to actually create the entity, unless, you only intend to queue operations that do not require the entity to exist yet (e.g., adding components to an entity that will be created later).
     pub fn create(self: *Commands) !EntityCommands {
         return try EntityCommands.init(self);
     }
@@ -202,8 +202,8 @@ pub const Commands = opaque {
     }
 
     /// Execute all queued commands and clear the buffer (retaining capacity for reuse).
-    pub fn flush(self: *Commands, manager: *ecs.Manager) anyerror!void {
-        try commandsInner(self).buffer.flush(manager.allocator, @ptrCast(manager));
+    pub fn flush(self: *Commands, ecsManager: *ecs.Manager) anyerror!void {
+        try commandsInner(self).buffer.flush(ecsManager.allocator, ecsManager);
     }
 };
 
@@ -315,7 +315,7 @@ pub const EntityCommands = struct {
     ///
     /// For pending entities, this requires the entity to have been flushed first.
     pub fn get(self: *const EntityCommands, comptime T: type) error{EntityNotAlive}!?*T {
-        return self.commands.getManager().getComponent(self.entity(), T);
+        return self.commands.manager().getComponent(self.entity(), T);
     }
 
     /// Flush this EntityCommands: create the entity (if pending and not yet created)
