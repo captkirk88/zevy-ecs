@@ -8,6 +8,7 @@ const Commands = zevy_ecs.params.Commands;
 const Query = zevy_ecs.params.Query;
 const Scheduler = zevy_ecs.schedule.Scheduler;
 const Stage = zevy_ecs.schedule.Stage;
+const StageId = zevy_ecs.schedule.StageId;
 const Stages = zevy_ecs.schedule.Stages;
 const relations = zevy_ecs.relations;
 const RelationManager = relations.RelationManager;
@@ -84,7 +85,18 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
 
         setupScheduledMixedSystems(&manager, &scheduler);
 
-        const label = try std.fmt.allocPrint(allocator, "Run Scheduler Stage on {d} Entities", .{count});
+        var stage_infos = scheduler.getStageInfo(allocator);
+        defer stage_infos.deinit(allocator);
+        var active_stages = try std.ArrayList(StageId).initCapacity(allocator, stage_infos.items.len);
+        defer active_stages.deinit(allocator);
+        for (stage_infos.items) |stage_info| {
+            if (stage_info.system_count > 0) {
+                try active_stages.append(allocator, stage_info.stage);
+            }
+        }
+
+        const stage_count = active_stages.items.len;
+        const label = try std.fmt.allocPrint(allocator, "{d} Entities, {d} Stages", .{ count, stage_count });
         defer allocator.free(label);
 
         _ = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerMixedSystems, .{ &scheduler, &manager });
@@ -450,14 +462,18 @@ fn setupScheduledMixedSystems(manager: *Manager, scheduler: *Scheduler) void {
     scheduler.addSystem(manager, Stage(Stages.Update), systemMovement, DefaultRegistry);
     scheduler.addSystem(manager, Stage(Stages.Update), systemHealthRegen, DefaultRegistry);
     scheduler.addSystem(manager, Stage(Stages.Update), systemDamageWithArmor, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Update), systemDamageNoArmor, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Update), systemTeamCollision, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Update), systemTargetTracking, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Update), systemVelocityDamping, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Draw), systemDamageNoArmor, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Draw), systemTeamCollision, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Draw), systemTargetTracking, DefaultRegistry);
+    scheduler.addSystem(manager, Stage(Stages.Last), systemVelocityDamping, DefaultRegistry);
 }
 
+/// Benchmarks running the mixed systems through the scheduler from the first stage to the last stage
+///
+/// *Note*: This runs 7 systems through all entity counts (up to 1,000,000 entities as in the benchmarks above) split into
+/// stages according to the scheduler stages (Update / Draw / Last) so that each system runs in the stage it was added to
 fn benchSchedulerMixedSystems(scheduler: *Scheduler, manager: *Manager) void {
-    scheduler.runStage(manager, Stage(Stages.Update)) catch |err| {
+    scheduler.runStages(manager, Stage(Stages.First), Stage(Stages.Last)) catch |err| {
         std.debug.print("Error running scheduler stage: {s}\n", .{@errorName(err)});
     };
 }

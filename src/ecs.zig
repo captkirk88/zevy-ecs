@@ -580,12 +580,7 @@ pub const Manager = struct {
     pub fn runSystemUntyped(self: *Manager, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
         const sys_ptr = self.systems.get(sys_handle.handle) orelse return error.InvalidSystemHandle;
         const s: *sys.System(ReturnType) = @ptrCast(@alignCast(sys_ptr));
-        const result = try s.run(self, s.ctx);
-        // Discard events that were consumed (marked handled) during this system run.
-        // Called once here instead of per-component-change to avoid O(n²) scans.
-        self.component_added.discardHandled();
-        self.component_removed.discardHandled();
-        return result;
+        return try s.run(self, s.ctx);
     }
 
     /// Cache an existing system value.
