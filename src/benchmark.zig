@@ -103,6 +103,37 @@ pub fn clearSection(self: *Self) void {
     }
 }
 
+fn measureNow() std.Io.Timestamp {
+    var threaded: std.Io.Threaded = undefined;
+    const io = threaded.io();
+    return std.Io.Timestamp.now(io, std.Io.Clock.awake);
+}
+
+fn callBenchmark(comptime func: anytype, args: anytype) anyerror!void {
+    const return_type = @typeInfo(@TypeOf(func)).@"fn".return_type;
+    if (return_type) |rt| {
+        if (@typeInfo(rt) == .error_union) {
+            try @call(.auto, func, args);
+        } else {
+            _ = @call(.auto, func, args);
+        }
+    } else {
+        _ = @call(.auto, func, args);
+    }
+}
+
+fn sortU64(values: []u64) void {
+    var i: usize = 1;
+    while (i < values.len) : (i += 1) {
+        const key = values[i];
+        var j = i;
+        while (j > 0 and values[j - 1] > key) : (j -= 1) {
+            values[j] = values[j - 1];
+        }
+        values[j] = key;
+    }
+}
+
 /// Run a benchmark function multiple times and record the results
 pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, args: anytype) !BenchmarkResult {
     const name_copy = try self.base_allocator.dupe(u8, name);
@@ -114,37 +145,49 @@ pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, ar
         null;
     errdefer if (section_copy) |section| self.base_allocator.free(section);
 
+    const timing_sample_count = if (ops == 0) @as(usize, 1) else @min(ops, 5);
+    var sample_times = try self.base_allocator.alloc(u64, timing_sample_count);
+    defer self.base_allocator.free(sample_times);
+
     self.counting_allocator.reset();
-    // std.Io.Threaded.now() ignores the Threaded userdata pointer, so an
-    // undefined local is safe here – we only need a valid vtable for timing.
-    var threaded: std.Io.Threaded = undefined;
-    const io = threaded.io();
-    const start = std.Io.Timestamp.now(io, std.Io.Clock.awake);
-    var i: usize = 0;
-    while (i < ops) : (i += 1) {
-        const return_type = @typeInfo(@TypeOf(func)).@"fn".return_type;
-        if (return_type) |rt| {
-            const return_type_info = @typeInfo(rt);
-            if (return_type_info == .error_union) {
-                try @call(.auto, func, args);
-            } else {
-                _ = @call(.auto, func, args);
-            }
-        } else {
-            _ = @call(.auto, func, args);
+    var total_duration: u64 = 0;
+    var completed_ops: usize = 0;
+    var sample_index: usize = 0;
+    while (sample_index < timing_sample_count) : (sample_index += 1) {
+        const remaining_ops = ops - completed_ops;
+        const remaining_samples = timing_sample_count - sample_index;
+        const batch_ops = if (remaining_ops == 0) 0 else @max(remaining_ops / remaining_samples, 1);
+
+        const start = measureNow();
+        var batch_index: usize = 0;
+        while (batch_index < batch_ops) : (batch_index += 1) {
+            try callBenchmark(func, args);
         }
+
+        const end = measureNow();
+        const batch_duration = @as(u64, @intCast(start.durationTo(end).nanoseconds));
+        total_duration += batch_duration;
+        sample_times[sample_index] = if (batch_ops > 0) batch_duration / batch_ops else 0;
+        completed_ops += batch_ops;
     }
-    const end = std.Io.Timestamp.now(io, std.Io.Clock.awake);
-    const total_duration = @as(u64, @intCast(start.durationTo(end).nanoseconds));
+
+    sortU64(sample_times);
+    const median_index = sample_times.len / 2;
+    const per_op_ns = if (sample_times.len == 0)
+        0
+    else if (sample_times.len % 2 == 1)
+        sample_times[median_index]
+    else
+        @as(u64, @intCast((@as(u128, sample_times[median_index - 1]) + sample_times[median_index]) / 2));
+
     const total_bytes = self.counting_allocator.bytes_allocated;
-    const per_op_ns = if (ops > 0) total_duration / ops else 0;
     const per_op_bytes = if (ops > 0) total_bytes / ops else 0;
 
     const result = BenchmarkResult{
         .section = section_copy,
         .name = name_copy,
         .duration_ns = total_duration,
-        .iterations = 1,
+        .iterations = timing_sample_count,
         .avg_ns = per_op_ns,
         .ops_per_iter = ops,
         .total_bytes = total_bytes,
@@ -540,4 +583,20 @@ pub fn printResults(self: *Self, format: OutputFormat) void {
             printHtmlFooter();
         },
     }
+}
+
+test "Benchmark.run preserves operation count while sampling timing" {
+    var bench = Self.init(std.testing.allocator, .plain);
+    defer bench.deinit();
+
+    var counter: usize = 0;
+    const result = try bench.run("counter", 7, struct {
+        fn increment(value: *usize) void {
+            value.* += 1;
+        }
+    }.increment, .{&counter});
+
+    try std.testing.expectEqual(@as(usize, 7), counter);
+    try std.testing.expectEqual(@as(usize, 7), result.ops_per_iter);
+    try std.testing.expectEqual(@as(usize, 5), result.iterations);
 }
