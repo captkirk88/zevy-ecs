@@ -7,7 +7,7 @@ const command_buffer = @import("command_buffer.zig");
 
 const CommandBuffer = command_buffer.CommandBuffer;
 
-fn commandsInner(commands: *Commands) *Commands._Inner {
+fn commandsInner(commands: Commands) *CommandsInner._Inner {
     return @ptrCast(@alignCast(commands));
 }
 
@@ -22,61 +22,65 @@ pub const PendingEntity = struct {
     }
 };
 
-/// Commands provides a way to queue deferred operations on the ECS.
-/// All command data is stored inline in a flat byte buffer — zero per-command
-/// allocations. The buffer grows amortized (O(log N) backing calls total) and
-/// retains its capacity across flush() calls.
-pub const Commands = opaque {
+pub const CommandsInner = opaque {
+    const Self = @This();
+
+    pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+        pub fn get() []const u8 {
+            return "Commands";
+        }
+    }.get else void;
+
     pub const _Inner = struct {
-        allocator: std.mem.Allocator,
-        manager: *ecs.Manager,
+        _allocator: std.mem.Allocator,
+        _manager: *ecs.Manager,
         buffer: CommandBuffer,
     };
 
-    pub fn init(base_allocator: std.mem.Allocator, ecsManager: *ecs.Manager) error{OutOfMemory}!*Commands {
+    pub fn init(base_allocator: std.mem.Allocator, ecsManager: *ecs.Manager) error{OutOfMemory}!Commands {
         const inner = try base_allocator.create(_Inner);
         inner.* = .{
-            .allocator = base_allocator,
-            .manager = ecsManager,
+            ._allocator = base_allocator,
+            ._manager = ecsManager,
             .buffer = .init(),
         };
         return @ptrCast(inner);
     }
 
-    pub fn deinit(self: *Commands) void {
-        commandsInner(self).buffer.deinit(commandsInner(self).allocator);
+    pub fn deinit(self: Commands) void {
+        commandsInner(self).buffer.deinit(commandsInner(self)._allocator);
     }
 
-    pub fn destroy(self: *Commands) void {
+    pub fn destroy(self: Commands) void {
         const inner = commandsInner(self);
-        const _allocator = inner.allocator;
+        const _allocator = inner._allocator;
         inner.buffer.deinit(_allocator);
         _allocator.destroy(inner);
     }
 
-    pub fn manager(self: *Commands) *ecs.Manager {
-        return commandsInner(self).manager;
+    pub fn manager(self: Commands) *ecs.Manager {
+        return commandsInner(self)._manager;
     }
 
-    pub fn allocator(self: *Commands) std.mem.Allocator {
-        return commandsInner(self).allocator;
+    pub fn allocator(self: Commands) std.mem.Allocator {
+        return commandsInner(self)._allocator;
     }
 
     /// Create a deferred entity and return EntityCommands for chaining operations.
     /// The entity is NOT created immediately — call EntityCommands.flush() to create it.
     ///
     /// *Note*: The returned EntityCommands must have flush() called to actually create the entity, unless, you only intend to queue operations that do not require the entity to exist yet (e.g., adding components to an entity that will be created later).
-    pub fn create(self: *Commands) !EntityCommands {
+    pub fn create(self: Commands) !EntityCommands {
         return try EntityCommands.init(self);
     }
 
     /// Get EntityCommands for an existing entity.
-    pub fn entity(self: *Commands, e: ecs.Entity) !EntityCommands {
+    pub fn entity(self: Commands, e: ecs.Entity) !EntityCommands {
         return try EntityCommands.initWithEntity(self, e);
     }
 
     /// Queue adding a component to an existing entity.
-    pub fn addComponent(self: *Commands, ent: ecs.Entity, comptime T: type, value: T) error{OutOfMemory}!void {
+    pub fn addComponent(self: Commands, ent: ecs.Entity, comptime T: type, value: T) error{OutOfMemory}!void {
         const Data = struct { ent: ecs.Entity, value: T };
         const CommandFns = struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
@@ -100,11 +104,11 @@ pub const Commands = opaque {
                 try mgr.addComponentBatch(ents, T, values);
             }
         };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{ .ent = ent, .value = value }, &CommandFns.execute, &CommandFns.batchExecute);
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .ent = ent, .value = value }, &CommandFns.execute, &CommandFns.batchExecute);
     }
 
     /// Queue removing a component from an existing entity.
-    pub fn removeComponent(self: *Commands, ent: ecs.Entity, comptime T: type) error{OutOfMemory}!void {
+    pub fn removeComponent(self: Commands, ent: ecs.Entity, comptime T: type) error{OutOfMemory}!void {
         const Data = struct { ent: ecs.Entity };
         const CommandFns = struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
@@ -125,13 +129,13 @@ pub const Commands = opaque {
                 try mgr.removeComponentBatch(ents, T);
             }
         };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{ .ent = ent }, &CommandFns.execute, &CommandFns.batchExecute);
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .ent = ent }, &CommandFns.execute, &CommandFns.batchExecute);
     }
 
     /// Queue destroying an existing entity.
-    pub fn destroyEntity(self: *Commands, ent: ecs.Entity) error{OutOfMemory}!void {
+    pub fn destroyEntity(self: Commands, ent: ecs.Entity) error{OutOfMemory}!void {
         const Data = struct { ent: ecs.Entity };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{ .ent = ent }, &struct {
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .ent = ent }, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -141,9 +145,9 @@ pub const Commands = opaque {
     }
 
     /// Queue adding a resource.
-    pub fn addResource(self: *Commands, comptime T: type, value: T) error{OutOfMemory}!void {
+    pub fn addResource(self: Commands, comptime T: type, value: T) error{OutOfMemory}!void {
         const Data = struct { value: T };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{ .value = value }, &struct {
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .value = value }, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -153,9 +157,9 @@ pub const Commands = opaque {
     }
 
     /// Queue removing a resource.
-    pub fn removeResource(self: *Commands, comptime T: type) error{OutOfMemory}!void {
+    pub fn removeResource(self: Commands, comptime T: type) error{OutOfMemory}!void {
         const Data = struct {};
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{}, &struct {
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{}, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 _ = ptr;
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -165,9 +169,9 @@ pub const Commands = opaque {
     }
 
     /// Queue adding a relation between two entities.
-    pub fn addRelation(self: *Commands, child: ecs.Entity, parent: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
+    pub fn addRelation(self: Commands, child: ecs.Entity, parent: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
         const Data = struct { child: ecs.Entity, parent: ecs.Entity };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{ .child = child, .parent = parent }, &struct {
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .child = child, .parent = parent }, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -181,9 +185,9 @@ pub const Commands = opaque {
     }
 
     /// Queue removing a relation between two entities.
-    pub fn removeRelation(self: *Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
+    pub fn removeRelation(self: Commands, entity1: ecs.Entity, entity2: ecs.Entity, comptime RelationType: type) error{OutOfMemory}!void {
         const Data = struct { entity1: ecs.Entity, entity2: ecs.Entity };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self).allocator, Data, .{ .entity1 = entity1, .entity2 = entity2 }, &struct {
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .entity1 = entity1, .entity2 = entity2 }, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -197,15 +201,21 @@ pub const Commands = opaque {
     }
 
     /// Enqueue all queued commands onto the manager's deferred command queue.
-    pub fn queue(self: *Commands) error{OutOfMemory}!void {
-        try commandsInner(self).manager.enqueueCommandBuffer(commandsInner(self).buffer.moveTo());
+    pub fn queue(self: Commands) error{OutOfMemory}!void {
+        try commandsInner(self)._manager.enqueueCommandBuffer(commandsInner(self).buffer.moveTo());
     }
 
     /// Execute all queued commands and clear the buffer (retaining capacity for reuse).
-    pub fn flush(self: *Commands, ecsManager: *ecs.Manager) anyerror!void {
+    pub fn flush(self: Commands, ecsManager: *ecs.Manager) anyerror!void {
         try commandsInner(self).buffer.flush(ecsManager.allocator, ecsManager);
     }
 };
+
+/// Commands provides a way to queue deferred operations on the ECS.
+/// All command data is stored inline in a flat byte buffer — zero per-command
+/// allocations. The buffer grows amortized (O(log N) backing calls total) and
+/// retains its capacity across flush() calls.
+pub const Commands = *CommandsInner;
 
 /// EntityCommands provides entity-specific deferred operations.
 /// For pending entities (created via Commands.create()), a PendingEntity is
@@ -213,7 +223,7 @@ pub const Commands = opaque {
 /// component commands are stored inline in a local byte buffer.
 /// For existing entities (via Commands.entity()), operations go to the parent Commands queue.
 pub const EntityCommands = struct {
-    commands: *Commands,
+    commands: Commands,
     pending: ?*PendingEntity,
     existing_entity: ?ecs.Entity,
     /// Byte buffer for pending-entity component commands (flushed when entity is created).
@@ -221,8 +231,8 @@ pub const EntityCommands = struct {
     ebuf: CommandBuffer,
 
     /// Initialize EntityCommands for a pending (deferred) entity.
-    pub fn init(cmds: *Commands) error{OutOfMemory}!EntityCommands {
-        const pending = try commandsInner(cmds).allocator.create(PendingEntity);
+    pub fn init(cmds: Commands) error{OutOfMemory}!EntityCommands {
+        const pending = try commandsInner(cmds)._allocator.create(PendingEntity);
         pending.* = .{};
         return .{
             .commands = cmds,
@@ -233,7 +243,7 @@ pub const EntityCommands = struct {
     }
 
     /// Initialize EntityCommands for an existing entity.
-    pub fn initWithEntity(cmds: *Commands, ent: ecs.Entity) error{OutOfMemory}!EntityCommands {
+    pub fn initWithEntity(cmds: Commands, ent: ecs.Entity) error{OutOfMemory}!EntityCommands {
         return .{
             .commands = cmds,
             .pending = null,
@@ -249,7 +259,7 @@ pub const EntityCommands = struct {
         } else {
             const pending_ptr = self.pending.?;
             const Data = struct { pending: *PendingEntity, value: T };
-            try self.ebuf.appendCommand(commandsInner(self.commands).allocator, Data, .{ .pending = pending_ptr, .value = value }, &struct {
+            try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr, .value = value }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -267,7 +277,7 @@ pub const EntityCommands = struct {
         } else {
             const pending_ptr = self.pending.?;
             const Data = struct { pending: *PendingEntity };
-            try self.ebuf.appendCommand(commandsInner(self.commands).allocator, Data, .{ .pending = pending_ptr }, &struct {
+            try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -285,7 +295,7 @@ pub const EntityCommands = struct {
         } else {
             const pending_ptr = self.pending.?;
             const Data = struct { pending: *PendingEntity };
-            try self.ebuf.appendCommand(commandsInner(self.commands).allocator, Data, .{ .pending = pending_ptr }, &struct {
+            try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
@@ -324,17 +334,17 @@ pub const EntityCommands = struct {
         if (self.pending) |pending| {
             // Guard against double-flush: only create the entity once.
             if (pending.entity == null) {
-                pending.entity = commandsInner(self.commands).manager.createEmpty();
+                pending.entity = commandsInner(self.commands)._manager.createEmpty();
             }
-            try self.ebuf.flush(commandsInner(self.commands).allocator, @ptrCast(commandsInner(self.commands).manager));
+            try self.ebuf.flush(commandsInner(self.commands)._allocator, @ptrCast(commandsInner(self.commands)._manager));
         } else {
-            try self.commands.flush(commandsInner(self.commands).manager);
+            try self.commands.flush(commandsInner(self.commands)._manager);
         }
     }
 
     pub fn deinit(self: *EntityCommands) void {
         self.flush() catch |err| @panic(@errorName(err));
-        if (self.pending) |p| commandsInner(self.commands).allocator.destroy(p);
-        self.ebuf.deinit(commandsInner(self.commands).allocator);
+        if (self.pending) |p| commandsInner(self.commands)._allocator.destroy(p);
+        self.ebuf.deinit(commandsInner(self.commands)._allocator);
     }
 };

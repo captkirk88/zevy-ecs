@@ -13,6 +13,7 @@ const reflect = @import("reflect.zig");
 const zevy_reflect = @import("zevy_reflect");
 const commands_mod = @import("commands.zig");
 const Commands = commands_mod.Commands;
+const CommandsInner = commands_mod.CommandsInner;
 const EntityCommands = commands_mod.EntityCommands;
 
 fn BaseType(comptime T: type) type {
@@ -407,10 +408,7 @@ const NextStateSystemParamImpl = struct {
 
 pub const NextStateSystemParam = SystemParam(DeclAndFieldMatcher(true, &.{ "StateEnum_", "_is_next_state_param" }, &.{"state_mgr"}), NextStateSystemParamImpl);
 
-/// Opaque system parameter providing shared read access to a resource of type T.
-/// Fields are hidden – use `res.get()` to obtain a const pointer to the value.
-/// The read lock is held for the entire duration of the system invocation and released automatically.
-pub fn Res(comptime T: type) type {
+pub fn ResInner(comptime T: type) type {
     return opaque {
         const Self = @This();
 
@@ -419,7 +417,6 @@ pub fn Res(comptime T: type) type {
         /// The wrapped value type
         pub const ResType = T;
 
-        /// Internal heap layout – do not use directly outside this file
         pub const _Inner = struct {
             ref: ecs.Ref(T),
             guard: zevy_mem.lock.RwLock(T).ReadGuard,
@@ -433,17 +430,21 @@ pub fn Res(comptime T: type) type {
 
         /// Get a const pointer to the resource value.
         /// Valid only while this `Res` is alive (i.e. within the system function).
-        pub fn get(self: *Self) *const T {
-            const inner: *_Inner = @ptrCast(@alignCast(self));
+        pub fn get(self: *const Self) *const T {
+            const inner: *const _Inner = @ptrCast(@alignCast(self));
             return inner.guard.get();
         }
     };
 }
 
-/// Opaque system parameter providing exclusive write access to a resource of type T.
-/// Fields are hidden – use `res.get()` to obtain a mutable pointer to the value.
-/// The write lock is held for the entire duration of the system invocation and released automatically.
-pub fn ResMut(comptime T: type) type {
+/// Pointer-backed system parameter providing shared read access to a resource of type T.
+/// Use `res.get()` to obtain a const pointer to the value.
+/// The read lock is held for the entire duration of the system invocation and released automatically.
+pub fn Res(comptime T: type) type {
+    return *ResInner(T);
+}
+
+pub fn ResMutInner(comptime T: type) type {
     return opaque {
         const Self = @This();
 
@@ -468,6 +469,13 @@ pub fn ResMut(comptime T: type) type {
     };
 }
 
+/// Pointer-backed system parameter providing exclusive write access to a resource of type T.
+/// Use `res.get()` to obtain a mutable pointer to the value.
+/// The write lock is held for the entire duration of the system invocation and released automatically.
+pub fn ResMut(comptime T: type) type {
+    return *ResMutInner(T);
+}
+
 /// Res(T) SystemParam matcher and applier
 const ResourceSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
@@ -479,8 +487,7 @@ const ResourceSystemParamImpl = struct {
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
-        const ResourceType = BaseType(ParamType).ResType;
-        const inner: *Res(ResourceType)._Inner = @ptrCast(@alignCast(ptr));
+        const inner: *BaseType(ParamType)._Inner = @ptrCast(@alignCast(ptr));
         inner.guard.deinit();
         inner.ref.deinit();
         e.allocator.destroy(inner);
@@ -500,8 +507,7 @@ const ResourceMutSystemParamImpl = struct {
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
-        const ResourceType = BaseType(ParamType).ResMutType;
-        const inner: *ResMut(ResourceType)._Inner = @ptrCast(@alignCast(ptr));
+        const inner: *BaseType(ParamType)._Inner = @ptrCast(@alignCast(ptr));
         inner.guard.deinit();
         inner.ref.deinit();
         e.allocator.destroy(inner);
@@ -591,24 +597,76 @@ pub const SingleSystemParam = SystemParam(SingleSystemParamMatcher, SingleSystem
 
 /// Write-guarded handle to the RelationManager resource.
 /// Use `rel.get()` to access the `RelationManager`.
-/// Call `rel.deinit()` to release the lock and Arc reference (done automatically by the system runner).
-pub const Relations = struct {
-    ref: ecs.Ref(relations_mod.RelationManager),
-    _guard: zevy_mem.lock.RwLock(relations_mod.RelationManager).WriteGuard,
+/// Released automatically by the system runner.
+pub const RelationsInner = opaque {
+    const Self = @This();
 
-    /// Get a pointer to the RelationManager. Valid only while this Relations struct is alive.
-    pub fn get(self: *Relations) *relations_mod.RelationManager {
-        return self._guard.get();
+    pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
+        pub fn get() []const u8 {
+            return "Relations";
+        }
+    }.get else void;
+
+    pub const _Inner = struct {
+        ref: ecs.Ref(relations_mod.RelationManager),
+        guard: zevy_mem.lock.RwLock(relations_mod.RelationManager).WriteGuard,
+    };
+
+    fn inner(self: *Self) *_Inner {
+        const impl: *_Inner = @ptrCast(@alignCast(self));
+        return impl;
+    }
+
+    pub fn hasIndex(self: *Self, comptime Kind: type) bool {
+        return self.inner().guard.get().hasIndex(Kind);
+    }
+
+    pub fn add(self: *Self, manager: *ecs.Manager, child: ecs.Entity, parent: ecs.Entity, comptime Kind: type) error{ ParentMismatch, EntityNotAlive, OutOfMemory }!void {
+        return try self.inner().guard.get().add(manager, child, parent, Kind);
+    }
+
+    pub fn addWithData(self: *Self, manager: *ecs.Manager, child: ecs.Entity, parent: ecs.Entity, comptime Kind: type, data: Kind) error{ ParentMismatch, EntityNotAlive, OutOfMemory }!void {
+        return try self.inner().guard.get().addWithData(manager, child, parent, Kind, data);
+    }
+
+    pub fn remove(self: *Self, manager: *ecs.Manager, child: ecs.Entity, parent: ecs.Entity, comptime Kind: type) error{ ParentMismatch, EntityNotAlive, OutOfMemory }!void {
+        return try self.inner().guard.get().remove(manager, child, parent, Kind);
+    }
+
+    pub fn getChildren(self: *Self, parent: ecs.Entity, comptime Kind: type) []const ecs.Entity {
+        return self.inner().guard.get().getChildren(parent, Kind);
+    }
+
+    pub fn getParents(self: *Self, child: ecs.Entity, comptime Kind: type) []const ecs.Entity {
+        return self.inner().guard.get().getParents(child, Kind);
+    }
+
+    pub fn getParent(self: *Self, manager: *ecs.Manager, child: ecs.Entity, comptime Kind: type) error{EntityNotAlive}!?ecs.Entity {
+        return try self.inner().guard.get().getParent(manager, child, Kind);
+    }
+
+    pub fn getChild(self: *Self, manager: *ecs.Manager, parent: ecs.Entity, comptime Kind: type) ?ecs.Entity {
+        return self.inner().guard.get().getChild(manager, parent, Kind);
+    }
+
+    pub fn has(self: *Self, manager: *ecs.Manager, child: ecs.Entity, parent: ecs.Entity, comptime Kind: type) !bool {
+        return try self.inner().guard.get().has(manager, child, parent, Kind);
+    }
+
+    pub fn removeEntity(self: *Self, entity: ecs.Entity) void {
+        self.inner().guard.get().removeEntity(entity);
+    }
+
+    pub fn indexCount(self: *Self) usize {
+        return self.inner().guard.get().indexCount();
     }
 };
 
-fn deinit_releations(self: *Relations) void {
-    self.ref.deinit();
-}
+pub const Relations = *RelationsInner;
 
 /// Relations SystemParam matcher and applier
 /// Provides access to the RelationManager resource
-/// Use as `rel: *params.Relations` in system functions.
+/// Use as `rel: params.Relations` in system functions.
 const RelationsSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         if (e.hasResource(relations_mod.RelationManager) == false) {
@@ -617,20 +675,21 @@ const RelationsSystemParamImpl = struct {
         }
         const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
         const guard = ref.lockWrite();
-        const rel_ptr = try e.allocator.create(BaseType(ParamType));
-        rel_ptr.* = .{ .ref = ref, ._guard = guard };
-        return rel_ptr;
+        const rel_ptr = try e.allocator.create(BaseType(ParamType)._Inner);
+        rel_ptr.* = .{ .ref = ref, .guard = guard };
+        return @ptrCast(rel_ptr);
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = ParamType;
-        const rel_ptr: *Relations = @ptrCast(@alignCast(ptr));
-        deinit_releations(rel_ptr);
+        const rel_ptr: *RelationsInner._Inner = @ptrCast(@alignCast(ptr));
+        rel_ptr.guard.deinit();
+        rel_ptr.ref.deinit();
         e.allocator.destroy(rel_ptr);
     }
 };
 
-pub const RelationsSystemParam = SystemParam(ExactBaseMatcher(true, Relations), RelationsSystemParamImpl);
+pub const RelationsSystemParam = SystemParam(ExactBaseMatcher(true, RelationsInner), RelationsSystemParamImpl);
 
 /// OnAdded(T) system param: read-only view of components of type T
 /// that were added since the last system run.
@@ -750,12 +809,12 @@ pub const OnRemovedSystemParam = SystemParam(DeclMatcher(false, &.{ "ComponentTy
 /// Commands SystemParam matcher and applier
 const CommandsSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
-        return try Commands.init(e.allocator, e);
+        return try CommandsInner.init(e.allocator, e);
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = ParamType;
-        const commands = @as(*Commands, @ptrCast(@alignCast(ptr)));
+        const commands: Commands = @ptrCast(@alignCast(ptr));
         commands.queue() catch |err| @panic(@errorName(err));
         if (!e.defer_command_flush.load(.acquire)) {
             e.flushQueuedCommands() catch |err| @panic(@errorName(err));
@@ -764,7 +823,7 @@ const CommandsSystemParamImpl = struct {
     }
 };
 
-pub const CommandsSystemParam = SystemParam(ExactBaseMatcher(true, Commands), CommandsSystemParamImpl);
+pub const CommandsSystemParam = SystemParam(ExactBaseMatcher(true, CommandsInner), CommandsSystemParamImpl);
 
 test "ResourceSystemParam basic" {
     const allocator = std.testing.allocator;
@@ -772,8 +831,8 @@ test "ResourceSystemParam basic" {
     defer ecs_instance.deinit();
     const value: i32 = 42;
     _ = try ecs_instance.addResource(i32, value);
-    const res = try ResourceSystemParam.apply(&ecs_instance, *Res(i32));
-    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), *Res(i32));
+    const res = try ResourceSystemParam.apply(&ecs_instance, Res(i32));
+    defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), Res(i32));
     try std.testing.expect(res.get().* == 42);
 }
 
@@ -784,8 +843,8 @@ test "ResourceMutSystemParam basic" {
     _ = try ecs_instance.addResource(i32, 1);
 
     {
-        const res = try ResourceMutSystemParam.apply(&ecs_instance, *ResMut(i32));
-        defer ResourceMutSystemParam.deinit(&ecs_instance, @ptrCast(res), *ResMut(i32));
+        const res = try ResourceMutSystemParam.apply(&ecs_instance, ResMut(i32));
+        defer ResourceMutSystemParam.deinit(&ecs_instance, @ptrCast(res), ResMut(i32));
         res.get().* = 99;
     }
 
@@ -870,20 +929,20 @@ test "RelationsSystemParam basic" {
     const a = manager.create(.{});
     const b = manager.create(.{});
 
-    const rel = try RelationsSystemParam.apply(&manager, *Relations);
-    defer RelationsSystemParam.deinit(&manager, @ptrCast(@alignCast(rel)), *Relations);
+    const rel = try RelationsSystemParam.apply(&manager, Relations);
+    defer RelationsSystemParam.deinit(&manager, @ptrCast(@alignCast(rel)), Relations);
 
     // Add relation a -> b using Child
-    try rel.get().add(&manager, a, b, Child);
+    try rel.add(&manager, a, b, Child);
 
     // Index should be created and queryable
-    const children = rel.get().getChildren(b, Child);
+    const children = rel.getChildren(b, Child);
     try std.testing.expect(children.len == 1);
     try std.testing.expect(children[0].eql(a));
 
-    try std.testing.expect(try rel.get().has(&manager, a, b, Child));
+    try std.testing.expect(try rel.has(&manager, a, b, Child));
 
-    const parent = try rel.get().getParent(&manager, a, Child);
+    const parent = try rel.getParent(&manager, a, Child);
     try std.testing.expect(parent.?.eql(b));
 }
 
@@ -907,8 +966,8 @@ test "CommandsSystemParam advanced" {
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    const commands = try CommandsSystemParam.apply(&manager, *Commands);
-    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), *Commands);
+    const commands = try CommandsSystemParam.apply(&manager, Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
 
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };
@@ -972,8 +1031,8 @@ test "Commands deferred entity creation" {
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    const commands = try CommandsSystemParam.apply(&manager, *Commands);
-    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), *Commands);
+    const commands = try CommandsSystemParam.apply(&manager, Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
 
     const Position = struct { x: f32, y: f32 };
     const Velocity = struct { dx: f32, dy: f32 };

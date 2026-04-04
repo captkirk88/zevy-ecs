@@ -228,12 +228,12 @@ fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType
             defer {
                 inline for (fn_info.params[injected_arg_count..], 0..) |param, i| {
                     const ParamType = param.type.?;
-                    // For pointer types (like *Commands), we need to pass the pointer value itself,
+                    // For pointer-backed params (like Commands), we need to pass the pointer value itself,
                     // not a pointer to the pointer. The resolved_args[i] already contains the pointer.
                     const resolved_ptr: *anyopaque = blk: {
                         const param_type_info = @typeInfo(ParamType);
                         if (param_type_info == .pointer) {
-                            // ParamType is already a pointer (e.g., *Commands), so resolved_args[i] is the pointer value
+                            // ParamType is already a pointer-backed alias (e.g., Commands), so resolved_args[i] is the pointer value
                             // We cast the pointer value directly to *anyopaque
                             break :blk @ptrCast(resolved_args[i]);
                         } else {
@@ -386,11 +386,15 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
                 const param_type = param.type.?;
                 // Check if the type has a debugInfo decl (which should be a const string) and use that, otherwise use @typeName
                 const type_name: ParamDebugInfo = blk2: {
-                    const type_info = @typeInfo(param_type);
+                    const param_base = switch (@typeInfo(param_type)) {
+                        .pointer => |pointer_info| pointer_info.child,
+                        else => param_type,
+                    };
+                    const type_info = @typeInfo(param_base);
                     // Only check for debugInfo on struct/union/enum types
-                    const can_have_decl = type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum";
-                    if (can_have_decl and reflect.hasFunc(param_type, "debugInfo")) {
-                        break :blk2 .{ .name = param_type.debugInfo() };
+                    const can_have_decl = type_info == .@"struct" or type_info == .@"union" or type_info == .@"enum" or type_info == .@"opaque";
+                    if (can_have_decl and @hasDecl(param_base, "debugInfo") and @TypeOf(param_base.debugInfo) != void) {
+                        break :blk2 .{ .name = param_base.debugInfo() };
                     } else {
                         break :blk2 .{ .name = @typeName(param_type) };
                     }
@@ -454,12 +458,12 @@ pub fn ToSystemReturnType(comptime system_fn: anytype) type {
 ///
 /// Example:
 /// ```zig
-/// fn produceData(commands: *Commands, query: Query()) []const u8 {
+/// fn produceData(commands: Commands, query: Query()) []const u8 {
 ///     // Logic to generate some data
 ///     return "Hello from first system";
 /// }
 ///
-/// fn processData(data: []const u8, commands: *Commands) void {
+/// fn processData(data: []const u8, commands: Commands) void {
 ///     // Use the data from the first system
 ///     std.debug.print("Processed: {s}\n", .{data});
 /// }
@@ -473,7 +477,7 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
     const f = struct {
         pub var first_system: ?System(ToSystemReturnType(first)) = null;
 
-        pub fn combined(commands: *Commands) !void {
+        pub fn combined(commands: Commands) !void {
             if (first_system == null) {
                 first_system = ToSystem(first, ParamRegistry);
             }
@@ -498,7 +502,7 @@ pub fn pipe(comptime first: anytype, comptime second: anytype, comptime ParamReg
 ///     return query.hasNext();
 /// }
 ///
-/// fn updatePositions(commands: *Commands, query: Query(.{pos: Position, vel: Velocity})) void {
+/// fn updatePositions(commands: Commands, query: Query(.{pos: Position, vel: Velocity})) void {
 ///     // System logic to update positions
 ///     while (query.next()) |q| {
 ///         // Update position based on velocity
@@ -519,7 +523,7 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime Par
         struct {
             pub var system_handle: ?System(void) = null;
 
-            pub fn run(cond: bool, commands: *Commands) !void {
+            pub fn run(cond: bool, commands: Commands) !void {
                 if (cond) {
                     if (system_handle == null) {
                         system_handle = ToSystem(system, ParamRegistry);
@@ -545,7 +549,7 @@ pub fn chain(systems: anytype, comptime ParamRegistry: type) System(void) {
     const Chain = struct {
         pub var system_handles: [count]System(void) = undefined;
 
-        pub fn run(commands: *Commands) !void {
+        pub fn run(commands: Commands) !void {
             inline for (system_handles) |sys| {
                 _ = try sys.run(commands.manager(), sys.ctx);
             }

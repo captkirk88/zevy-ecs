@@ -293,7 +293,7 @@ fn movementSystem(
 
 // System with resources
 fn damageSystem(
-    dt: *zevy_ecs.Res(DeltaTime),
+    dt: zevy_ecs.Res(DeltaTime),
     query: zevy_ecs.Query(
         struct { health: Health },
     ),
@@ -307,7 +307,7 @@ fn damageSystem(
 
 // System with Commands for deferred operations
 fn spawnSystem(
-    commands: *zevy_ecs.Commands,
+    commands: zevy_ecs.Commands,
     query: zevy_ecs.Query(
         struct { spawner: Spawner },
     ),
@@ -386,7 +386,7 @@ In Release builds, `debug_info` is `void` and has zero runtime overhead.
 
 Systems can request various parameters that are automatically injected. All parameters are optional and resolved at compile time:
 
-- **`*Commands`**: Deferred command buffer for entity/component/resource operations (executed after system completes)
+- **`Commands`**: Deferred command buffer for entity/component/resource operations (executed after system completes)
 - **`Query(Include, Exclude)`**: Query entities with specific components or **`Single`** to get a single entity with specific components
 - **`Res(T)`**: Shared read-only access to a global resource of type T
 - **`ResMut(T)`**: Exclusive mutable access to a global resource of type T
@@ -397,7 +397,7 @@ Systems can request various parameters that are automatically injected. All para
 - **`EventWriter(T)`**: Write events of type T
 - **`OnAdded(T)`**: Iterate over entities that had component T added since the last system run
 - **`OnRemoved(T)`**: Iterate over entities from which component T was removed since the last system run
-- **`*Relations`**: Access to the RelationManager for entity relationships
+- **`Relations`**: Access to relation operations for entity relationships
 
 > [!NOTE]
 > Use `commands.manager()` when you need direct `*Manager` access inside a system. For deferred creation, call `commands.create()`, queue operations on the returned `EntityCommands`, then call `entity_cmds.flush()` and `entity_cmds.entity()` to access the created entity. For existing entities, use `commands.entity(entity)` and `EntityCommands.get(T)` when you need to read the current component value through the manager.
@@ -595,8 +595,8 @@ const SocketData = struct {
 // 2. Via RelationManager API - explicitly manages relations
 
 fn setupHierarchy(
-    commands: *zevy_ecs.Commands,
-    relations: *zevy_ecs.Relations,
+    commands: zevy_ecs.Commands,
+    relations: zevy_ecs.Relations,
 ) !void {
     const ecs = commands.manager();
 
@@ -612,26 +612,26 @@ fn setupHierarchy(
     const child = child_cmds.entity();
 
     // Use RelationManager API
-    try relations.get().add(ecs, child, parent, Child);
+    try relations.add(ecs, child, parent, Child);
 
     // Query children of parent
-    const children = relations.get().getChildren(parent, Child);
+    const children = relations.getChildren(parent, Child);
     for (children) |child| {
         std.debug.print("Child: {d}\n", .{child.id});
     }
 
     // Get parent of child
-    if (try relations.get().getParent(ecs, child, Child)) |p| {
+    if (try relations.getParent(ecs, child, Child)) |p| {
         std.debug.print("Parent: {d}\n", .{p.id});
     }
 
     // Check if relation exists
-    if (try relations.get().has(ecs, child, parent, Child)) {
+    if (try relations.has(ecs, child, parent, Child)) {
         std.debug.print("Child1 has parent relation\n", .{});
     }
 
     // Remove relation
-    try relations.get().remove(ecs, child, parent, Child);
+    try relations.remove(ecs, child, parent, Child);
 }
 
 pub fn main() !void {
@@ -649,8 +649,8 @@ pub fn main() !void {
 
 ```zig
 fn attachWeapon(
-    commands: *zevy_ecs.Commands,
-    relations: *zevy_ecs.Relations,
+    commands: zevy_ecs.Commands,
+    relations: zevy_ecs.Relations,
 ) !void {
     const ecs = commands.manager();
 
@@ -666,7 +666,7 @@ fn attachWeapon(
     const weapon = weapon_cmds.entity();
 
     // Method 1: Add relation with custom data using RelationManager API
-    try relations.get().addWithData(
+    try relations.addWithData(
         ecs,
         weapon,
         character,
@@ -691,8 +691,8 @@ fn attachWeapon(
 ```zig
 // Entity can own multiple items
 fn setupInventory(
-    commands: *zevy_ecs.Commands,
-    relations: *zevy_ecs.Relations,
+    commands: zevy_ecs.Commands,
+    relations: zevy_ecs.Relations,
 ) !void {
     const ecs = commands.manager();
 
@@ -718,12 +718,12 @@ fn setupInventory(
     const potion = potion_cmds.entity();
 
     // Add non-exclusive relations (entity can have multiple)
-    try relations.get().add(ecs, player, sword, Owns);
-    try relations.get().add(ecs, player, shield, Owns);
-    try relations.get().add(ecs, player, potion, Owns);
+    try relations.add(ecs, player, sword, Owns);
+    try relations.add(ecs, player, shield, Owns);
+    try relations.add(ecs, player, potion, Owns);
 
     // Get all owned items
-    const items = relations.get().getParents(player, Owns);
+    const items = relations.getParents(player, Owns);
     std.debug.print("Player owns {d} items\n", .{items.len});
 }
 ```

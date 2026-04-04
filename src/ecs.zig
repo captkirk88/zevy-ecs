@@ -790,7 +790,7 @@ test "removeSystem removes cached system" {
 
     // Define a test system that increments the counter
     const test_system = struct {
-        pub fn run(res: *params.ResMut(TestCounter)) void {
+        pub fn run(res: params.ResMut(TestCounter)) void {
             res.get().count += 1;
         }
     }.run;
@@ -826,7 +826,7 @@ test "removeSystem with same function cached twice returns same handle" {
     _ = try ecs.addResource(TestCounter, .{ .count = 0 });
 
     const test_system = struct {
-        pub fn run(_: *Manager, res: *params.ResMut(TestCounter)) void {
+        pub fn run(_: *Manager, res: params.ResMut(TestCounter)) void {
             res.get().count += 1;
         }
     }.run;

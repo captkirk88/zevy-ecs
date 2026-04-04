@@ -392,10 +392,9 @@ pub const Scheduler = struct {
         }
     }
 
-    /// Run all systems in a stage concurrently.
-    /// Each `addSystem` single entry runs as its own async task; each `chain()`
-    /// entry runs sequentially within a single async task.
-    /// Commands flushing is deferred until all tasks complete.
+    /// Run all systems in a stage.
+    /// Single-entry stages run inline to avoid async overhead; multi-entry stages
+    /// dispatch concurrently. Commands flushing is deferred until all work completes.
     pub inline fn runStage(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) anyerror!void {
         const list = self.systems.get(stage.value) orelse return error.StageHasNoSystems;
         if (list.items.len == 0) {
@@ -406,29 +405,45 @@ pub const Scheduler = struct {
         ecs.defer_command_flush.store(true, .release);
         defer ecs.defer_command_flush.store(false, .release);
 
-        const io = self.threaded.io();
+        var first_err: ?anyerror = null;
 
-        // Pre-allocate futures to avoid OOM after tasks are already dispatched.
-        var futures = try std.ArrayList(std.Io.Future(anyerror!void)).initCapacity(self.allocator, list.items.len);
-        defer futures.deinit(self.allocator);
-
-        // Dispatch each stage entry as an async task.
-        for (list.items) |entry| {
-            switch (entry) {
+        if (list.items.len == 1) {
+            switch (list.items[0]) {
                 .single => |handle| {
-                    futures.appendAssumeCapacity(io.async(runSingleTask, .{ ecs, handle }));
+                    runSingleTask(ecs, handle) catch |err| {
+                        first_err = err;
+                    };
                 },
                 .chain => |handles| {
-                    futures.appendAssumeCapacity(io.async(runChainTask, .{ ecs, handles }));
+                    runChainTask(ecs, handles) catch |err| {
+                        first_err = err;
+                    };
                 },
             }
-        }
+        } else {
+            const io = self.threaded.io();
 
-        // Await all futures. Always wait for everything even on error.
-        var first_err: ?anyerror = null;
-        for (futures.items) |*future| {
-            if (future.await(io)) |_| {} else |err| {
-                if (first_err == null) first_err = err;
+            // Pre-allocate futures to avoid OOM after tasks are already dispatched.
+            var futures = try std.ArrayList(std.Io.Future(anyerror!void)).initCapacity(self.allocator, list.items.len);
+            defer futures.deinit(self.allocator);
+
+            // Dispatch each stage entry as an async task.
+            for (list.items) |entry| {
+                switch (entry) {
+                    .single => |handle| {
+                        futures.appendAssumeCapacity(io.async(runSingleTask, .{ ecs, handle }));
+                    },
+                    .chain => |handles| {
+                        futures.appendAssumeCapacity(io.async(runChainTask, .{ ecs, handles }));
+                    },
+                }
+            }
+
+            // Await all futures. Always wait for everything even on error.
+            for (futures.items) |*future| {
+                if (future.await(io)) |_| {} else |err| {
+                    if (first_err == null) first_err = err;
+                }
             }
         }
 
@@ -492,7 +507,7 @@ pub const Scheduler = struct {
 
         // Create cleanup system that discards handled and unhandled events (consumes them)
         const cleanup_system = struct {
-            pub fn cleanup(store_res: *params.ResMut(events.EventStore(T))) void {
+            pub fn cleanup(store_res: params.ResMut(events.EventStore(T))) void {
                 store_res.get().discardHandled();
                 store_res.get().discardUnhandled();
             }
@@ -912,7 +927,7 @@ test "Scheduler assign outside scope" {
     _ = try ecs.addResource(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
-        pub fn run(out: *params.ResMut(bool)) void {
+        pub fn run(out: params.ResMut(bool)) void {
             out.get().* = true;
         }
     }.run;
@@ -955,21 +970,21 @@ test "Scheduler runStages executes custom stages in sorted order" {
     const late_stage = StageId.init(350_000);
 
     const record_early = struct {
-        fn run(trace: *params.ResMut(ExecutionTrace), _: *params.Res(EarlyMarker)) void {
+        fn run(trace: params.ResMut(ExecutionTrace), _: params.Res(EarlyMarker)) void {
             const trace_data = trace.get();
             trace_data.values[trace_data.len] = 150_000;
             trace_data.len += 1;
         }
     }.run;
     const record_middle = struct {
-        fn run(trace: *params.ResMut(ExecutionTrace), _: *params.Res(MiddleMarker)) void {
+        fn run(trace: params.ResMut(ExecutionTrace), _: params.Res(MiddleMarker)) void {
             const trace_data = trace.get();
             trace_data.values[trace_data.len] = 250_000;
             trace_data.len += 1;
         }
     }.run;
     const record_late = struct {
-        fn run(trace: *params.ResMut(ExecutionTrace), _: *params.Res(LateMarker)) void {
+        fn run(trace: params.ResMut(ExecutionTrace), _: params.Res(LateMarker)) void {
             const trace_data = trace.get();
             trace_data.values[trace_data.len] = 350_000;
             trace_data.len += 1;
@@ -1010,12 +1025,12 @@ test "Scheduler discards handled component events in Last stage" {
     _ = try ecs.addResource(AddedCount, .{ .value = 0 });
 
     const add_tag = struct {
-        fn run(ent: ecs_mod.Entity, cmds: *commands_mod.Commands) void {
+        fn run(ent: ecs_mod.Entity, cmds: commands_mod.Commands) void {
             cmds.addComponent(ent, Tag, .{ .value = 42 }) catch {};
         }
     }.run;
     const count_added = struct {
-        fn run(count: *params.ResMut(AddedCount), added: params.OnAdded(Tag)) void {
+        fn run(count: params.ResMut(AddedCount), added: params.OnAdded(Tag)) void {
             count.get().value = added.items.len;
         }
     }.run;
@@ -1189,13 +1204,13 @@ test "Concurrent stage: two independent systems both run" {
     _ = try ecs.addResource(BValue, .{ .v = 0 });
 
     const sysA = struct {
-        fn run(res: *params.ResMut(AValue)) void {
+        fn run(res: params.ResMut(AValue)) void {
             res.get().v = 111;
         }
     }.run;
 
     const sysB = struct {
-        fn run(res: *params.ResMut(BValue)) void {
+        fn run(res: params.ResMut(BValue)) void {
             res.get().v = 222;
         }
     }.run;
@@ -1242,17 +1257,17 @@ test "chain(): systems within a chain run in order" {
     // sys2 reads A.v, writes B.v = A.v + 10  (proves sys2 runs after sys1)
     // sys3 reads B.v, writes C.v = B.v + 100  (proves sys3 runs after sys2)
     const sys1 = struct {
-        fn run(a: *params.ResMut(A)) void {
+        fn run(a: params.ResMut(A)) void {
             a.get().v = 1;
         }
     }.run;
     const sys2 = struct {
-        fn run(a: *params.Res(A), b: *params.ResMut(B)) void {
+        fn run(a: params.Res(A), b: params.ResMut(B)) void {
             b.get().v = a.get().v + 10;
         }
     }.run;
     const sys3 = struct {
-        fn run(b: *params.Res(B), c: *params.ResMut(C)) void {
+        fn run(b: params.Res(B), c: params.ResMut(C)) void {
             c.get().v = b.get().v + 100;
         }
     }.run;
@@ -1298,7 +1313,7 @@ test "Concurrent stage: Commands deferred flush adds components" {
     // Commands flushing is deferred by CommandsSystemParam.deinit until all stage
     // futures settle, so the mutation reaches the Manager safely on the main thread.
     const tagSys = struct {
-        fn run(ent: ecs_mod.Entity, cmds: *commands_mod.Commands) void {
+        fn run(ent: ecs_mod.Entity, cmds: commands_mod.Commands) void {
             cmds.addComponent(ent, Tag, .{ .value = 99 }) catch {};
         }
     }.run;

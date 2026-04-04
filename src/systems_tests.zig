@@ -45,7 +45,7 @@ const ChainCounter = struct {
 // Basic system functions
 fn simpleSystem() void {}
 
-fn resourceSystem(res: *Res(DeltaTime)) void {
+fn resourceSystem(res: Res(DeltaTime)) void {
     std.testing.expect(res.get().value == 0.016) catch unreachable;
 }
 
@@ -57,7 +57,7 @@ fn querySystem(query: Query(struct { pos: Position })) void {
     std.testing.expect(count == 5) catch unreachable;
 }
 
-fn multiParamSystem(res: *Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity })) void {
+fn multiParamSystem(res: Res(DeltaTime), query: Query(struct { pos: Position, vel: Velocity })) void {
     while (query.next()) |item| {
         item.pos.x += item.vel.dx * res.get().value;
         item.pos.y += item.vel.dy * res.get().value;
@@ -87,7 +87,7 @@ fn eventReaderSystem(reader: EventReader(u32)) void {
     std.testing.expect(count == 2) catch unreachable;
 }
 
-fn queryEarlyDeinitSystem(commands: *Commands, query: Query(struct { pos: Position })) !void {
+fn queryEarlyDeinitSystem(commands: Commands, query: Query(struct { pos: Position })) !void {
     var released_query = query;
     defer released_query.deinit();
 
@@ -112,11 +112,11 @@ fn systemWithArgs(multiplier: i32, offset: i32) void {
     std.testing.expect(result == 14) catch unreachable; // 5 * 2 + 4 = 14
 }
 
-fn chainIncrementCounter(res: *ResMut(ChainCounter)) void {
+fn chainIncrementCounter(res: ResMut(ChainCounter)) void {
     res.get().value += 1;
 }
 
-fn chainMultiplyCounter(res: *ResMut(ChainCounter)) void {
+fn chainMultiplyCounter(res: ResMut(ChainCounter)) void {
     res.get().value *= 3;
 }
 
@@ -141,8 +141,8 @@ fn conditionalSystem() void {}
 const GameState = enum { menu, playing, paused };
 
 fn actualFuncSystem(
-    commands: *Commands,
-    res: *Res(DeltaTime),
+    commands: Commands,
+    res: Res(DeltaTime),
     local: *Local(u32),
     query: Query(struct { pos: Position, no_velocity: Without(Velocity) }),
     single: params.Single(struct { vel: Velocity }),
@@ -150,7 +150,7 @@ fn actualFuncSystem(
     event_writer: EventWriter(u32),
     on_added: params.OnAdded(Position),
     on_removed: params.OnRemoved(Position),
-    relation_mgr: *params.Relations,
+    relation_mgr: params.Relations,
 ) void {
     _ = commands;
     _ = res;
@@ -164,11 +164,11 @@ fn actualFuncSystem(
     _ = relation_mgr;
 }
 
-fn mutateRes(res: *ResMut(DeltaTime)) void {
+fn mutateRes(res: ResMut(DeltaTime)) void {
     res.get().value = 2.0;
 }
 
-fn checkRes(res: *Res(DeltaTime)) void {
+fn checkRes(res: Res(DeltaTime)) void {
     std.testing.expect(res.get().value == 2.0) catch unreachable;
 }
 
@@ -358,7 +358,7 @@ test "System - chain runs systems sequentially" {
     const counter = ChainCounter{ .value = 2 };
     _ = try manager.addResource(ChainCounter, counter);
 
-    const ChainSystems: [2]fn (res: *ResMut(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
+    const ChainSystems: [2]fn (res: ResMut(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
     const chained = systems.chain(ChainSystems, DefaultRegistry);
     _ = try chained.run(&manager, chained.ctx);
 

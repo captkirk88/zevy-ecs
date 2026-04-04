@@ -275,28 +275,28 @@ test "OnEnter and OnExit systems" {
     // Create OnEnter system for Menu state
     const params = @import("systems.params.zig");
     const menu_enter_system = struct {
-        pub fn run(flag: *params.ResMut(MenuEntered)) void {
+        pub fn run(flag: params.ResMut(MenuEntered)) void {
             flag.get().value = true;
         }
     }.run;
 
     // Create OnExit system for Menu state
     const menu_exit_system = struct {
-        pub fn run(flag: *params.ResMut(MenuExited)) void {
+        pub fn run(flag: params.ResMut(MenuExited)) void {
             flag.get().value = true;
         }
     }.run;
 
     // Create OnEnter system for Playing state
     const playing_enter_system = struct {
-        pub fn run(flag: *params.ResMut(PlayingEntered)) void {
+        pub fn run(flag: params.ResMut(PlayingEntered)) void {
             flag.get().value = true;
         }
     }.run;
 
     // Create OnExit system for Playing state
     const playing_exit_system = struct {
-        pub fn run(flag: *params.ResMut(PlayingExited)) void {
+        pub fn run(flag: params.ResMut(PlayingExited)) void {
             flag.get().value = true;
         }
     }.run;
@@ -399,19 +399,19 @@ test "InState systems" {
     // Create InState systems for each state
     const params = @import("systems.params.zig");
     const menu_system = struct {
-        pub fn run(flag: *params.ResMut(MenuSystemRan)) void {
+        pub fn run(flag: params.ResMut(MenuSystemRan)) void {
             flag.get().value = true;
         }
     }.run;
 
     const playing_system = struct {
-        pub fn run(flag: *params.ResMut(PlayingSystemRan)) void {
+        pub fn run(flag: params.ResMut(PlayingSystemRan)) void {
             flag.get().value = true;
         }
     }.run;
 
     const paused_system = struct {
-        pub fn run(flag: *params.ResMut(PausedSystemRan)) void {
+        pub fn run(flag: params.ResMut(PausedSystemRan)) void {
             flag.get().value = true;
         }
     }.run;

@@ -388,7 +388,7 @@ fn systemTargetTracking(query: Query(TargetTrackingQueryInclude)) void {
 }
 
 // CRUD System: collect work from a query, explicitly release it, then mutate the world.
-fn systemCrudAddRemoveComponents(commands: *Commands, query: Query(TargetTrackingQueryInclude)) !void {
+fn systemCrudAddRemoveComponents(commands: Commands, query: Query(TargetTrackingQueryInclude)) !void {
     var released_query = query;
     defer released_query.deinit();
 
@@ -614,7 +614,7 @@ fn setupSceneGraph(manager: *Manager, rel: *zevy_ecs.relations.RelationManager, 
 
 // System: Update world transforms based on parent hierarchy using ECS Query
 fn systemUpdateTransforms(
-    commands: *Commands,
+    commands: Commands,
     query: Query(.{ Transform, relations.Relation(relations.kinds.Child) }),
 ) void {
     // Query all entities that have Transform and a Child relation (children with parents)

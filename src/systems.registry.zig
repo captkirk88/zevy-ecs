@@ -192,8 +192,8 @@ test "merged SystemParamRegistry" {
     // Test that we can apply a default registry param
     const value: f32 = 42.0;
     _ = try ecs_instance.addResource(f32, value);
-    var res = try merge.apply(&ecs_instance, *params.Res(f32));
-    defer params.ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), *params.Res(f32));
+    var res = try merge.apply(&ecs_instance, params.Res(f32));
+    defer params.ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), params.Res(f32));
     try std.testing.expect(res.get().* == 42.0);
 }
 
@@ -230,7 +230,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
         /// Unfortunately with the way zig handles anonymous structs we need to define this separately
         pub const IncludeTypes = struct { a: TestComponentA, b: TestComponentB };
         query: query.Query(IncludeTypes),
-        res: *params.Res(i32),
+        res: params.Res(i32),
         local: *params.Local(u64),
     };
     const CustomComplexParam = struct {
@@ -244,7 +244,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
         }
         pub fn apply(e: *ecs.Manager, comptime T: type) anyerror!T {
             const query_val = e.query(ComplexType.IncludeTypes);
-            const res_value = try params.ResourceSystemParam.apply(e, *params.Res(i32));
+            const res_value = try params.ResourceSystemParam.apply(e, params.Res(i32));
             const local_ptr = try params.LocalSystemParam.apply(e, *params.Local(u64));
             return T{
                 .query = query_val,
@@ -255,7 +255,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
         pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime T: type) void {
             const complex: *T = @ptrCast(@alignCast(ptr));
             complex.query.deinit();
-            params.ResourceSystemParam.deinit(e, @ptrCast(complex.res), *params.Res(i32));
+            params.ResourceSystemParam.deinit(e, @ptrCast(complex.res), params.Res(i32));
         }
     };
 
