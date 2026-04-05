@@ -1,7 +1,7 @@
 .{
     .name = .zevy_ecs,
 
-    .version = "2.3.0",
+    .version = "2.3.1",
 
     .fingerprint = 0xf22b53cc99fd8256, // Changing this has security and trust implications.
 
@@ -9,8 +9,8 @@
 
     .dependencies = .{
         .zevy_reflect = .{
-            .url = "git+https://github.com/captkirk88/zevy-reflect#c152e09d0cc552fb58d5db81e1ca17f6365ba2b1",
-            .hash = "zevy_reflect-1.0.1-Ob80cPmgAgD9tpG3mS-zzA3pFje8OSXUBwCDYIVf0YTE",
+            .url = "git+https://github.com/captkirk88/zevy-reflect#7df2a4e8adf782e5f606b901abcf0914eccda298",
+            .hash = "zevy_reflect-1.1.0-Ob80cGSoAgDK6_b6OWgf6Ma8t9VKg8-ymt5QkXgjYu_w",
         },
         .zevy_buildtools = .{
             .url = "git+https://github.com/captkirk88/zevy-buildtools#a56ce3e3d27020503b1e92587166acdfcfd521c9",
