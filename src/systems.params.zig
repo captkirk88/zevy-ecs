@@ -1076,3 +1076,28 @@ test "Commands deferred entity creation" {
 
     try std.testing.expect(ent_cmds.entity().eql(entity));
 }
+
+test "Commands deferred entity creation supports aligned component payloads" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    const commands = try CommandsSystemParam.apply(&manager, Commands);
+    defer CommandsSystemParam.deinit(&manager, @ptrCast(@alignCast(commands)), Commands);
+
+    const AlignedComponent = struct {
+        vec: @Vector(4, f32),
+    };
+
+    var ent_cmds = try commands.create();
+    defer ent_cmds.deinit();
+
+    _ = try ent_cmds.add(AlignedComponent, .{ .vec = .{ 1.0, 2.0, 3.0, 4.0 } });
+
+    try ent_cmds.flush();
+
+    const stored = try ent_cmds.get(AlignedComponent);
+    try std.testing.expect(stored != null);
+    try std.testing.expectEqual(@as(f32, 1.0), stored.?.vec[0]);
+    try std.testing.expectEqual(@as(f32, 4.0), stored.?.vec[3]);
+}

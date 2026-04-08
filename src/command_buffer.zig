@@ -1,6 +1,8 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
 
+const storage_alignment = std.mem.Alignment.of(std.c.max_align_t);
+
 pub const CommandHeader = struct {
     execute: *const fn (*anyopaque, *anyopaque) anyerror!void,
     batch_execute: ?*const fn ([]const *const anyopaque, *anyopaque) anyerror!void,
@@ -14,7 +16,7 @@ const BatchGroup = struct {
 };
 
 pub const CommandBuffer = struct {
-    bytes: std.ArrayList(u8),
+    bytes: std.array_list.Aligned(u8, storage_alignment),
 
     pub fn init() CommandBuffer {
         return .{ .bytes = .empty };
@@ -46,11 +48,15 @@ pub const CommandBuffer = struct {
         execute: *const fn (*anyopaque, *anyopaque) anyerror!void,
         batch_execute: ?*const fn ([]const *const anyopaque, *anyopaque) anyerror!void,
     ) error{OutOfMemory}!void {
-        const header_align = @alignOf(CommandHeader);
         const data_align = @alignOf(DataType);
-        const entry_align = @max(header_align, data_align);
+        comptime if (data_align > storage_alignment.toByteUnits()) {
+            @compileError(std.fmt.comptimePrint(
+                "CommandBuffer payload alignment {d} exceeds storage alignment {d} for type {s}",
+                .{ data_align, storage_alignment.toByteUnits(), @typeName(DataType) },
+            ));
+        };
 
-        const header_offset = std.mem.alignForward(usize, self.bytes.items.len, entry_align);
+        const header_offset = self.bytes.items.len;
         const data_offset_rel: usize = if (@sizeOf(DataType) == 0)
             0
         else
@@ -59,7 +65,7 @@ pub const CommandBuffer = struct {
             header_offset + @sizeOf(CommandHeader),
             header_offset + data_offset_rel + @sizeOf(DataType),
         );
-        const next_header = std.mem.alignForward(usize, entry_end, header_align);
+        const next_header = std.mem.alignForward(usize, entry_end, storage_alignment.toByteUnits());
 
         const old_len = self.bytes.items.len;
         try self.bytes.resize(allocator, next_header);

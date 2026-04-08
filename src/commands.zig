@@ -7,7 +7,7 @@ const command_buffer = @import("command_buffer.zig");
 
 const CommandBuffer = command_buffer.CommandBuffer;
 
-fn commandsInner(commands: Commands) *CommandsInner._Inner {
+inline fn commandsInner(commands: Commands) *CommandsInner._Inner {
     return @ptrCast(@alignCast(commands));
 }
 
@@ -336,7 +336,7 @@ pub const EntityCommands = struct {
             if (pending.entity == null) {
                 pending.entity = commandsInner(self.commands)._manager.createEmpty();
             }
-            try self.ebuf.flush(commandsInner(self.commands)._allocator, @ptrCast(commandsInner(self.commands)._manager));
+            try self.ebuf.flush(commandsInner(self.commands)._allocator, commandsInner(self.commands)._manager);
         } else {
             try self.commands.flush(commandsInner(self.commands)._manager);
         }
