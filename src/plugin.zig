@@ -51,8 +51,8 @@ const Plugin = PluginTemplate.Interface;
 /// try plugin_manager.build(&manager);
 /// ```
 pub const PluginManager = struct {
-    plugins: std.ArrayListUnmanaged(PluginEntry) = .empty,
-    plugin_hashes: std.AutoHashMapUnmanaged(u64, void) = .{},
+    plugins: std.ArrayList(PluginEntry),
+    plugin_hashes: std.AutoHashMap(u64, void),
     allocator: std.mem.Allocator,
 
     /// Internal storage for type-erased plugins
@@ -73,6 +73,8 @@ pub const PluginManager = struct {
     pub fn init(allocator: std.mem.Allocator) PluginManager {
         return .{
             .allocator = allocator,
+            .plugins = std.ArrayList(PluginEntry).initCapacity(allocator, 10) catch |err| @panic(@errorName(err)),
+            .plugin_hashes = std.AutoHashMap(u64, void).init(allocator),
         };
     }
 
@@ -98,7 +100,7 @@ pub const PluginManager = struct {
         }
 
         self.plugins.deinit(self.allocator);
-        self.plugin_hashes.deinit(self.allocator);
+        self.plugin_hashes.deinit();
 
         return if (any_error) errors.items else null;
     }
@@ -122,7 +124,7 @@ pub const PluginManager = struct {
             .destroy_fn = null, // No destroy function for raw plugins
         });
 
-        try self.plugin_hashes.put(self.allocator, key_hash, {});
+        try self.plugin_hashes.put(key_hash, {});
     }
 
     /// Add a plugin instance to the manager.
@@ -157,7 +159,7 @@ pub const PluginManager = struct {
             .destroy_fn = &Wrapper.destroy,
         });
 
-        try self.plugin_hashes.put(self.allocator, key_hash, {});
+        try self.plugin_hashes.put(key_hash, {});
     }
 
     /// Add a bundle of plugins defined as fields in a struct. Each field will be added as an individual plugin.
