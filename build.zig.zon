@@ -17,8 +17,8 @@
             .hash = "zevy_buildtools-1.0.0-AG3r_F6RAAAeSEw9OxHJ_nkIvYpfoZY5zAOyMEqM_Yvp",
         },
         .zevy_mem = .{
-            .url = "git+https://github.com/captkirk88/zevy-mem#69a990772ac3d004dfc5f5e5f387bc80c7d6cdd7",
-            .hash = "zevy_mem-1.0.1-jK9L0bw7AwBtO0jXbqL54oGnMWndhXRBkjpPsA7tuhG1",
+            .url = "git+https://github.com/captkirk88/zevy-mem#1f9e5ec6af90148dcc218d24ca7cd2615178b0b7",
+            .hash = "zevy_mem-1.1.0-jK9L0Qg7AwBuDocGllXc0w8pgrJWV2DKAh659ViP5flb",
         },
     },
 

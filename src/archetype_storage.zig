@@ -32,6 +32,15 @@ pub const ArchetypeStorage = struct {
         // Map: ArchetypeSignature -> *Archetype
         archetypes: std.HashMap(ArchetypeSignature, *Archetype, Context, 80),
         entity_sparse_set: SparseSet(EntityMapEntry),
+
+        pub fn deinit(self: *Inner) void {
+            var it = self.archetypes.valueIterator();
+            while (it.next()) |archetype| {
+                archetype.*.deinit();
+            }
+            self.archetypes.deinit();
+            self.entity_sparse_set.deinit();
+        }
     };
 
     pub const ReadGuard = zevy_mem.lock.RwLock(Inner).ReadGuard;
@@ -66,15 +75,6 @@ pub const ArchetypeStorage = struct {
     }
 
     pub fn deinit(self: *ArchetypeStorage) void {
-        var guard = self.inner.lockWrite();
-        const storage = guard.get();
-        var it = storage.archetypes.valueIterator();
-        while (it.next()) |archetype| {
-            archetype.*.deinit();
-        }
-        storage.archetypes.deinit();
-        storage.entity_sparse_set.deinit();
-        guard.deinit();
         self.inner.deinit();
     }
 
