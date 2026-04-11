@@ -88,12 +88,13 @@ pub fn ExactBaseMatcher(comptime require_pointer: bool, comptime ExpectedBase: t
     };
 }
 
-/// Local: Provides per-system-function persistent storage, accessible only to the declaring system.
-/// Value persists across system invocations (lifetime: ECS instance or until explicitly cleared).
-pub fn Local(comptime T: type) type {
-    return struct {
-        _value: T = undefined,
-        _set: bool = false,
+/// LocalInner: opaque backing type for per-system persistent storage.
+/// Use `Local(T)` as the system parameter type.
+pub fn LocalInner(comptime T: type) type {
+    return opaque {
+        const Self = @This();
+        pub const is_local = true;
+        pub const LocalType = T;
 
         pub const debugInfo = if (@import("builtin").mode == .Debug) struct {
             pub fn get() []const u8 {
@@ -101,55 +102,65 @@ pub fn Local(comptime T: type) type {
             }
         }.get else void;
 
+        pub const _Storage = struct {
+            _value: T = undefined,
+            _set: bool = false,
+        };
+
         /// Set the local value (persists across invocations).
         pub fn set(self: *Self, val: T) void {
-            self._value = val;
-            self._set = true;
+            const s: *_Storage = @ptrCast(@alignCast(self));
+            s._value = val;
+            s._set = true;
         }
 
         /// Get the local value.
         pub fn get(self: *Self) T {
-            return self._value;
+            const s: *_Storage = @ptrCast(@alignCast(self));
+            return s._value;
         }
 
         /// Get the local value, returns null if not set.
         pub fn value(self: *Self) ?T {
-            if (self._set) return self._value;
+            const s: *_Storage = @ptrCast(@alignCast(self));
+            if (s._set) return s._value;
             return null;
         }
 
         /// Reset the local value (clears persistent state).
         pub fn clear(self: *Self) void {
-            self._set = false;
+            const s: *_Storage = @ptrCast(@alignCast(self));
+            s._set = false;
         }
 
         /// Returns true if the value has been set.
         pub fn isSet(self: *Self) bool {
-            return self._set;
+            const s: *_Storage = @ptrCast(@alignCast(self));
+            return s._set;
         }
-
-        const Self = @This();
     };
+}
+
+/// Pointer-backed system parameter providing per-system persistent storage of type T.
+/// Use `local.get()` / `local.set(val)` to access and mutate the stored value.
+/// The value persists across system invocations for the lifetime of the ECS instance.
+pub fn Local(comptime T: type) type {
+    return *LocalInner(T);
 }
 
 const LocalSystemParamMatcher = struct {
     pub fn matches(comptime ParamType: type, comptime Base: type) bool {
-        const type_info = @typeInfo(Base);
-        return @typeInfo(ParamType) == .pointer and
-            type_info == .@"struct" and
-            typeHasFields(Base, &.{ "_value", "_set" }) and
-            type_info.@"struct".fields.len == 2;
+        return @typeInfo(ParamType) == .pointer and typeHasDecls(Base, &.{ "is_local", "LocalType" });
     }
 };
 
 const LocalSystemParamImpl = struct {
     pub fn apply(_: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
-        const LocalType = BaseType(ParamType);
-        const ValueType = @typeInfo(LocalType).@"struct".fields[0].type;
+        const StorageType = BaseType(ParamType)._Storage;
         const static_storage = struct {
-            var local: Local(ValueType) = .{ ._value = undefined, ._set = false };
+            var storage: StorageType = .{ ._set = false };
         };
-        return &static_storage.local;
+        return @ptrCast(@alignCast(&static_storage.storage));
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
@@ -870,9 +881,9 @@ test "LocalSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    const local_ptr = try LocalSystemParam.apply(&ecs_instance, *Local(i32));
-    local_ptr._value = 99;
-    try std.testing.expect(local_ptr._value == 99);
+    const local_ptr = try LocalSystemParam.apply(&ecs_instance, Local(i32));
+    local_ptr.set(99);
+    try std.testing.expect(local_ptr.get() == 99);
 }
 
 test "EventReaderSystemParam basic" {

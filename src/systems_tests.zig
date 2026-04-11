@@ -64,7 +64,7 @@ fn multiParamSystem(res: Res(DeltaTime), query: Query(struct { pos: Position, ve
     }
 }
 
-fn localSystem(local: *Local(u32)) void {
+fn localSystem(local: Local(u32)) void {
     if (!local.isSet()) {
         local.set(0);
     }
