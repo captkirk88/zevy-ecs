@@ -22,7 +22,7 @@
 - [ ] Create a zevy-app repo for a generic App that uses zevy-ecs Scheduler and provides a main loop.
   - This would create a common structure and allow for easier integration with other libraries.
   - It would also allow for better separation of concerns and make it easier to maintain and update the App and Scheduler independently.
-  - The Scheduler currently only takes a zevy_ecs.Manager, but it could be modified to take a context that by default includes the Manager but can also include other resources as needed. This would allow for more flexibility and make it easier to integrate with other libraries and systems. (This would be a breaking change for v2.0.0)
+  - The Scheduler currently only takes a zevy_ecs.Manager, but it could be modified to take a context that by default includes the Manager but can also include other resources as needed. This would allow for more flexibility and make it easier to integrate with other libraries and systems. (This would be a breaking change, so it would be better to do this in a future major release.)
 
 ### Will recursively do...
 

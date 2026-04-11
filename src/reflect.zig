@@ -1,6 +1,14 @@
 const std = @import("std");
 const reflect = @import("zevy_reflect");
 
+/// Get the base type by dereferencing pointers
+pub fn BaseType(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .pointer => |pointer_info| BaseType(pointer_info.child),
+        else => T,
+    };
+}
+
 /// Check if a type is the Entity type
 pub fn isEntity(comptime T: type) bool {
     // Entity is defined as a struct with id: u32 and generation: u32

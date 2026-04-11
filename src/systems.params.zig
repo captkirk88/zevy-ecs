@@ -16,12 +16,7 @@ const Commands = commands_mod.Commands;
 const CommandsInner = commands_mod.CommandsInner;
 const EntityCommands = commands_mod.EntityCommands;
 
-fn BaseType(comptime T: type) type {
-    return switch (@typeInfo(T)) {
-        .pointer => |pointer_info| BaseType(pointer_info.child),
-        else => T,
-    };
-}
+const BaseType = reflect.BaseType;
 
 fn typeHasDecls(comptime T: type, comptime decl_names: []const []const u8) bool {
     switch (@typeInfo(T)) {
@@ -41,7 +36,12 @@ fn typeHasFields(comptime T: type, comptime field_names: []const []const u8) boo
     return true;
 }
 
-fn SystemParam(comptime Matcher: type, comptime Impl: type) type {
+/// SystemParam defines how to match, apply, and deinitialize a system parameter type.
+///
+/// Matchers are used to determine if a given system parameter type matches this handler.
+///
+/// `Impl` provides the logic to apply (construct) the parameter value for a system function and to deinitialize it after the system runs.
+pub fn SystemParam(comptime Matcher: type, comptime Impl: type) type {
     return struct {
         pub fn matches(comptime ParamType: type) bool {
             return Matcher.matches(ParamType, BaseType(ParamType));
@@ -57,7 +57,8 @@ fn SystemParam(comptime Matcher: type, comptime Impl: type) type {
     };
 }
 
-fn DeclMatcher(comptime require_pointer: bool, comptime decl_names: []const []const u8) type {
+/// DeclMatcher matches if the base type (after dereferencing pointers) has the specified declarations, and pointer-ness matches the requirement.
+pub fn DeclMatcher(comptime require_pointer: bool, comptime decl_names: []const []const u8) type {
     return struct {
         pub fn matches(comptime ParamType: type, comptime Base: type) bool {
             return (@typeInfo(ParamType) == .pointer) == require_pointer and typeHasDecls(Base, decl_names);
@@ -65,7 +66,8 @@ fn DeclMatcher(comptime require_pointer: bool, comptime decl_names: []const []co
     };
 }
 
-fn DeclAndFieldMatcher(
+/// DeclAndFieldMatcher matches if the base type (after dereferencing pointers) has the specified declarations and fields, and pointer-ness matches the requirement.
+pub fn DeclAndFieldMatcher(
     comptime require_pointer: bool,
     comptime decl_names: []const []const u8,
     comptime field_names: []const []const u8,
@@ -77,7 +79,8 @@ fn DeclAndFieldMatcher(
     };
 }
 
-fn ExactBaseMatcher(comptime require_pointer: bool, comptime ExpectedBase: type) type {
+/// ExactBaseMatcher matches if the base type (after dereferencing pointers) exactly matches the expected type, and pointer-ness matches the requirement.
+pub fn ExactBaseMatcher(comptime require_pointer: bool, comptime ExpectedBase: type) type {
     return struct {
         pub fn matches(comptime ParamType: type, comptime Base: type) bool {
             return (@typeInfo(ParamType) == .pointer) == require_pointer and Base == ExpectedBase;
@@ -462,9 +465,16 @@ pub fn ResMutInner(comptime T: type) type {
             }
         }.get else void;
 
+        /// Get a mutable pointer to the resource value.
         pub fn get(self: *Self) *T {
             const inner: *_Inner = @ptrCast(@alignCast(self));
             return inner.guard.get();
+        }
+
+        /// Set the resource value.
+        pub fn set(self: *Self, value: T) void {
+            const inner: *_Inner = @ptrCast(@alignCast(self));
+            inner.guard.get().* = value;
         }
     };
 }
@@ -662,6 +672,7 @@ pub const RelationsInner = opaque {
     }
 };
 
+/// Relations provides access to the RelationManager resource for managing entity relationships.
 pub const Relations = *RelationsInner;
 
 /// Relations SystemParam matcher and applier
@@ -754,7 +765,7 @@ pub const OnAddedSystemParam = SystemParam(DeclMatcher(false, &.{ "ComponentType
 
 /// OnRemoved(T) system param: exposes entities from which component T
 /// was removed since last system run. This is a lightweight wrapper
-/// over an event stream produced by the scheduler.
+/// over an event stream produced by calling `ecs.Manager.removeComponent(T)` or similar.
 pub fn OnRemoved(comptime T: type) type {
     return struct {
         const Self = @This();

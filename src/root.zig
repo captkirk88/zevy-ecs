@@ -27,8 +27,6 @@ pub const runIf = sys.runIf;
 pub const chain = scheduler.chain;
 pub const With = qry.With;
 pub const Without = qry.Without;
-pub const Res = params_mod.Res;
-pub const ResMut = params_mod.ResMut;
 
 // System parameter types
 /// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter
@@ -42,31 +40,25 @@ pub const params = struct {
     pub const Query = qry.Query;
     /// Commands parameter type for issuing commands to modify the ECS world
     pub const Commands = commands.Commands;
-    /// Resource parameter type for accessing resources
     pub const Res = params_mod.Res;
-    /// Mutable resource parameter type for exclusive resource access
     pub const ResMut = params_mod.ResMut;
-    /// Local parameter type for per-system-instance local state
     pub const Local = params_mod.Local;
-    /// EventReader parameter type for reading events
     pub const EventReader = params_mod.EventReader;
-    /// EventWriter parameter type for writing events
     pub const EventWriter = params_mod.EventWriter;
-    /// State parameter type for checking if a specific state enum value is active
     pub const State = params_mod.State;
-    /// NextState parameter type for immediate state transitions
     pub const NextState = params_mod.NextState;
-    /// Relations parameter type for managing entity relationships
     pub const Relations = params_mod.Relations;
-    /// OnAdded parameter type for reading components that were added this frame
     pub const OnAdded = params_mod.OnAdded;
-    /// OnRemoved parameter type for reading components that were removed this frame
     pub const OnRemoved = params_mod.OnRemoved;
-    /// Single parameter type — returns exactly one matching query result
     pub const Single = params_mod.Single;
 
     /// System parameter type aliases for usage in custom system params.
     pub const systems = struct {
+        pub const matchers = struct {
+            pub const Decl = params_mod.DeclMatcher;
+            pub const DeclAndField = params_mod.DeclAndFieldMatcher;
+            pub const ExactBase = params_mod.ExactBaseMatcher;
+        };
         pub const CommandsSystemParam = params_mod.CommandsSystemParam;
         pub const QuerySystemParam = params_mod.QuerySystemParam;
         pub const ResourceSystemParam = params_mod.ResourceSystemParam;
