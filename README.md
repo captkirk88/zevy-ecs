@@ -15,7 +15,7 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 ## Features
 
 - **Archetype-based storage**: Efficiently groups entities with the same component combinations for cache-friendly iteration
-- **Type-safe queries**: Compile-time validated component queries with include/exclude filters and optional components
+- **Type-safe queries**: Compile-time validated component queries with support for optional components and filters (With/Without)
 - **Flexible system parameters**: Built-in support for Query, Res (resources), Local (per-system state), State/NextState, EventReader/EventWriter, Relations
 - **Relationship Support** : Manage entity relationships with minimal overhead using the Relations system parameter
 - **Resource management**: Global state accessible across systems with automatic cleanup
