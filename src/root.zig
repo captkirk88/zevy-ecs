@@ -54,6 +54,8 @@ pub const params = struct {
 
     /// System parameter type aliases for usage in custom system params.
     pub const systems = struct {
+        pub const SystemParam = params_mod.SystemParam;
+
         pub const matchers = struct {
             pub const Decl = params_mod.DeclMatcher;
             pub const DeclAndField = params_mod.DeclAndFieldMatcher;
