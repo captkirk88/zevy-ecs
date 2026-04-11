@@ -21,7 +21,7 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 - **Resource management**: Global state accessible across systems with automatic cleanup
 - **Event system**: Built-in event queue with filtering and handling capabilities in a circular buffer
 - **Batch operations**: High-performance batch entity creation
-- **Component serialization**: Built-in support for serializing/deserializing components and entities
+- **Component serialization**: Built-in support for serializing/deserializing components, resources, and entities
 - **Extensible parameter system**: Create custom system parameters by implementing `matches`, `apply`, and optional `deinit` functions
 - **Zero runtime overhead**: All system parameter resolution happens at compile time
 
@@ -44,6 +44,7 @@ Good question.  The std API has changed to the point I don't even know anymore. 
     - [Custom System Registries](#custom-system-registries)
     - [Serialization](#serialization)
         - [Basic Component Serialization](#basic-component-serialization)
+        - [Resource Serialization](#resource-serialization)
         - [Using ComponentWriter](#using-componentwriter)
         - [Using ComponentReader](#using-componentreader)
         - [Entity Serialization](#entity-serialization)
@@ -436,8 +437,8 @@ const has_config = manager.hasResource(GameConfig);
 // Remove resource
 manager.removeResource(GameConfig);
 
-// List all resources
-var types = manager.listResourceTypes();
+// List all resource type hashes
+var types = manager.listResourceTypeHashes();
 defer types.deinit();
 ```
 
@@ -816,7 +817,7 @@ const CustomParamRegistry = zevy_ecs.MergedSystemParamRegistry(.{
 
 ### Serialization
 
-zevy_ecs provides flexible component and entity serialization through `ComponentInstance`, `EntityInstance`, `ComponentWriter`, and `ComponentReader`.
+zevy_ecs provides flexible component, resource, and entity serialization through `ComponentInstance`, `ResourceSnapshot`, `EntityInstance`, `ComponentWriter`, and `ComponentReader`.
 
 #### Basic Component Serialization
 
@@ -828,13 +829,15 @@ const pos = Position{ .x = 10.0, .y = 20.0 };
 const comp = zevy_ecs.serialize.ComponentInstance.from(Position, &pos);
 
 // Serialize to writer
-var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-defer buffer.deinit(allocator);
-try comp.writeTo(buffer.writer(allocator).any());
+var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+defer writer_alloc.deinit();
+try comp.writeTo(&writer_alloc.writer);
+const buffer = try writer_alloc.toOwnedSlice();
+defer allocator.free(buffer);
 
 // Deserialize from reader
-var fbs = std.io.fixedBufferStream(buffer.items);
-const read_comp = try zevy_ecs.serialize.ComponentInstance.readFrom(fbs.reader().any(), allocator);
+var reader = std.Io.Reader.fixed(buffer);
+const read_comp = try zevy_ecs.serialize.ComponentInstance.readFrom(&reader, allocator);
 defer allocator.free(read_comp.data);
 
 // Access typed data
@@ -842,6 +845,67 @@ if (read_comp.as(Position)) |read_pos| {
     std.debug.print("Position: ({d}, {d})\n", .{ read_pos.x, read_pos.y });
 }
 ```
+
+#### Resource Serialization
+
+`ResourceSnapshot` captures a specific resource type and restores it later.
+Deserialization writes into resources that are already registered in the target manager; if a resource is missing, restoration fails with `error.ResourceNotFound`.
+
+```zig
+const GameConfig = struct {
+    width: u32,
+    height: u32,
+    fullscreen: bool,
+};
+
+const Score = struct { value: i32 };
+
+_ = try manager.addResource(GameConfig, .{
+    .width = 1920,
+    .height = 1080,
+    .fullscreen = true,
+});
+_ = try manager.addResource(Score, .{ .value = 42 });
+
+const config_snapshot = try zevy_ecs.serialize.ResourceSnapshot.fromManager(
+    allocator,
+    &manager,
+    GameConfig,
+);
+defer config_snapshot.deinit(allocator);
+
+const score_snapshot = try zevy_ecs.serialize.ResourceSnapshot.fromManager(
+    allocator,
+    &manager,
+    Score,
+);
+defer score_snapshot.deinit(allocator);
+
+var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+defer writer_alloc.deinit();
+
+try config_snapshot.writeTo(&writer_alloc.writer);
+try score_snapshot.writeTo(&writer_alloc.writer);
+
+const buffer = try writer_alloc.toOwnedSlice();
+defer allocator.free(buffer);
+
+var reader = std.Io.Reader.fixed(buffer);
+var restored_config = try zevy_ecs.serialize.ResourceSnapshot.readFrom(&reader, allocator);
+defer restored_config.deinit(allocator);
+
+var restored_score = try zevy_ecs.serialize.ResourceSnapshot.readFrom(&reader, allocator);
+defer restored_score.deinit(allocator);
+
+// Target resources must already exist before restore.
+_ = try manager.addResource(GameConfig, .{ .width = 0, .height = 0, .fullscreen = false });
+_ = try manager.addResource(Score, .{ .value = 0 });
+
+try restored_config.toManager(&manager);
+try restored_score.toManager(&manager);
+```
+
+`ResourceSnapshot` performs a raw byte copy, so it is best suited for POD-style resource types.
 
 #### Using ComponentWriter
 
@@ -862,11 +926,14 @@ const components = try manager.getAllComponents(allocator, entity);
 defer allocator.free(components);
 
 // Serialize all components to a buffer
-var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-defer buffer.deinit(allocator);
+var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+defer writer_alloc.deinit();
 
-var writer = zevy_ecs.serialize.ComponentWriter.init(buffer.writer(allocator).any());
+var writer = zevy_ecs.serialize.ComponentWriter.init(&writer_alloc.writer);
 try writer.writeComponents(components);
+
+const buffer = try writer_alloc.toOwnedSlice();
+defer allocator.free(buffer);
 ```
 
 #### Using ComponentReader
@@ -875,11 +942,11 @@ try writer.writeComponents(components);
 
 ```zig
 // Deserialize components from buffer
-var fbs = std.io.fixedBufferStream(buffer.items);
-var reader = zevy_ecs.serialize.ComponentReader.init(fbs.reader().any());
+var reader = std.Io.Reader.fixed(buffer);
+var component_reader = zevy_ecs.serialize.ComponentReader.init(&reader);
 
-const components = try reader.readComponents(allocator);
-defer reader.freeComponents(allocator, components);
+const components = try component_reader.readComponents(allocator);
+defer component_reader.freeComponents(allocator, components);
 
 // Access the typed data
 for (components) |comp| {
@@ -908,13 +975,17 @@ const entity_instance = try zevy_ecs.serialize.EntityInstance.fromEntity(allocat
 defer entity_instance.deinit(allocator);
 
 // Serialize to buffer
-var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-defer buffer.deinit(allocator);
-try entity_instance.writeTo(buffer.writer(allocator).any());
+var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+defer writer_alloc.deinit();
+
+try entity_instance.writeTo(&writer_alloc.writer);
+
+const buffer = try writer_alloc.toOwnedSlice();
+defer allocator.free(buffer);
 
 // Deserialize from buffer
-var fbs = std.io.fixedBufferStream(buffer.items);
-const restored_instance = try zevy_ecs.serialize.EntityInstance.readFrom(fbs.reader().any(), allocator);
+var reader = std.Io.Reader.fixed(buffer);
+const restored_instance = try zevy_ecs.serialize.EntityInstance.readFrom(&reader, allocator);
 defer restored_instance.deinit(allocator);
 
 // Create a new entity from the restored data
@@ -925,9 +996,9 @@ const new_entity = try restored_instance.toEntity(&manager);
 
 ```zig
 // Serialize multiple entities
-var buffer = try std.ArrayList(u8).initCapacity(allocator, 0);
-defer buffer.deinit(allocator);
-const writer = buffer.writer(allocator).any();
+var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+defer writer_alloc.deinit();
+const writer = &writer_alloc.writer;
 
 const entities = [_]zevy_ecs.Entity{ entity1, entity2, entity3 };
 try writer.writeInt(usize, entities.len, .little);
@@ -938,14 +1009,16 @@ for (entities) |entity| {
     try instance.writeTo(writer);
 }
 
-// Deserialize multiple entities
-var fbs = std.io.fixedBufferStream(buffer.items);
-const reader = fbs.reader().any();
+const buffer = try writer_alloc.toOwnedSlice();
+defer allocator.free(buffer);
 
-const count = try reader.readInt(usize, .little);
+// Deserialize multiple entities
+var reader = std.Io.Reader.fixed(buffer);
+
+const count = try reader.takeInt(usize, .little);
 var i: usize = 0;
 while (i < count) : (i += 1) {
-    const restored = try zevy_ecs.serialize.EntityInstance.readFrom(reader, allocator);
+    const restored = try zevy_ecs.serialize.EntityInstance.readFrom(&reader, allocator);
     defer restored.deinit(allocator);
     _ = try restored.toEntity(&manager);
 }

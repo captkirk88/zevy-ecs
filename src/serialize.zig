@@ -59,6 +59,67 @@ pub const ComponentInstance = struct {
     }
 };
 
+/// Serialized resource payload.
+///
+/// Resources use the same wire format as components: type hash, size, then raw bytes.
+pub const ResourceInstance = ComponentInstance;
+
+/// Represents a serialized collection of resources.
+///
+/// Resource capture uses a caller-supplied type list so you can choose which resources
+/// to serialize. Restoration targets already-registered resources by type hash.
+pub const ResourceSnapshot = struct {
+    resource: ResourceInstance,
+
+    /// Capture the current value of a requested resource type.
+    pub fn fromManager(
+        allocator: std.mem.Allocator,
+        manager: *ecs.Manager,
+        comptime T: type,
+    ) error{ OutOfMemory, ResourceNotFound, InvalidResourceData }!ResourceSnapshot {
+        const type_hash = reflect.typeHash(T);
+        const entry = ecs.resourceEntryByHash(manager, type_hash) orelse return error.ResourceNotFound;
+        const resource_size = entry.size;
+        const data_copy = try allocator.alloc(u8, resource_size);
+        errdefer allocator.free(data_copy);
+        try ecs.readResourceBytesByHash(manager, type_hash, data_copy);
+
+        return ResourceSnapshot{
+            .resource = ResourceInstance{
+                .hash = type_hash,
+                .size = resource_size,
+                .data = data_copy,
+            },
+        };
+    }
+
+    /// Restore a serialized resource into a manager.
+    ///
+    /// The serialized resource must already exist in the manager.
+    pub fn toManager(self: *const ResourceSnapshot, manager: *ecs.Manager) error{ ResourceNotFound, InvalidResourceData }!void {
+        try ecs.writeResourceBytesByHash(manager, self.resource.hash, self.resource.data);
+    }
+
+    /// Write serialized resource to any std.Io.Writer.
+    pub fn writeTo(self: *const ResourceSnapshot, writer: *std.Io.Writer) anyerror!void {
+        try self.resource.writeTo(writer);
+    }
+
+    /// Read a ResourceSnapshot from any std.Io.Reader.
+    /// The caller is responsible for freeing the returned data using deinit().
+    pub fn readFrom(reader: *std.Io.Reader, allocator: std.mem.Allocator) anyerror!ResourceSnapshot {
+        const resource = try ResourceInstance.readFrom(reader, allocator);
+        return ResourceSnapshot{
+            .resource = resource,
+        };
+    }
+
+    /// Free all memory associated with this ResourceSnapshot.
+    pub fn deinit(self: *ResourceSnapshot, allocator: std.mem.Allocator) void {
+        allocator.free(self.resource.data);
+    }
+};
+
 /// Represents a serialized entity with all its components and referenced entities
 pub const EntityInstance = struct {
     components: []ComponentInstance,

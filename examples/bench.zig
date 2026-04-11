@@ -13,8 +13,8 @@ const StageId = zevy_ecs.schedule.StageId;
 const Stages = zevy_ecs.schedule.Stages;
 const relations = zevy_ecs.relations;
 const RelationManager = relations.RelationManager;
-const Child = relations.Child;
-const Owns = relations.Owns;
+const Child = relations.kinds.Child;
+const Owns = relations.kinds.Owns;
 
 const mem = @import("zevy_mem");
 
@@ -183,6 +183,34 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         _ = try bench.run(label, BENCH_OPT_COUNT, benchDeserialize, .{ &manager, allocator, io, count });
     }
 
+    // Resource Serialization
+    try bench.beginSection("Resource Serialization");
+    inline for (resource_counts) |res_count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        addBenchResources(&manager, res_count);
+
+        const label = try std.fmt.allocPrint(allocator, "Serialize {d} Resources", .{res_count});
+        defer allocator.free(label);
+
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchSerializeResources, .{ &manager, allocator, res_count });
+    }
+
+    // Resource Deserialization
+    try bench.beginSection("Resource Deserialization");
+    inline for (resource_counts) |res_count| {
+        var manager = try Manager.init(bench.allocator());
+        defer manager.deinit();
+
+        addBenchResources(&manager, res_count);
+
+        const label = try std.fmt.allocPrint(allocator, "Deserialize {d} Resources", .{res_count});
+        defer allocator.free(label);
+
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchDeserializeResources, .{ &manager, allocator, res_count });
+    }
+
     // Manager Transfer
     try bench.beginSection("Manager Transfer");
     inline for (counts) |count| {
@@ -248,6 +276,86 @@ const Damage = struct {
 const Team = struct {
     id: u8,
 };
+
+const GameSettings = struct {
+    width: u32,
+    height: u32,
+    fullscreen: bool,
+    volume: f32,
+};
+
+const PhysicsConfig = struct {
+    gravity: f32,
+    max_velocity: f32,
+    iterations: u32,
+};
+
+const AudioConfig = struct {
+    master_volume: f32,
+    music_volume: f32,
+    sfx_volume: f32,
+    sample_rate: u32,
+};
+
+const GraphicsConfig = struct {
+    shadow_quality: u8,
+    aa_samples: u8,
+    fov: f32,
+    draw_distance: f32,
+};
+
+const InputConfig = struct {
+    mouse_sensitivity: f32,
+    invert_y: bool,
+    deadzone: f32,
+};
+
+const NetworkConfig = struct {
+    port: u16,
+    max_connections: u16,
+    timeout_ms: u32,
+    tick_rate: u32,
+};
+
+const DebugConfig = struct {
+    show_fps: bool,
+    show_colliders: bool,
+    log_level: u8,
+};
+
+const CameraConfig = struct {
+    near_clip: f32,
+    far_clip: f32,
+    aspect_ratio: f32,
+};
+
+const AIConfig = struct {
+    update_interval_ms: u32,
+    max_agents: u32,
+    path_cache_size: u32,
+};
+
+const SaveConfig = struct {
+    auto_save_interval_s: u32,
+    max_save_slots: u8,
+    compress: bool,
+};
+
+/// All benchmark resource types as a comptime tuple.
+const BenchResources = .{
+    GameSettings,
+    PhysicsConfig,
+    AudioConfig,
+    GraphicsConfig,
+    InputConfig,
+    NetworkConfig,
+    DebugConfig,
+    CameraConfig,
+    AIConfig,
+    SaveConfig,
+};
+
+const resource_counts = [_]usize{ 1, 2, 4, 6, 8, 10 };
 
 const Target = struct {
     entity: Entity,
@@ -489,6 +597,12 @@ fn setupMixedEntities(manager: *Manager, allocator: std.mem.Allocator, comptime 
             },
         }
     }
+    _ = try manager.addResource(GameSettings, .{
+        .width = 1920,
+        .height = 1080,
+        .fullscreen = true,
+        .volume = 0.75,
+    });
     return entities;
 }
 
@@ -672,6 +786,57 @@ fn benchSerialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, e
     }
     // Single flush at the end — flushing per-component causes N syscalls.
     try file_writer.flush();
+}
+
+fn defaultBenchResource(comptime T: type) T {
+    var val: T = std.mem.zeroes(T);
+    inline for (std.meta.fields(T)) |field| {
+        switch (@typeInfo(field.type)) {
+            .float => @field(val, field.name) = 1.0,
+            .int => @field(val, field.name) = 1,
+            .bool => @field(val, field.name) = false,
+            else => {},
+        }
+    }
+    return val;
+}
+
+fn addBenchResources(manager: *Manager, comptime count: usize) void {
+    inline for (0..count) |i| {
+        const T = BenchResources[i];
+        _ = manager.addResource(T, defaultBenchResource(T)) catch {};
+    }
+}
+
+fn benchSerializeResources(manager: *Manager, allocator: std.mem.Allocator, comptime count: usize) !void {
+    inline for (0..count) |i| {
+        const T = BenchResources[i];
+        var snapshot = try zevy_ecs.serialize.ResourceSnapshot.fromManager(allocator, manager, T);
+        defer snapshot.deinit(allocator);
+        var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer writer_alloc.deinit();
+        try snapshot.writeTo(&writer_alloc.writer);
+        const buf = try writer_alloc.toOwnedSlice();
+        defer allocator.free(buf);
+        std.mem.doNotOptimizeAway(buf);
+    }
+}
+
+fn benchDeserializeResources(manager: *Manager, allocator: std.mem.Allocator, comptime count: usize) !void {
+    inline for (0..count) |i| {
+        const T = BenchResources[i];
+        var snapshot = try zevy_ecs.serialize.ResourceSnapshot.fromManager(allocator, manager, T);
+        defer snapshot.deinit(allocator);
+        var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+        defer writer_alloc.deinit();
+        try snapshot.writeTo(&writer_alloc.writer);
+        const buf = try writer_alloc.toOwnedSlice();
+        defer allocator.free(buf);
+        var reader = std.Io.Reader.fixed(buf);
+        var restored = try zevy_ecs.serialize.ResourceSnapshot.readFrom(&reader, allocator);
+        defer restored.deinit(allocator);
+        try restored.toManager(manager);
+    }
 }
 
 fn benchDeserialize(manager: *Manager, allocator: std.mem.Allocator, io: std.Io, count: usize) !void {

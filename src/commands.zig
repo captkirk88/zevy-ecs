@@ -253,7 +253,7 @@ pub const EntityCommands = struct {
     }
 
     /// Queue adding a component to this entity. Returns self for chaining.
-    pub fn add(self: *EntityCommands, comptime T: type, value: T) error{OutOfMemory}!*EntityCommands {
+    pub fn add(self: *EntityCommands, comptime T: type, value: T) error{OutOfMemory}!void {
         if (self.existing_entity) |ent| {
             try self.commands.addComponent(ent, T, value);
         } else {
@@ -267,11 +267,10 @@ pub const EntityCommands = struct {
                 }
             }.execute, null);
         }
-        return self;
     }
 
     /// Queue removing a component from this entity. Returns self for chaining.
-    pub fn remove(self: *EntityCommands, comptime T: type) anyerror!*EntityCommands {
+    pub fn remove(self: *EntityCommands, comptime T: type) anyerror!void {
         if (self.existing_entity) |ent| {
             try self.commands.removeComponent(ent, T);
         } else {
@@ -285,11 +284,10 @@ pub const EntityCommands = struct {
                 }
             }.execute, null);
         }
-        return self;
     }
 
     /// Queue destroying this entity. Returns self for chaining.
-    pub fn destroy(self: *EntityCommands) error{OutOfMemory}!*EntityCommands {
+    pub fn destroy(self: *EntityCommands) error{OutOfMemory}!void {
         if (self.existing_entity) |ent| {
             try self.commands.destroyEntity(ent);
         } else {
@@ -303,7 +301,6 @@ pub const EntityCommands = struct {
                 }
             }.execute, null);
         }
-        return self;
     }
 
     /// Get the entity. For pending entities, panics if flush() has not been called.
@@ -319,6 +316,14 @@ pub const EntityCommands = struct {
     /// Returns null for existing entities.
     pub fn getPending(self: *const EntityCommands) ?*PendingEntity {
         return self.pending;
+    }
+
+    pub fn hasPending(self: *const EntityCommands) bool {
+        return self.pending != null;
+    }
+
+    pub fn hasExisting(self: *const EntityCommands) bool {
+        return self.existing_entity != null;
     }
 
     /// Get a component from this entity.

@@ -29,26 +29,46 @@ pub const Entity = struct {
     }
 };
 
-const ResourceEntry = struct {
+pub const ResourceEntry = struct {
     ptr: *anyopaque,
-    type_name: []const u8,
+    type_hash: u64,
+    size: usize,
     deinit_fn: ?*const fn (*anyopaque) void,
 
     pub fn init(
         ptr: *anyopaque,
-        type_name: []const u8,
+        type_hash: u64,
+        size: usize,
         deinit_fn: ?*const fn (*anyopaque) void,
     ) ResourceEntry {
         return ResourceEntry{
             .ptr = ptr,
-            .type_name = type_name,
+            .type_hash = type_hash,
+            .size = size,
             .deinit_fn = deinit_fn,
         };
     }
+
     pub fn deinit(self: *ResourceEntry) void {
         if (self.deinit_fn) |deinit_fn| {
             deinit_fn(self.ptr);
         }
+    }
+};
+
+const ResourceCodec = struct {
+    size: usize,
+    write_bytes_fn: *const fn (*const anyopaque, []u8) void,
+    read_bytes_fn: *const fn (*anyopaque, []const u8) error{InvalidResourceData}!void,
+
+    pub fn writeBytes(self: *const ResourceCodec, resource_ptr: *const anyopaque, dest: []u8) error{InvalidResourceData}!void {
+        if (dest.len != self.size) return error.InvalidResourceData;
+        self.write_bytes_fn(resource_ptr, dest);
+    }
+
+    pub fn readBytes(self: *const ResourceCodec, resource_ptr: *anyopaque, src: []const u8) error{InvalidResourceData}!void {
+        if (src.len != self.size) return error.InvalidResourceData;
+        try self.read_bytes_fn(resource_ptr, src);
     }
 };
 
@@ -67,6 +87,7 @@ pub const Manager = struct {
     free_ids: std.ArrayList(u32), // Reusable entity IDs
     world: World, // Manages archetypes and component storage
     resources: *zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)), // TypeHash -> ResourceEntry
+    resource_codecs: std.AutoHashMap(u64, ResourceCodec),
     systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
 
     relations: Ref(relations.RelationManager),
@@ -89,6 +110,7 @@ pub const Manager = struct {
             .free_ids = try std.ArrayList(u32).initCapacity(allocator, 256),
             .world = World.init(allocator),
             .resources = try zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)).init(allocator, std.AutoHashMap(u64, ResourceEntry).init(allocator)),
+            .resource_codecs = std.AutoHashMap(u64, ResourceCodec).init(allocator),
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
             .component_added = try events.EventStore(ComponentEvent).init(allocator, 64),
             .component_removed = try events.EventStore(ComponentEvent).init(allocator, 64),
@@ -117,6 +139,7 @@ pub const Manager = struct {
         res_guard.get().clearAndFree();
         res_guard.deinit();
         self.resources.deinit();
+        self.resource_codecs.deinit();
 
         var sys_it = self.systems.valueIterator();
         while (sys_it.next()) |sys_ptr| {
@@ -393,18 +416,16 @@ pub const Manager = struct {
     /// defer guard.deinit();
     /// guard.get().field = newValue;
     /// ```
-    pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
-        // Reject pointer types to avoid complexity
+    fn initResourceEntry(self: *Manager, comptime T: type, value: T) error{OutOfMemory}!struct {
+        entry: ResourceEntry,
+        reference: Ref(T),
+    } {
         if (@typeInfo(T) == .pointer) {
-            @compileError("addResource does not accept pointer types. Use value types only.");
+            @compileError("resource APIs do not accept pointer types. Use value types only.");
         }
 
         const type_hash = comptime reflect.typeHash(T);
-        var guard = self.resources.lock();
-        defer guard.deinit();
-        const result = try guard.get().getOrPut(type_hash);
-        if (result.found_existing) return error.ResourceAlreadyExists;
-
+        const type_size = @sizeOf(T);
         const arc_ptr = try zevy_mem.pointers.ArcRwLock(T).init(self.allocator, value);
         const deinit_fn = struct {
             pub fn deinit(resource_ptr: *anyopaque) void {
@@ -412,13 +433,52 @@ pub const Manager = struct {
                 typed_ptr.deinit();
             }
         }.deinit;
+        const write_bytes_fn = struct {
+            pub fn write(resource_ptr: *const anyopaque, dest: []u8) void {
+                const typed_ptr: Ref(T) = @ptrCast(@alignCast(@constCast(resource_ptr)));
+                var guard = typed_ptr.lockRead();
+                defer guard.deinit();
+                @memcpy(dest, std.mem.asBytes(guard.get()));
+            }
+        }.write;
+        const read_bytes_fn = struct {
+            pub fn read(resource_ptr: *anyopaque, src: []const u8) error{InvalidResourceData}!void {
+                if (src.len != type_size) return error.InvalidResourceData;
 
-        try guard.get().put(type_hash, .init(
-            @ptrCast(@alignCast(arc_ptr)),
-            @typeName(T),
-            deinit_fn,
-        ));
-        return arc_ptr;
+                const typed_ptr: Ref(T) = @ptrCast(@alignCast(resource_ptr));
+                var guard = typed_ptr.lockWrite();
+                defer guard.deinit();
+                @memcpy(std.mem.asBytes(guard.get()), src);
+            }
+        }.read;
+
+        try self.resource_codecs.put(type_hash, .{
+            .size = type_size,
+            .write_bytes_fn = write_bytes_fn,
+            .read_bytes_fn = read_bytes_fn,
+        });
+
+        return .{
+            .entry = .init(
+                @ptrCast(@alignCast(arc_ptr)),
+                type_hash,
+                type_size,
+                deinit_fn,
+            ),
+            .reference = arc_ptr,
+        };
+    }
+
+    pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
+        const type_hash = comptime reflect.typeHash(T);
+        var guard = self.resources.lock();
+        defer guard.deinit();
+        const result = try guard.get().getOrPut(type_hash);
+        if (result.found_existing) return error.ResourceAlreadyExists;
+
+        const resource = try self.initResourceEntry(T, value);
+        result.value_ptr.* = resource.entry;
+        return resource.reference;
     }
 
     /// Get a reference-counted handle to a resource of type T, or null if it doesn't exist.
@@ -488,13 +548,13 @@ pub const Manager = struct {
         guard.deinit();
     }
 
-    /// List all resource type names currently stored in the ECS.
-    pub fn listResourceTypes(self: *Manager, allocator: std.mem.Allocator) std.ArrayList([]const u8) {
+    /// List all resource type hashes currently stored in the ECS.
+    pub fn listResourceTypeHashes(self: *Manager, allocator: std.mem.Allocator) std.ArrayList(u64) {
         var guard = self.resources.lock();
-        var types = std.ArrayList([]const u8).initCapacity(allocator, guard.get().count()) catch |err| @panic(@errorName(err));
+        var types = std.ArrayList(u64).initCapacity(allocator, guard.get().count()) catch |err| @panic(@errorName(err));
         var it = guard.get().valueIterator();
         while (it.next()) |resource| {
-            types.append(allocator, resource.type_name) catch |err| @panic(@errorName(err));
+            types.append(allocator, resource.type_hash) catch |err| @panic(@errorName(err));
         }
         guard.deinit();
         return types;
@@ -612,10 +672,9 @@ pub const Manager = struct {
         const SystemType = @TypeOf(system);
         const ReturnType = SystemType.return_type;
 
-        // Generate hash from the system's run function pointer
-        const run_fn_addr = @intFromPtr(system.run);
-        const ctx_addr = @intFromPtr(system.ctx);
-        const system_hash = hash.Wyhash.hash(run_fn_addr, std.mem.asBytes(&ctx_addr));
+        // Use the stable type-name-based hash embedded at construction time,
+        // consistent with createSystemCached.
+        const system_hash = system.hash;
 
         // Check if system already exists
         if (self.systems.get(system_hash)) |_| {
@@ -637,6 +696,36 @@ pub const Manager = struct {
         self.allocator.destroy(system);
     }
 };
+
+/// Internal helpers used by serialize.zig — not re-exported via root.zig.
+pub fn resourceEntryByHash(manager: *Manager, type_hash: u64) ?ResourceEntry {
+    var guard = manager.resources.lock();
+    defer guard.deinit();
+    if (guard.get().get(type_hash)) |entry| {
+        return entry;
+    }
+    return null;
+}
+
+pub fn readResourceBytesByHash(manager: *Manager, type_hash: u64, dest: []u8) error{ ResourceNotFound, InvalidResourceData }!void {
+    var guard = manager.resources.lock();
+    defer guard.deinit();
+
+    const entry = guard.get().getPtr(type_hash) orelse return error.ResourceNotFound;
+    const codec = manager.resource_codecs.getPtr(type_hash) orelse return error.ResourceNotFound;
+    if (entry.size != codec.size) return error.InvalidResourceData;
+    try codec.writeBytes(entry.ptr, dest);
+}
+
+pub fn writeResourceBytesByHash(manager: *Manager, type_hash: u64, src: []const u8) error{ ResourceNotFound, InvalidResourceData }!void {
+    var guard = manager.resources.lock();
+    defer guard.deinit();
+
+    const entry = guard.get().getPtr(type_hash) orelse return error.ResourceNotFound;
+    const codec = manager.resource_codecs.getPtr(type_hash) orelse return error.ResourceNotFound;
+    if (entry.size != codec.size) return error.InvalidResourceData;
+    try codec.readBytes(entry.ptr, src);
+}
 
 /// Add a component of type T to the given entity, or an error if entity is dead.
 pub fn _addComponent(self: *Manager, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {

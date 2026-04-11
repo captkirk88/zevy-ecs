@@ -1,7 +1,7 @@
 .{
     .name = .zevy_ecs,
 
-    .version = "2.3.2",
+    .version = "2.3.3",
 
     .fingerprint = 0xf22b53cc99fd8256, // Changing this has security and trust implications.
 

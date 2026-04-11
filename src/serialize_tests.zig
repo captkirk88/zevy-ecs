@@ -7,6 +7,16 @@ const relations = @import("relations.zig");
 const Position = struct { x: f32, y: f32 };
 const Velocity = struct { dx: f32, dy: f32 };
 const Health = struct { value: i32 };
+const GameConfig = struct {
+    width: u32,
+    height: u32,
+    fullscreen: bool,
+};
+const Score = struct { value: i32 };
+const resource_hashes = [_]u64{
+    @import("zevy_reflect").typeHash(GameConfig),
+    @import("zevy_reflect").typeHash(Score),
+};
 
 test "ComponentInstance - from and as" {
     const pos = Position{ .x = 10.0, .y = 20.0 };
@@ -459,6 +469,112 @@ test "EntityInstance - serialize and deserialize with relation component" {
     try testing.expectEqual(parent.id, parent_rel.?.parent_entity.id);
     try testing.expectEqual(parent.generation, parent_rel.?.parent_entity.generation);
     try testing.expectEqual(@as(u32, 1), parent_rel.?.slot);
+}
+
+test "ResourceSnapshot - fromManager and toManager" {
+    const allocator = testing.allocator;
+
+    var source_manager = try ecs.Manager.init(allocator);
+    defer source_manager.deinit();
+
+    _ = try source_manager.addResource(GameConfig, .{
+        .width = 1920,
+        .height = 1080,
+        .fullscreen = true,
+    });
+    _ = try source_manager.addResource(Score, .{ .value = 99 });
+
+    var config_snapshot = try serialize.ResourceSnapshot.fromManager(allocator, &source_manager, GameConfig);
+    defer config_snapshot.deinit(allocator);
+
+    var score_snapshot = try serialize.ResourceSnapshot.fromManager(allocator, &source_manager, Score);
+    defer score_snapshot.deinit(allocator);
+
+    var writer_alloc: std.Io.Writer.Allocating = .init(allocator);
+    defer writer_alloc.deinit();
+
+    try config_snapshot.writeTo(&writer_alloc.writer);
+    try score_snapshot.writeTo(&writer_alloc.writer);
+
+    const buffer = try writer_alloc.toOwnedSlice();
+    defer allocator.free(buffer);
+
+    var reader = std.Io.Reader.fixed(buffer);
+    var restored_config = try serialize.ResourceSnapshot.readFrom(&reader, allocator);
+    defer restored_config.deinit(allocator);
+
+    var restored_score = try serialize.ResourceSnapshot.readFrom(&reader, allocator);
+    defer restored_score.deinit(allocator);
+
+    var target_manager = try ecs.Manager.init(allocator);
+    defer target_manager.deinit();
+
+    _ = try target_manager.addResource(GameConfig, .{
+        .width = 800,
+        .height = 600,
+        .fullscreen = false,
+    });
+    _ = try target_manager.addResource(Score, .{ .value = 0 });
+
+    try restored_config.toManager(&target_manager);
+    try restored_score.toManager(&target_manager);
+
+    const config_ref = target_manager.getResource(GameConfig).?;
+    defer config_ref.deinit();
+    var config_guard = config_ref.lockRead();
+    defer config_guard.deinit();
+    try testing.expectEqual(@as(u32, 1920), config_guard.get().width);
+    try testing.expectEqual(@as(u32, 1080), config_guard.get().height);
+    try testing.expectEqual(true, config_guard.get().fullscreen);
+
+    const score_ref = target_manager.getResource(Score).?;
+    defer score_ref.deinit();
+    var score_guard = score_ref.lockRead();
+    defer score_guard.deinit();
+    try testing.expectEqual(@as(i32, 99), score_guard.get().value);
+}
+
+test "ResourceSnapshot - toManager requires existing resources" {
+    const allocator = testing.allocator;
+
+    var source_manager = try ecs.Manager.init(allocator);
+    defer source_manager.deinit();
+
+    _ = try source_manager.addResource(GameConfig, .{
+        .width = 1280,
+        .height = 720,
+        .fullscreen = false,
+    });
+    _ = try source_manager.addResource(Score, .{ .value = 12 });
+
+    var score_snapshot = try serialize.ResourceSnapshot.fromManager(allocator, &source_manager, Score);
+    defer score_snapshot.deinit(allocator);
+
+    var target_manager = try ecs.Manager.init(allocator);
+    defer target_manager.deinit();
+
+    _ = try target_manager.addResource(GameConfig, .{
+        .width = 1,
+        .height = 1,
+        .fullscreen = true,
+    });
+
+    try testing.expectError(error.ResourceNotFound, score_snapshot.toManager(&target_manager));
+}
+
+test "ResourceSnapshot - fromManager requires existing resources" {
+    const allocator = testing.allocator;
+
+    var manager = try ecs.Manager.init(allocator);
+    defer manager.deinit();
+
+    _ = try manager.addResource(GameConfig, .{
+        .width = 640,
+        .height = 480,
+        .fullscreen = false,
+    });
+
+    try testing.expectError(error.ResourceNotFound, serialize.ResourceSnapshot.fromManager(allocator, &manager, Score));
 }
 
 test "EntityInstance - with references (fromEntityWithReferences)" {

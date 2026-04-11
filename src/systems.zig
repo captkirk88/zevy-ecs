@@ -132,6 +132,9 @@ pub fn System(comptime ReturnType: type) type {
         run: *const fn (*ecs_mod.Manager, ?*anyopaque) anyerror!ReturnType,
         /// Opaque pointer to static metadata/context for argument construction
         ctx: ?*anyopaque,
+        /// Stable hash computed from type names; used by cacheSystem for deduplication.
+        /// Compatible with createSystemCached for no-args systems.
+        hash: u64,
         /// Debug information about the system (only populated in debug builds)
         debug_info: if (is_debug) SystemDebugInfo else void,
 
@@ -151,7 +154,11 @@ pub fn System(comptime ReturnType: type) type {
 
 /// Converts a system function into a System struct for caching and later execution.
 pub inline fn ToSystem(system_fn: anytype, comptime SystemParamsRegistry: type) System(ToSystemReturnType(system_fn)) {
-    return ToSystemWithArgs(system_fn, .{}, SystemParamsRegistry);
+    var s = ToSystemWithArgs(system_fn, .{}, SystemParamsRegistry);
+    // Override hash to match createSystemCached's formula (excludes args type for compatibility)
+    const fn_hash = reflect.typeHash(@TypeOf(system_fn));
+    s.hash = reflect.hashWithSeed(@typeName(SystemParamsRegistry), fn_hash);
+    return s;
 }
 
 /// Context struct to hold both the function pointer and injected arguments
@@ -428,9 +435,16 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
         };
     } else {};
 
+    const system_hash = blk: {
+        const fn_hash = reflect.typeHash(@TypeOf(system_fn));
+        const reg_hash = reflect.hashWithSeed(@typeName(Registry), fn_hash);
+        break :blk reflect.hashWithSeed(@typeName(ArgsType), reg_hash);
+    };
+
     return System(ReturnType){
         .run = makeSystemTrampolineWithArgs(system_fn, ReturnType, Registry, ArgsType),
         .ctx = @ptrCast(static_context.context),
+        .hash = system_hash,
         .debug_info = debug_info,
     };
 }

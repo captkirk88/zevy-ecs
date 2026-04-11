@@ -357,7 +357,7 @@ test "Manager - removeResource" {
     try std.testing.expect(!manager.hasResource(GameConfig));
 }
 
-test "Manager - listResourceTypes" {
+test "Manager - listResourceTypeHashes" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
 
@@ -367,7 +367,7 @@ test "Manager - listResourceTypes" {
     const score: i32 = 1000;
     _ = try manager.addResource(i32, score);
 
-    var types = manager.listResourceTypes(std.testing.allocator);
+    var types = manager.listResourceTypeHashes(std.testing.allocator);
     defer types.deinit(std.testing.allocator);
 
     try std.testing.expect(types.items.len == 3);
