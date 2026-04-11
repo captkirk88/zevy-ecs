@@ -5,20 +5,20 @@
 
     .fingerprint = 0xf22b53cc99fd8256, // Changing this has security and trust implications.
 
-    .minimum_zig_version = "0.16.0-dev.3006+94355f192",
+    .minimum_zig_version = "0.16.0-dev.3142+5ccfeb926",
 
     .dependencies = .{
         .zevy_reflect = .{
-            .url = "git+https://github.com/captkirk88/zevy-reflect#49b435ee2b62a2084d848672eb61f4c78211a43d",
-            .hash = "zevy_reflect-1.1.0-Ob80cDDaAgAcCca73mY7LB5PVcJ8YJEroQ0Ca6pUf3fW",
+            .url = "git+https://github.com/captkirk88/zevy-reflect#05d9d6c5348cf1cc3aec0efd872cdde1aac118c1",
+            .hash = "zevy_reflect-1.1.0-Ob80cDDaAgBRwkJJdhG0tcftiF1T4KlC7veaGutpzdFX",
         },
         .zevy_buildtools = .{
-            .url = "git+https://github.com/captkirk88/zevy-buildtools#a56ce3e3d27020503b1e92587166acdfcfd521c9",
-            .hash = "zevy_buildtools-1.0.0-AG3r_F6RAAAeSEw9OxHJ_nkIvYpfoZY5zAOyMEqM_Yvp",
+            .url = "git+https://github.com/captkirk88/zevy-buildtools#73dbb1c11d076af3934e9c4339ad2a4f4265b19e",
+            .hash = "zevy_buildtools-1.1.0-AG3r_P2QAACstZJiOpk_0yn08wbEDVk_Aoi4Fc9dHKoS",
         },
         .zevy_mem = .{
-            .url = "git+https://github.com/captkirk88/zevy-mem#1f9e5ec6af90148dcc218d24ca7cd2615178b0b7",
-            .hash = "zevy_mem-1.1.0-jK9L0Qg7AwBuDocGllXc0w8pgrJWV2DKAh659ViP5flb",
+            .url = "git+https://github.com/captkirk88/zevy-mem#113630e4ea473a541d0e7cb70e73554b5a3929d0",
+            .hash = "zevy_mem-1.1.0-jK9L0Qg7AwAZV-PlG3Cd2nKhUdfBLj45Agssn2CaX1_y",
         },
     },
 
