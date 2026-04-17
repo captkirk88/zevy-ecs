@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) !void {
         .{ .name = "zevy_reflect", .module = reflect_mod },
         .{ .name = "zevy_mem", .module = mem_mod },
         .{ .name = "benchmark", .module = benchmark_mod },
-    }, target, optimize);
+    }, target, .ReleaseFast);
     _ = examples;
 
     try buildtools.fmt.addFmtStep(b, false);
