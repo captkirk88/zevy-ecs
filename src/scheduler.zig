@@ -499,7 +499,7 @@ pub const Scheduler = struct {
         comptime ParamRegistry: type,
     ) error{OutOfMemory}!void {
         if (!ecs.hasResource(events.EventStore(T))) {
-            _ = ecs.addResource(events.EventStore(T), try events.EventStore(T).init(ecs.allocator, 10)) catch |err| switch (err) {
+            ecs.addResourceRetained(events.EventStore(T), try events.EventStore(T).init(ecs.allocator, 10)) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 error.ResourceAlreadyExists => std.debug.panic("Resource already exists when adding EventStore for newly registered event type: {s}", .{@typeName(T)}),
             };
@@ -549,7 +549,7 @@ pub const Scheduler = struct {
 
         // Automatically add StateManager resource for this state type
         const state_mgr = self.getStateManager(ecs, StateEnum);
-        _ = try ecs.addResource(state_mod.StateManager(StateEnum), state_mgr);
+        try ecs.addResourceRetained(state_mod.StateManager(StateEnum), state_mgr);
     }
 
     /// Check if a specific state value is currently active
@@ -924,7 +924,7 @@ test "Scheduler assign outside scope" {
 
     // Add a custom stage and a system to it
     const custom_stage = StageId.init(150_000); // Between First (100,000) and PreUpdate (200,000)
-    _ = try ecs.addResource(bool, false);
+    try ecs.addResourceRetained(bool, false);
     try scheduler.addStage(custom_stage);
     const test_system = struct {
         pub fn run(out: params.ResMut(bool)) void {
@@ -960,10 +960,10 @@ test "Scheduler runStages executes custom stages in sorted order" {
     const MiddleMarker = struct {};
     const LateMarker = struct {};
 
-    _ = try ecs.addResource(ExecutionTrace, .{});
-    _ = try ecs.addResource(EarlyMarker, .{});
-    _ = try ecs.addResource(MiddleMarker, .{});
-    _ = try ecs.addResource(LateMarker, .{});
+    try ecs.addResourceRetained(ExecutionTrace, .{});
+    try ecs.addResourceRetained(EarlyMarker, .{});
+    try ecs.addResourceRetained(MiddleMarker, .{});
+    try ecs.addResourceRetained(LateMarker, .{});
 
     const early_stage = StageId.init(150_000);
     const middle_stage = StageId.init(250_000);
@@ -1022,7 +1022,7 @@ test "Scheduler discards handled component events in Last stage" {
     const AddedCount = struct { value: usize };
 
     const entity = ecs.createEmpty();
-    _ = try ecs.addResource(AddedCount, .{ .value = 0 });
+    try ecs.addResourceRetained(AddedCount, .{ .value = 0 });
 
     const add_tag = struct {
         fn run(ent: ecs_mod.Entity, cmds: commands_mod.Commands) void {
@@ -1200,8 +1200,8 @@ test "Concurrent stage: two independent systems both run" {
     const AValue = struct { v: u32 };
     const BValue = struct { v: u32 };
 
-    _ = try ecs.addResource(AValue, .{ .v = 0 });
-    _ = try ecs.addResource(BValue, .{ .v = 0 });
+    try ecs.addResourceRetained(AValue, .{ .v = 0 });
+    try ecs.addResourceRetained(BValue, .{ .v = 0 });
 
     const sysA = struct {
         fn run(res: params.ResMut(AValue)) void {
@@ -1249,9 +1249,9 @@ test "chain(): systems within a chain run in order" {
     const A = struct { v: u32 };
     const B = struct { v: u32 };
     const C = struct { v: u32 };
-    _ = try ecs.addResource(A, .{ .v = 0 });
-    _ = try ecs.addResource(B, .{ .v = 0 });
-    _ = try ecs.addResource(C, .{ .v = 0 });
+    try ecs.addResourceRetained(A, .{ .v = 0 });
+    try ecs.addResourceRetained(B, .{ .v = 0 });
+    try ecs.addResourceRetained(C, .{ .v = 0 });
 
     // sys1 → A.v = 1
     // sys2 reads A.v, writes B.v = A.v + 10  (proves sys2 runs after sys1)

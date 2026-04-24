@@ -111,17 +111,17 @@ pub fn EventStore(comptime T: type) type {
         }
 
         /// Check if the store is empty
-        pub fn isEmpty(self: *Self) bool {
+        pub fn isEmpty(self: *const Self) bool {
             return self.len == 0;
         }
 
         /// Get the number of events currently stored
-        pub fn count(self: *Self) usize {
+        pub fn count(self: *const Self) usize {
             return self.len;
         }
 
         /// Get the current capacity
-        pub fn getCapacity(self: *Self) usize {
+        pub fn getCapacity(self: *const Self) usize {
             return self.capacity;
         }
 

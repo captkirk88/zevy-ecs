@@ -191,7 +191,7 @@ test "merged SystemParamRegistry" {
 
     // Test that we can apply a default registry param
     const value: f32 = 42.0;
-    _ = try ecs_instance.addResource(f32, value);
+    try ecs_instance.addResourceRetained(f32, value);
     var res = try merge.apply(&ecs_instance, params.Res(f32));
     defer params.ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), params.Res(f32));
     try std.testing.expect(res.get().* == 42.0);
@@ -222,7 +222,7 @@ test "CustomSystemParam with Query, Res, Local fields" {
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
     const res_val: i32 = 7;
-    _ = try ecs_instance.addResource(i32, res_val);
+    try ecs_instance.addResourceRetained(i32, res_val);
 
     const TestComponentA = struct { a: i32 };
     const TestComponentB = struct { b: u32 };

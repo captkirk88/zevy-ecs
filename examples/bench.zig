@@ -804,7 +804,7 @@ fn defaultBenchResource(comptime T: type) T {
 fn addBenchResources(manager: *Manager, comptime count: usize) void {
     inline for (0..count) |i| {
         const T = BenchResources[i];
-        _ = manager.addResource(T, defaultBenchResource(T)) catch {};
+        manager.addResourceRetained(T, defaultBenchResource(T)) catch {};
     }
 }
 

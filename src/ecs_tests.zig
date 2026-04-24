@@ -283,7 +283,7 @@ test "Manager - addResource" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 5, .max_players = 10 };
-    _ = try manager.addResource(GameConfig, config);
+    try manager.addResourceRetained(GameConfig, config);
 
     var res_ref = manager.getResource(GameConfig).?;
     defer res_ref.deinit();
@@ -298,7 +298,7 @@ test "Manager - addResource duplicate fails" {
     defer manager.deinit();
 
     const config1 = GameConfig{ .difficulty = 5, .max_players = 10 };
-    _ = try manager.addResource(GameConfig, config1);
+    try manager.addResourceRetained(GameConfig, config1);
 
     const config2 = GameConfig{ .difficulty = 8, .max_players = 20 };
     const result = manager.addResource(GameConfig, config2);
@@ -310,7 +310,7 @@ test "Manager - getResource returns resource" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 7, .max_players = 15 };
-    _ = try manager.addResource(GameConfig, config);
+    try manager.addResourceRetained(GameConfig, config);
 
     const retrieved = manager.getResource(GameConfig);
     try std.testing.expect(retrieved != null);
@@ -338,7 +338,7 @@ test "Manager - hasResource" {
     try std.testing.expect(!manager.hasResource(GameConfig));
 
     const config = GameConfig{ .difficulty = 3, .max_players = 5 };
-    _ = try manager.addResource(GameConfig, config);
+    try manager.addResourceRetained(GameConfig, config);
 
     try std.testing.expect(manager.hasResource(GameConfig));
 }
@@ -348,7 +348,7 @@ test "Manager - removeResource" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 4, .max_players = 8 };
-    _ = try manager.addResource(GameConfig, config);
+    try manager.addResourceRetained(GameConfig, config);
 
     try std.testing.expect(manager.hasResource(GameConfig));
 
@@ -362,10 +362,10 @@ test "Manager - listResourceTypeHashes" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 1, .max_players = 4 };
-    _ = try manager.addResource(GameConfig, config);
+    try manager.addResourceRetained(GameConfig, config);
 
     const score: i32 = 1000;
-    _ = try manager.addResource(i32, score);
+    try manager.addResourceRetained(i32, score);
 
     var types = manager.listResourceTypeHashes(std.testing.allocator);
     defer types.deinit(std.testing.allocator);
@@ -473,7 +473,7 @@ test "Manager - resource mutation through pointer" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 1, .max_players = 2 };
-    _ = try manager.addResource(GameConfig, config);
+    try manager.addResourceRetained(GameConfig, config);
 
     // Mutate through write guard
     var res_ref = manager.getResource(GameConfig).?;

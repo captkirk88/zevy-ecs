@@ -151,7 +151,7 @@ pub const CommandsInner = opaque {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
-                _ = try mgr.addResource(T, d.value);
+                try mgr.addResourceRetained(T, d.value);
             }
         }.execute, null);
     }

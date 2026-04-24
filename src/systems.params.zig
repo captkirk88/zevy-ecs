@@ -245,7 +245,7 @@ const EventReaderSystemParamImpl = struct {
         const EventType = BaseType(ParamType).EventType;
         var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
             const store = try events.EventStore(EventType).init(e.allocator, 16);
-            _ = try e.addResource(events.EventStore(EventType), store);
+            try e.addResourceRetained(events.EventStore(EventType), store);
             break :blk e.getResource(events.EventStore(EventType)) orelse return error.ResourceNotFound;
         };
         const guard = ref.lockWrite();
@@ -302,7 +302,7 @@ const EventWriterSystemParamImpl = struct {
         const EventType = BaseType(ParamType).EventType;
         var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
             const store = try events.EventStore(EventType).init(e.allocator, 16);
-            _ = try e.addResource(events.EventStore(EventType), store);
+            try e.addResourceRetained(events.EventStore(EventType), store);
             break :blk e.getResource(events.EventStore(EventType)) orelse return error.ResourceNotFound;
         };
         const guard = ref.lockWrite();
@@ -693,7 +693,7 @@ const RelationsSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         if (e.hasResource(relations_mod.RelationManager) == false) {
             const rel_mgr = relations_mod.RelationManager.init(e.allocator);
-            _ = try e.addResource(relations_mod.RelationManager, rel_mgr);
+            try e.addResourceRetained(relations_mod.RelationManager, rel_mgr);
         }
         const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
         const guard = ref.lockWrite();
@@ -852,7 +852,7 @@ test "ResourceSystemParam basic" {
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
     const value: i32 = 42;
-    _ = try ecs_instance.addResource(i32, value);
+    try ecs_instance.addResourceRetained(i32, value);
     const res = try ResourceSystemParam.apply(&ecs_instance, Res(i32));
     defer ResourceSystemParam.deinit(&ecs_instance, @ptrCast(res), Res(i32));
     try std.testing.expect(res.get().* == 42);
@@ -862,7 +862,7 @@ test "ResourceMutSystemParam basic" {
     const allocator = std.testing.allocator;
     var ecs_instance = try ecs.Manager.init(allocator);
     defer ecs_instance.deinit();
-    _ = try ecs_instance.addResource(i32, 1);
+    try ecs_instance.addResourceRetained(i32, 1);
 
     {
         const res = try ResourceMutSystemParam.apply(&ecs_instance, ResMut(i32));

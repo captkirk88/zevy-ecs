@@ -477,12 +477,12 @@ test "ResourceSnapshot - fromManager and toManager" {
     var source_manager = try ecs.Manager.init(allocator);
     defer source_manager.deinit();
 
-    _ = try source_manager.addResource(GameConfig, .{
+    try source_manager.addResourceRetained(GameConfig, .{
         .width = 1920,
         .height = 1080,
         .fullscreen = true,
     });
-    _ = try source_manager.addResource(Score, .{ .value = 99 });
+    try source_manager.addResourceRetained(Score, .{ .value = 99 });
 
     var config_snapshot = try serialize.ResourceSnapshot.fromManager(allocator, &source_manager, GameConfig);
     defer config_snapshot.deinit(allocator);
@@ -509,12 +509,12 @@ test "ResourceSnapshot - fromManager and toManager" {
     var target_manager = try ecs.Manager.init(allocator);
     defer target_manager.deinit();
 
-    _ = try target_manager.addResource(GameConfig, .{
+    try target_manager.addResourceRetained(GameConfig, .{
         .width = 800,
         .height = 600,
         .fullscreen = false,
     });
-    _ = try target_manager.addResource(Score, .{ .value = 0 });
+    try target_manager.addResourceRetained(Score, .{ .value = 0 });
 
     try restored_config.toManager(&target_manager);
     try restored_score.toManager(&target_manager);
@@ -540,12 +540,12 @@ test "ResourceSnapshot - toManager requires existing resources" {
     var source_manager = try ecs.Manager.init(allocator);
     defer source_manager.deinit();
 
-    _ = try source_manager.addResource(GameConfig, .{
+    try source_manager.addResourceRetained(GameConfig, .{
         .width = 1280,
         .height = 720,
         .fullscreen = false,
     });
-    _ = try source_manager.addResource(Score, .{ .value = 12 });
+    try source_manager.addResourceRetained(Score, .{ .value = 12 });
 
     var score_snapshot = try serialize.ResourceSnapshot.fromManager(allocator, &source_manager, Score);
     defer score_snapshot.deinit(allocator);
@@ -553,7 +553,7 @@ test "ResourceSnapshot - toManager requires existing resources" {
     var target_manager = try ecs.Manager.init(allocator);
     defer target_manager.deinit();
 
-    _ = try target_manager.addResource(GameConfig, .{
+    try target_manager.addResourceRetained(GameConfig, .{
         .width = 1,
         .height = 1,
         .fullscreen = true,
@@ -568,7 +568,7 @@ test "ResourceSnapshot - fromManager requires existing resources" {
     var manager = try ecs.Manager.init(allocator);
     defer manager.deinit();
 
-    _ = try manager.addResource(GameConfig, .{
+    try manager.addResourceRetained(GameConfig, .{
         .width = 640,
         .height = 480,
         .fullscreen = false,

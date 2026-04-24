@@ -11,6 +11,7 @@ const events = @import("events.zig");
 const relations = @import("relations.zig");
 const hash = std.hash;
 const sys = @import("systems.zig");
+const scheduler_mod = @import("scheduler.zig");
 const params = @import("systems.params.zig");
 const registry = @import("systems.registry.zig");
 const command_buffer = @import("command_buffer.zig");
@@ -131,6 +132,7 @@ pub const Manager = struct {
         for (self.queued_commands.items) |*buffer| buffer.deinit(self.allocator);
         self.queued_commands.deinit(self.allocator);
         self.world.deinit();
+        self.relations.deinit();
         var res_guard = self.resources.lock();
         var res_it = res_guard.get().valueIterator();
         while (res_it.next()) |entry| {
@@ -452,6 +454,8 @@ pub const Manager = struct {
             }
         }.read;
 
+        const manager_ref = arc_ptr.clone();
+
         try self.resource_codecs.put(type_hash, .{
             .size = type_size,
             .write_bytes_fn = write_bytes_fn,
@@ -460,7 +464,7 @@ pub const Manager = struct {
 
         return .{
             .entry = .init(
-                @ptrCast(@alignCast(arc_ptr)),
+                @ptrCast(@alignCast(manager_ref)),
                 type_hash,
                 type_size,
                 deinit_fn,
@@ -479,6 +483,13 @@ pub const Manager = struct {
         const resource = try self.initResourceEntry(T, value);
         result.value_ptr.* = resource.entry;
         return resource.reference;
+    }
+
+    /// Add a resource and immediately release the caller's temporary Ref.
+    /// Use this when the caller only needs the Manager-owned resource.
+    pub fn addResourceRetained(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!void {
+        const ref = try self.addResource(T, value);
+        ref.deinit();
     }
 
     /// Get a reference-counted handle to a resource of type T, or null if it doesn't exist.
@@ -875,7 +886,7 @@ test "removeSystem removes cached system" {
 
     // Create a test resource to verify system execution
     const TestCounter = struct { count: u32 };
-    _ = try ecs.addResource(TestCounter, .{ .count = 0 });
+    try ecs.addResourceRetained(TestCounter, .{ .count = 0 });
 
     // Define a test system that increments the counter
     const test_system = struct {
@@ -912,7 +923,7 @@ test "removeSystem with same function cached twice returns same handle" {
     defer ecs.deinit();
 
     const TestCounter = struct { count: u32 };
-    _ = try ecs.addResource(TestCounter, .{ .count = 0 });
+    try ecs.addResourceRetained(TestCounter, .{ .count = 0 });
 
     const test_system = struct {
         pub fn run(_: *Manager, res: params.ResMut(TestCounter)) void {
@@ -1046,9 +1057,67 @@ test "getOrAddResource" {
         value: u32,
     };
 
-    _ = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }, null) catch unreachable;
+    const res = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }, null) catch unreachable;
+    res.deinit();
 
     try std.testing.expect(ecs.hasResource(MyResource));
+}
+
+test "addResource keeps manager-owned reference" {
+    var ecs = try Manager.init(std.testing.allocator);
+    defer ecs.deinit();
+
+    const res = try ecs.addResource(u32, 42);
+    try std.testing.expectEqual(@as(usize, 2), res.strongCount());
+    res.deinit();
+
+    const again = ecs.getResource(u32) orelse return error.ResourceNotFound;
+    defer again.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), again.strongCount());
+    var guard = again.lockRead();
+    defer guard.deinit();
+    try std.testing.expectEqual(@as(u32, 42), guard.get().*);
+}
+
+test "Scheduler resource survives repeated access" {
+    var ecs = try Manager.init(std.testing.allocator);
+    defer ecs.deinit();
+
+    const TestEvent = struct { value: u32 };
+    const Counter = struct { value: u32 };
+
+    const first = try ecs.getOrAddResource(scheduler_mod.Scheduler, try scheduler_mod.Scheduler.init(std.testing.allocator), null);
+    {
+        var first_guard = first.lockWrite();
+        defer first_guard.deinit();
+        try first_guard.get().registerEvent(&ecs, TestEvent, registry.DefaultParamRegistry);
+    }
+    first.deinit();
+
+    try ecs.addResourceRetained(Counter, .{ .value = 0 });
+
+    const second = ecs.getResource(scheduler_mod.Scheduler) orelse return error.ResourceNotFound;
+    defer second.deinit();
+
+    const increment = struct {
+        fn run(counter: params.ResMut(Counter)) void {
+            counter.get().value += 1;
+        }
+    }.run;
+
+    {
+        var second_guard = second.lockWrite();
+        defer second_guard.deinit();
+        second_guard.get().addSystem(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update), increment, registry.DefaultParamRegistry);
+        try second_guard.get().runStage(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update));
+    }
+
+    const counter_ref = ecs.getResource(Counter) orelse return error.ResourceNotFound;
+    defer counter_ref.deinit();
+    var counter_guard = counter_ref.lockRead();
+    defer counter_guard.deinit();
+    try std.testing.expectEqual(@as(u32, 1), counter_guard.get().value);
 }
 
 // Stress test to try to surface migration/invariant issues

@@ -247,10 +247,10 @@ test "OnEnter and OnExit systems" {
     const PlayingEntered = struct { value: bool };
     const PlayingExited = struct { value: bool };
 
-    _ = try ecs.addResource(MenuEntered, .{ .value = false });
-    _ = try ecs.addResource(MenuExited, .{ .value = false });
-    _ = try ecs.addResource(PlayingEntered, .{ .value = false });
-    _ = try ecs.addResource(PlayingExited, .{ .value = false });
+    try ecs.addResourceRetained(MenuEntered, .{ .value = false });
+    try ecs.addResourceRetained(MenuExited, .{ .value = false });
+    try ecs.addResourceRetained(PlayingEntered, .{ .value = false });
+    try ecs.addResourceRetained(PlayingExited, .{ .value = false });
 
     const get_flag = struct {
         fn value(manager: *ecs_mod.Manager, comptime T: type) bool {
@@ -372,9 +372,9 @@ test "InState systems" {
     const PlayingSystemRan = struct { value: bool };
     const PausedSystemRan = struct { value: bool };
 
-    _ = try ecs.addResource(MenuSystemRan, .{ .value = false });
-    _ = try ecs.addResource(PlayingSystemRan, .{ .value = false });
-    _ = try ecs.addResource(PausedSystemRan, .{ .value = false });
+    try ecs.addResourceRetained(MenuSystemRan, .{ .value = false });
+    try ecs.addResourceRetained(PlayingSystemRan, .{ .value = false });
+    try ecs.addResourceRetained(PausedSystemRan, .{ .value = false });
 
     const get_flag = struct {
         fn value(manager: *ecs_mod.Manager, comptime T: type) bool {

@@ -212,7 +212,7 @@ test "System - with resource parameter" {
     defer manager.deinit();
 
     const dt = DeltaTime{ .value = 0.016 };
-    _ = try manager.addResource(DeltaTime, dt);
+    try manager.addResourceRetained(DeltaTime, dt);
 
     const system = ToSystem(resourceSystem, DefaultRegistry);
     _ = try system.run(&manager, system.ctx);
@@ -261,7 +261,7 @@ test "System - with multiple parameters" {
     defer manager.deinit();
 
     const dt = DeltaTime{ .value = 0.016 };
-    _ = try manager.addResource(DeltaTime, dt);
+    try manager.addResourceRetained(DeltaTime, dt);
 
     for (0..3) |i| {
         const pos = Position{ .x = @floatFromInt(i), .y = 0.0 };
@@ -356,7 +356,7 @@ test "System - chain runs systems sequentially" {
     defer manager.deinit();
 
     const counter = ChainCounter{ .value = 2 };
-    _ = try manager.addResource(ChainCounter, counter);
+    try manager.addResourceRetained(ChainCounter, counter);
 
     const ChainSystems: [2]fn (res: ResMut(ChainCounter)) void = .{ chainIncrementCounter, chainMultiplyCounter };
     const chained = systems.chain(ChainSystems, DefaultRegistry);
@@ -374,7 +374,7 @@ test "System - resource mutation" {
     defer manager.deinit();
 
     const dt = DeltaTime{ .value = 1.0 };
-    _ = try manager.addResource(DeltaTime, dt);
+    try manager.addResourceRetained(DeltaTime, dt);
 
     const sys1 = ToSystem(mutateRes, DefaultRegistry);
     const sys2 = ToSystem(checkRes, DefaultRegistry);
@@ -589,7 +589,7 @@ test "SystemDebugInfo contains parameter information" {
 
     // Setup resources and entities for the system
     const dt = DeltaTime{ .value = 0.016 };
-    _ = try manager.addResource(DeltaTime, dt);
+    try manager.addResourceRetained(DeltaTime, dt);
 
     // Create entities for Query and Single to work
     const pos_entity = manager.create(.{Position{ .x = 1.0, .y = 2.0 }});

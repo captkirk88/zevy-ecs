@@ -416,20 +416,30 @@ const GameConfig = struct {
     fps: u32,
 };
 
-// Add resource, returns pointer to resource
+// Add resource, returns a Ref that must be deinited when you're done with it
 var config = try manager.addResource(GameConfig, .{
     .width = 1920,
     .height = 1080,
     .fps = 60,
 });
+defer config.deinit();
 
 // Modify resource
-config.fps = 120;
+var config_guard = config.lockWrite();
+defer config_guard.deinit();
+config_guard.get().fps = 120;
 
 // Get resource
 if (manager.getResource(GameConfig)) |cfg| {
-    std.debug.print("FPS: {d}\n", .{cfg.fps});
+    defer cfg.deinit();
+    var cfg_guard = cfg.lockRead();
+    defer cfg_guard.deinit();
+    std.debug.print("FPS: {d}\n", .{cfg_guard.get().fps});
 }
+
+// If you only want the Manager-owned resource and do not need the Ref,
+// use addResourceRetained(...).
+try manager.addResourceRetained(FrameCounter, .{ .value = 0 });
 
 // Check if resource exists
 const has_config = manager.hasResource(GameConfig);
