@@ -1028,6 +1028,8 @@ while (i < count) : (i += 1) {
 
 The plugin system provides a modular way to organize and initialize features in your application. Plugins can register systems, resources, and perform setup tasks in a reusable manner.
 
+If you want plugin interface validation errors to report the registration site, use `plugin_manager.addAt(PluginType, plugin, @src())` or `plugin_manager.addBundleAt(BundleType, bundle, @src())`.
+
 #### Basic Plugin Usage
 
 ```zig

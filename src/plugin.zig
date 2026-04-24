@@ -132,6 +132,31 @@ pub const PluginManager = struct {
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
+        try self.addInternal(PluginType, plugin, null);
+    }
+
+    /// Add a plugin instance to the manager and include the registration site in interface diagnostics.
+    pub fn addAt(
+        self: *PluginManager,
+        comptime PluginType: type,
+        plugin: PluginType,
+        comptime validation_site: std.builtin.SourceLocation,
+    ) error{
+        OutOfMemory,
+        PluginAlreadyExists,
+    }!void {
+        try self.addInternal(PluginType, plugin, validation_site);
+    }
+
+    fn addInternal(
+        self: *PluginManager,
+        comptime PluginType: type,
+        plugin: PluginType,
+        comptime validation_site: ?std.builtin.SourceLocation,
+    ) error{
+        OutOfMemory,
+        PluginAlreadyExists,
+    }!void {
         const type_info = reflect.getReflectInfo(PluginType).type;
         const key_hash = type_info.hash;
         // Check if plugin already exists
@@ -139,7 +164,11 @@ pub const PluginManager = struct {
             return error.PluginAlreadyExists;
         }
 
-        PluginTemplate.validate(PluginType);
+        if (validation_site) |site| {
+            PluginTemplate.validateAt(PluginType, site);
+        } else {
+            PluginTemplate.validate(PluginType);
+        }
         var interface: Plugin = undefined;
         const plugin_inst = try self.allocator.create(PluginType);
         plugin_inst.* = plugin;
@@ -167,6 +196,31 @@ pub const PluginManager = struct {
         OutOfMemory,
         PluginAlreadyExists,
     }!void {
+        try self.addBundleInternal(BundleType, bundle, null);
+    }
+
+    /// Add a bundle of plugins defined as fields in a struct and include the registration site in interface diagnostics.
+    pub fn addBundleAt(
+        self: *PluginManager,
+        comptime BundleType: type,
+        bundle: BundleType,
+        comptime validation_site: std.builtin.SourceLocation,
+    ) error{
+        OutOfMemory,
+        PluginAlreadyExists,
+    }!void {
+        try self.addBundleInternal(BundleType, bundle, validation_site);
+    }
+
+    fn addBundleInternal(
+        self: *PluginManager,
+        comptime BundleType: type,
+        bundle: BundleType,
+        comptime validation_site: ?std.builtin.SourceLocation,
+    ) error{
+        OutOfMemory,
+        PluginAlreadyExists,
+    }!void {
         const info = reflect.getReflectInfo(BundleType).type;
         if (info.category != .Struct) {
             @compileError("Plugin bundle must be a struct");
@@ -175,7 +229,11 @@ pub const PluginManager = struct {
         inline for (info.fields) |field_info| {
             const FieldType = field_info.type.type;
             const field_value = field_info.get(@constCast(&bundle));
-            try self.add(FieldType, field_value);
+            if (validation_site) |site| {
+                try self.addAt(FieldType, field_value, site);
+            } else {
+                try self.add(FieldType, field_value);
+            }
         }
     }
 
@@ -300,6 +358,42 @@ test "PluginManager add single plugin" {
     var res_guard = res_ref.lockRead();
     defer res_guard.deinit();
     try std.testing.expectEqual(@as(i32, 42), res_guard.get().*);
+}
+
+test "PluginManager addAt single plugin" {
+    const TestPlugin = struct {
+        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
+            _ = try manager.addResource(i32, 123);
+        }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
+            _ = self;
+            _ = allocator;
+            _ = e;
+        }
+    };
+
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    var plugin_manager = PluginManager.init(std.testing.allocator);
+    defer {
+        if (plugin_manager.deinit(&manager)) |errors| {
+            for (errors) |error_entry| {
+                std.debug.print(
+                    "Error deinitializing plugin '{s}': {s}\n",
+                    .{ error_entry.plugin, @errorName(error_entry.err) },
+                );
+            }
+        }
+    }
+
+    try plugin_manager.addAt(TestPlugin, .{}, @src());
+    try plugin_manager.build(&manager);
+    var res_ref = manager.getResource(i32).?;
+    defer res_ref.deinit();
+    var res_guard = res_ref.lockRead();
+    defer res_guard.deinit();
+    try std.testing.expectEqual(@as(i32, 123), res_guard.get().*);
 }
 
 test "PluginManager add multiple plugins" {
