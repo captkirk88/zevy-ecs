@@ -27,6 +27,11 @@ pub const runIf = sys.runIf;
 pub const chain = scheduler.chain;
 pub const With = qry.With;
 pub const Without = qry.Without;
+pub const QueryContext = qry.QueryContext;
+
+// Error handling
+/// ErrorGroup type for aggregating multiple errors into one
+pub const ErrorGroup = scheduler.ErrorGroup;
 
 // System parameter types
 /// Default system parameter registry including Query, Res, Local, EventReader, and EventWriter

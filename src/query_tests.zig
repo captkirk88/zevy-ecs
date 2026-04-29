@@ -730,3 +730,279 @@ test "Query - hasNext" {
 
     try std.testing.expect(count == 3);
 }
+
+// --- Custom query filter type tests ---
+
+/// A custom filter: only match entities that have Health.
+const HasHealth = struct {
+    pub const QueryFilter = With(Health);
+};
+
+/// A custom filter: only match entities without Armor.
+const NoArmor = struct {
+    pub const QueryFilter = Without(Armor);
+};
+
+/// A custom filter combining multiple With/Without via a tuple payload.
+const RequiresPhysics = struct {
+    pub const QueryFilter = With(.{ Position, Velocity });
+};
+
+/// A custom filter using a struct to express multiple constraints.
+const ActiveUnit = struct {
+    pub const QueryFilter = struct {
+        requires_health: With(Health),
+        no_armor: Without(Armor),
+    };
+};
+
+test "Query - custom filter type with With(T)" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Entities with Position + Health
+    for (0..4) |i| {
+        _ = manager.create(.{ Position{ .x = @floatFromInt(i), .y = 0.0 }, Health{ .value = 100 } });
+    }
+    // Entities with Position only (no Health)
+    for (0..3) |_| {
+        _ = manager.create(.{Position{ .x = 99.0, .y = 0.0 }});
+    }
+
+    var q = manager.query(struct {
+        pos: Position,
+        filter: HasHealth,
+    });
+    defer q.deinit();
+    comptime {
+        if (@hasField(@TypeOf(q).IncludeTypesTupleType, "filter")) {
+            @compileError("Custom filter types must not appear in query results.");
+        }
+    }
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expect(item.pos.x < 99.0);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 4), count);
+}
+
+test "Query - custom filter type with Without(T)" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Entities with Position + Health
+    for (0..5) |_| {
+        _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Health{ .value = 100 } });
+    }
+    // Entities with Position + Health + Armor
+    for (0..3) |_| {
+        _ = manager.create(.{ Position{ .x = 2.0, .y = 0.0 }, Health{ .value = 100 }, Armor{ .defense = 10 } });
+    }
+
+    var q = manager.query(struct {
+        pos: Position,
+        filter: NoArmor,
+    });
+    defer q.deinit();
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expect(item.pos.x == 1.0);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 5), count);
+}
+
+test "Query - custom filter with tuple payload (multiple requires)" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Position + Velocity
+    for (0..3) |_| {
+        _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Velocity{ .dx = 1.0, .dy = 0.0 } });
+    }
+    // Position only
+    for (0..4) |_| {
+        _ = manager.create(.{Position{ .x = 2.0, .y = 0.0 }});
+    }
+
+    var q = manager.query(struct {
+        physics: RequiresPhysics,
+        health: ?Health,
+    });
+    defer q.deinit();
+    var count: usize = 0;
+    while (q.next()) |_| {
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), count);
+}
+
+test "Query - custom filter with struct return (multiple constraints)" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Position + Health (matches: has Health, no Armor)
+    for (0..4) |_| {
+        _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Health{ .value = 50 } });
+    }
+    // Position + Health + Armor (excluded: has Armor)
+    for (0..2) |_| {
+        _ = manager.create(.{ Position{ .x = 2.0, .y = 0.0 }, Health{ .value = 50 }, Armor{ .defense = 5 } });
+    }
+    // Position only (excluded: no Health)
+    for (0..3) |_| {
+        _ = manager.create(.{Position{ .x = 3.0, .y = 0.0 }});
+    }
+
+    var q = manager.query(struct {
+        pos: Position,
+        unit: ActiveUnit,
+    });
+    defer q.deinit();
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expect(item.pos.x == 1.0);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 4), count);
+}
+
+test "Query - multiple custom filters combined" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Position + Velocity + Health (matches all filters)
+    for (0..3) |_| {
+        _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Velocity{ .dx = 1.0, .dy = 0.0 }, Health{ .value = 100 } });
+    }
+    // Position + Velocity (missing Health)
+    for (0..2) |_| {
+        _ = manager.create(.{ Position{ .x = 2.0, .y = 0.0 }, Velocity{ .dx = 1.0, .dy = 0.0 } });
+    }
+    // Position + Velocity + Health + Armor (has Armor, filtered out)
+    for (0..2) |_| {
+        _ = manager.create(.{ Position{ .x = 3.0, .y = 0.0 }, Velocity{ .dx = 1.0, .dy = 0.0 }, Health{ .value = 100 }, Armor{ .defense = 5 } });
+    }
+
+    // pos: Position is omitted here because RequiresPhysics already adds a require-Position
+    // constraint via QueryFilter = With(.{Position, Velocity}).  Using Entity instead
+    // avoids a duplicate-constraint compile error while still exercising multiple custom filters.
+    var q = manager.query(struct {
+        ent: Entity,
+        physics: RequiresPhysics,
+        alive: HasHealth,
+        unarmored: NoArmor,
+    });
+    defer q.deinit();
+    var count: usize = 0;
+    while (q.next()) |_| {
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), count);
+}
+
+test "Query - custom filter combined with explicit With/Without" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Position + Health + Team (matches)
+    for (0..3) |_| {
+        _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Health{ .value = 100 }, Team{ .id = 1 } });
+    }
+    // Position + Health (no Team, excluded)
+    for (0..4) |_| {
+        _ = manager.create(.{ Position{ .x = 2.0, .y = 0.0 }, Health{ .value = 100 } });
+    }
+    // Position + Health + Team + Armor (has Armor, excluded by NoArmor)
+    for (0..2) |_| {
+        _ = manager.create(.{ Position{ .x = 3.0, .y = 0.0 }, Health{ .value = 100 }, Team{ .id = 1 }, Armor{ .defense = 5 } });
+    }
+
+    var q = manager.query(struct {
+        pos: Position,
+        alive: HasHealth,
+        has_team: With(Team),
+        no_armor: Without(Armor),
+    });
+    defer q.deinit();
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expect(item.pos.x == 1.0);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), count);
+}
+
+// --- Custom query types with QueryResultType + query ---
+
+/// A result-only custom type: yields the current entity from fetch context.
+/// No QueryFilter — no constraints, just contributes a result field.
+const CurrentEntity = struct {
+    pub const QueryResultType = Entity;
+    pub fn query(ctx: query_mod.QueryContext) Entity {
+        return ctx.entity;
+    }
+};
+
+/// A custom type that adds a constraint (require Health) AND contributes a result field
+/// (the health value by copy), so it acts as both a filter and a fetcher.
+const HealthValue = struct {
+    pub const QueryFilter = With(Health);
+    pub const QueryResultType = i32;
+    pub fn query(ctx: query_mod.QueryContext) i32 {
+        return ctx.get(Health).value;
+    }
+};
+
+test "Query - custom type with QueryResultType only (no QueryFilter)" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const e1 = manager.create(.{Position{ .x = 1.0, .y = 0.0 }});
+    const e2 = manager.create(.{Position{ .x = 2.0, .y = 0.0 }});
+    const e3 = manager.create(.{Position{ .x = 3.0, .y = 0.0 }});
+
+    var q = manager.query(struct {
+        pos: Position,
+        ent: CurrentEntity,
+    });
+    defer q.deinit();
+
+    var seen = std.AutoHashMap(u32, bool).init(std.testing.allocator);
+    defer seen.deinit();
+
+    while (q.next()) |item| {
+        try seen.put(item.ent.id, true);
+        _ = item.pos;
+    }
+    try std.testing.expectEqual(@as(usize, 3), seen.count());
+    try std.testing.expect(seen.contains(e1.id));
+    try std.testing.expect(seen.contains(e2.id));
+    try std.testing.expect(seen.contains(e3.id));
+}
+
+test "Query - custom type with both QueryFilter and QueryResultType" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    // Entities with Health (matched)
+    _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Health{ .value = 42 } });
+    _ = manager.create(.{ Position{ .x = 2.0, .y = 0.0 }, Health{ .value = 99 } });
+    // Entities without Health (filtered out by QueryFilter = With(Health))
+    _ = manager.create(.{Position{ .x = 3.0, .y = 0.0 }});
+    _ = manager.create(.{Position{ .x = 4.0, .y = 0.0 }});
+
+    var q = manager.query(struct {
+        pos: Position,
+        hp: HealthValue,
+    });
+    defer q.deinit();
+
+    var count: usize = 0;
+    while (q.next()) |item| {
+        try std.testing.expect(item.hp == 42 or item.hp == 99);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), count);
+}

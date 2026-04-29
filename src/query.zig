@@ -5,8 +5,11 @@ const archetype_mod = @import("archetype.zig");
 const Entity = @import("ecs.zig").Entity;
 const reflect = @import("zevy_reflect");
 
-const MarkerKind = enum { none, with, without };
-const ResultKind = enum { entity, component };
+/// Marker types for query field declarations, used to indicate special matching rules for fields that don't directly correspond to a component in the archetype.
+const MarkerKind = enum { none, with, without, custom };
+/// Indicates whether a query result field corresponds to an entity reference, a component reference, or a custom fetcher result.
+const ResultKind = enum { entity, component, custom };
+/// Internal representation of a query constraint, used for efficient archetype matching at runtime.
 const ConstraintKind = enum { require, exclude };
 
 const FilterConstraint = struct {
@@ -18,6 +21,8 @@ const ResultFieldMeta = struct {
     source_name: [:0]const u8,
     result_name: []const u8,
     component_type: type,
+    /// For .custom kind: the type that declared QueryResultType/query. void otherwise.
+    custom_type: type,
     kind: ResultKind,
     is_optional: bool,
     result_index: usize,
@@ -25,6 +30,37 @@ const ResultFieldMeta = struct {
 
 const ENTITY_SENTINEL: usize = std.math.maxInt(usize) - 1;
 const MISSING_COMPONENT_SENTINEL: usize = std.math.maxInt(usize);
+const CUSTOM_FETCH_SENTINEL: usize = std.math.maxInt(usize) - 2;
+
+/// Passed to a custom query type's `query` function during result iteration.
+/// Provides access to the current entity, its archetype, and the full archetype storage
+/// so custom types can implement arbitrary fetch logic (e.g. relation traversal, derived values).
+pub const QueryContext = struct {
+    storage: *archetype_storage.ArchetypeStorage,
+    arch: *archetype_mod.Archetype,
+    entity: Entity,
+    entity_index: usize,
+
+    /// Returns a mutable pointer to component `T` for the current entity.
+    /// Panics if the component is not present on this archetype.
+    pub fn get(self: QueryContext, comptime T: type) *T {
+        const idx = archetypeComponentIndex(self.arch, T);
+        if (idx == MISSING_COMPONENT_SENTINEL) @panic("QueryContext.get: component '" ++ @typeName(T) ++ "' not present");
+        return componentPointer(self.arch, self.entity_index, idx, T);
+    }
+
+    /// Returns a mutable pointer to component `T`, or null if not present.
+    pub fn getOpt(self: QueryContext, comptime T: type) ?*T {
+        const idx = archetypeComponentIndex(self.arch, T);
+        if (idx == MISSING_COMPONENT_SENTINEL) return null;
+        return componentPointer(self.arch, self.entity_index, idx, T);
+    }
+
+    /// Returns true if the current archetype has component `T`.
+    pub fn has(self: QueryContext, comptime T: type) bool {
+        return archetypeComponentIndex(self.arch, T) != MISSING_COMPONENT_SENTINEL;
+    }
+};
 
 /// Marker type for a query that matches only entities that have the given component
 /// types. Use `With(T)` in a query spec to indicate that only entities that have
@@ -80,19 +116,49 @@ fn markerLabel(comptime kind: MarkerKind) []const u8 {
     return switch (kind) {
         .with => "With",
         .without => "Without",
+        .custom => "Custom",
         .none => "",
     };
 }
 
+/// Returns true if T is a custom query type — a type that participates in Query via:
+/// - `pub const QueryFilter: type` — a With/Without type (or struct thereof) that adds archetype constraints, and/or
+/// - `pub const QueryResultType: type` + `pub fn query(QueryContext) QueryResultType` — a runtime result contribution.
+fn isCustomQueryType(comptime T: type) bool {
+    if (!typeCanHaveDecls(T)) return false;
+    const has_filter = @hasDecl(T, "QueryFilter") and @TypeOf(T.QueryFilter) == type;
+    const has_result_type = @hasDecl(T, "QueryResultType") and @TypeOf(T.QueryResultType) == type;
+    const has_fetch = @hasDecl(T, "query");
+    return has_filter or has_result_type or has_fetch;
+}
+
+/// Validates that a custom query type's declarations are consistent.
+fn validateCustomQueryType(comptime T: type) void {
+    const has_filter = @hasDecl(T, "QueryFilter") and @TypeOf(T.QueryFilter) == type;
+    const has_result_type = @hasDecl(T, "QueryResultType") and @TypeOf(T.QueryResultType) == type;
+    const has_fetch = @hasDecl(T, "query");
+    if (has_result_type and !has_fetch) {
+        @compileError("Custom query type '" ++ @typeName(T) ++ "' declares QueryResultType but is missing query.");
+    }
+    if (has_fetch and !has_result_type) {
+        @compileError("Custom query type '" ++ @typeName(T) ++ "' declares query but is missing QueryResultType.");
+    }
+    if (!has_filter and !has_result_type) {
+        @compileError("Custom query type '" ++ @typeName(T) ++ "' must declare QueryFilter, QueryResultType + query, or both.");
+    }
+}
+
 fn queryMarkerKindNonOptional(comptime T: type) MarkerKind {
-    if (!typeCanHaveDecls(T) or !@hasDecl(T, "QueryMarker")) {
-        return .none;
+    if (!typeCanHaveDecls(T)) return .none;
+    if (@hasDecl(T, "QueryMarker")) {
+        const marker = @field(T, "QueryMarker");
+        if (@TypeOf(marker) != MarkerKind) {
+            @compileError("Query marker '" ++ @typeName(T) ++ "' has an invalid QueryMarker declaration.");
+        }
+        return marker;
     }
-    const marker = @field(T, "QueryMarker");
-    if (@TypeOf(marker) != MarkerKind) {
-        @compileError("Query marker '" ++ @typeName(T) ++ "' has an invalid QueryMarker declaration.");
-    }
-    return marker;
+    if (isCustomQueryType(T)) return .custom;
+    return .none;
 }
 
 fn queryMarkerKind(comptime T: type) MarkerKind {
@@ -100,6 +166,9 @@ fn queryMarkerKind(comptime T: type) MarkerKind {
         const child = optionalChildType(T);
         const child_marker = queryMarkerKindNonOptional(child);
         if (child_marker != .none) {
+            if (child_marker == .custom) {
+                @compileError("Custom query types cannot be optional. Use '" ++ @typeName(child) ++ "' directly.");
+            }
             @compileError("Query markers cannot be optional. Use " ++ markerLabel(child_marker) ++ "(...) directly.");
         }
         return .none;
@@ -107,6 +176,7 @@ fn queryMarkerKind(comptime T: type) MarkerKind {
     return queryMarkerKindNonOptional(T);
 }
 
+///
 fn markerPayloadCount(comptime Payload: anytype) usize {
     if (@TypeOf(Payload) == type) {
         return 1;
@@ -187,6 +257,72 @@ fn queryFieldDeclaredType(comptime IncludeTypes: anytype, comptime field: anytyp
     return if (field.type == type) @field(IncludeTypes, field.name) else field.type;
 }
 
+/// Validates and expands a `QueryFilter` value into a comptime-known array of `FilterConstraint`.
+/// `Filter` must be a `With`/`Without` marker type, or a struct whose fields are all such markers.
+/// The returned type exposes:
+///   `pub const constraints: [N]FilterConstraint` — the validated constraint list
+///   `pub const len: usize`                        — number of constraints
+/// This function is memoized by Zig (generic type cache), so calling it twice for the
+/// same Filter type is free — both passes in `buildQueryMeta` share the result.
+fn QueryFilterExpansion(comptime Filter: type) type {
+    const marker = queryMarkerKindNonOptional(Filter);
+    if (marker == .custom) {
+        @compileError("Custom query types cannot be used inside QueryFilter.");
+    }
+    // Single With/Without marker
+    if (marker == .with or marker == .without) {
+        const payload_count = markerPayloadCount(Filter.Payload);
+        var buf: [payload_count]FilterConstraint = undefined;
+        inline for (0..payload_count) |i| {
+            const CompType = markerPayloadTypeAt(Filter.Payload, i);
+            validateMarkerPayloadType(marker, CompType);
+            buf[i] = .{
+                .kind = if (marker == .with) .require else .exclude,
+                .component_type = CompType,
+            };
+        }
+        const final = buf;
+        return struct {
+            pub const constraints = final;
+            pub const len = payload_count;
+        };
+    }
+    // Struct of With/Without markers
+    const info = @typeInfo(Filter);
+    if (info != .@"struct") {
+        @compileError("QueryFilter must be a With/Without marker or a struct of With/Without markers, got: " ++ @typeName(Filter));
+    }
+    comptime var total: usize = 0;
+    inline for (info.@"struct".fields) |f| {
+        const fm = queryMarkerKindNonOptional(f.type);
+        switch (fm) {
+            .with, .without => total += markerPayloadCount(f.type.Payload),
+            .none => @compileError("All fields in the struct assigned to QueryFilter must be With or Without markers."),
+            .custom => @compileError("Custom query types cannot be nested inside QueryFilter."),
+        }
+    }
+    var buf: [total]FilterConstraint = undefined;
+    comptime var idx: usize = 0;
+    inline for (info.@"struct".fields) |f| {
+        const fm = queryMarkerKindNonOptional(f.type);
+        const payload_count = markerPayloadCount(f.type.Payload);
+        inline for (0..payload_count) |i| {
+            const CompType = markerPayloadTypeAt(f.type.Payload, i);
+            validateMarkerPayloadType(fm, CompType);
+            buf[idx] = .{
+                .kind = if (fm == .with) .require else .exclude,
+                .component_type = CompType,
+            };
+            idx += 1;
+        }
+    }
+    const final = buf;
+    return struct {
+        pub const constraints = final;
+        pub const len = total;
+    };
+}
+
 fn debugPayloadString(comptime Payload: anytype) []const u8 {
     if (@TypeOf(Payload) == type) {
         return @typeName(Payload);
@@ -206,6 +342,7 @@ fn debugFieldString(comptime DeclaredType: type) []const u8 {
         .none => @typeName(DeclaredType),
         .with => "With(" ++ debugPayloadString(DeclaredType.Payload) ++ ")",
         .without => "Without(" ++ debugPayloadString(DeclaredType.Payload) ++ ")",
+        .custom => @typeName(DeclaredType),
     };
 }
 
@@ -238,13 +375,11 @@ fn validateConstraints(comptime constraints: anytype) void {
 }
 
 fn resultFieldOutputType(comptime field: ResultFieldMeta) type {
-    if (field.kind == .entity) {
-        return Entity;
-    }
-    if (field.is_optional) {
-        return ?*field.component_type;
-    }
-    return *field.component_type;
+    return switch (field.kind) {
+        .entity => Entity,
+        .component => if (field.is_optional) ?*field.component_type else *field.component_type,
+        .custom => field.custom_type.QueryResultType,
+    };
 }
 
 fn buildResultType(comptime is_tuple: bool, comptime result_fields: anytype) type {
@@ -305,6 +440,15 @@ fn buildQueryMeta(comptime IncludeTypes: anytype) type {
                 }
                 constraint_total += payload_count;
             },
+            .custom => {
+                validateCustomQueryType(declared_type);
+                if (@hasDecl(declared_type, "QueryFilter")) {
+                    constraint_total += QueryFilterExpansion(declared_type.QueryFilter).len;
+                }
+                if (@hasDecl(declared_type, "QueryResultType")) {
+                    result_field_count += 1;
+                }
+            },
         }
     }
 
@@ -325,6 +469,7 @@ fn buildQueryMeta(comptime IncludeTypes: anytype) type {
                     .source_name = field.name,
                     .result_name = if (include_info.@"struct".is_tuple) std.fmt.comptimePrint("{d}", .{result_index}) else field.name,
                     .component_type = component_type,
+                    .custom_type = void,
                     .kind = if (component_type == Entity) .entity else .component,
                     .is_optional = is_optional,
                     .result_index = result_index,
@@ -344,6 +489,27 @@ fn buildQueryMeta(comptime IncludeTypes: anytype) type {
                         .component_type = markerPayloadTypeAt(declared_type.Payload, payload_index),
                     };
                     constraint_index += 1;
+                }
+            },
+            .custom => {
+                if (@hasDecl(declared_type, "QueryFilter")) {
+                    const Expansion = QueryFilterExpansion(declared_type.QueryFilter);
+                    inline for (Expansion.constraints) |c| {
+                        constraints_buf[constraint_index] = c;
+                        constraint_index += 1;
+                    }
+                }
+                if (@hasDecl(declared_type, "QueryResultType")) {
+                    result_fields_buf[result_index] = .{
+                        .source_name = field.name,
+                        .result_name = if (include_info.@"struct".is_tuple) std.fmt.comptimePrint("{d}", .{result_index}) else field.name,
+                        .component_type = void,
+                        .custom_type = declared_type,
+                        .kind = .custom,
+                        .is_optional = false,
+                        .result_index = result_index,
+                    };
+                    result_index += 1;
                 }
             },
         }
@@ -511,6 +677,7 @@ pub fn Query(comptime IncludeTypes: anytype) type {
                     self.component_indices[field.result_index] = switch (field.kind) {
                         .entity => ENTITY_SENTINEL,
                         .component => archetypeComponentIndex(arch, field.component_type),
+                        .custom => CUSTOM_FETCH_SENTINEL,
                     };
                 }
             }
@@ -557,6 +724,15 @@ pub fn Query(comptime IncludeTypes: anytype) type {
                                     const ptr = componentPointer(arch, mutable_self.entity_index, component_index, field.component_type);
                                     @field(result, field.result_name) = ptr;
                                 }
+                            },
+                            .custom => {
+                                const ctx = QueryContext{
+                                    .storage = mutable_self.storage,
+                                    .arch = arch,
+                                    .entity = arch.entities.items[mutable_self.entity_index],
+                                    .entity_index = mutable_self.entity_index,
+                                };
+                                @field(result, field.result_name) = field.custom_type.query(ctx);
                             },
                         }
                     }

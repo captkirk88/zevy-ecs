@@ -403,21 +403,6 @@ pub const Manager = struct {
         return Entity{ .id = id, .generation = 0 };
     }
 
-    /// Add or update a resource.
-    /// Resources must be value types (no pointers allowed).
-    ///
-    /// *Recommended to use Plain Old Data (POD) types only.*
-    ///
-    /// Example:
-    /// ```zig
-    /// const res = manager.addResource(MyResourceType, MyResourceType{ .value = 42 }) catch |err| {
-    ///     // Handle error
-    ///     return;
-    /// };
-    /// var guard = res.lockWrite();
-    /// defer guard.deinit();
-    /// guard.get().field = newValue;
-    /// ```
     fn initResourceEntry(self: *Manager, comptime T: type, value: T) error{OutOfMemory}!struct {
         entry: ResourceEntry,
         reference: Ref(T),
@@ -473,6 +458,10 @@ pub const Manager = struct {
         };
     }
 
+    /// Add a resource of type T, or return an error if it already exists.
+    /// The resource will be deinitialized when the Manager is deinitialized, or when removed with removeResource.
+    ///
+    /// The returned `Ref(T)` is a reference-counted handle to the resource. Call `deinit()` on the Ref when done to release it.
     pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
         const type_hash = comptime reflect.typeHash(T);
         var guard = self.resources.lock();
@@ -497,6 +486,7 @@ pub const Manager = struct {
     /// Example:
     /// ```zig
     /// if (manager.getResource(MyResourceType)) |r| {
+    ///     r.deinit(); // Release caller's temporary Ref when done
     ///     var guard = r.lockRead();
     ///     defer guard.deinit();
     ///     _ = guard.get();
@@ -1110,7 +1100,7 @@ test "Scheduler resource survives repeated access" {
         var second_guard = second.lockWrite();
         defer second_guard.deinit();
         second_guard.get().addSystem(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update), increment, registry.DefaultParamRegistry);
-        try second_guard.get().runStage(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update));
+        _ = second_guard.get().runStage(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update));
     }
 
     const counter_ref = ecs.getResource(Counter) orelse return error.ResourceNotFound;

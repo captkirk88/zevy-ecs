@@ -34,6 +34,7 @@ Good question.  The std API has changed to the point I don't even know anymore. 
     - [Entities](#entities)
     - [Components](#components)
     - [Queries](#queries)
+        - [Custom Query Types](#custom-query-types)
     - [Systems](#systems)
     - [System Parameters](#system-parameters)
     - [Resources](#resources)
@@ -267,9 +268,55 @@ var entity_query = manager.query(
         entity: zevy_ecs.Entity,
         pos: Position,
     },
-);while (entity_query.next()) |item| {
+);
+while (entity_query.next()) |item| {
     std.debug.print("Entity {d} at ({d}, {d})\n",
         .{ item.entity.id, item.pos.x, item.pos.y });
+}
+```
+
+#### Custom Query Types
+
+Any type can participate in a query by declaring `QueryFilter`, `QueryResultType` + `query`, or both.
+
+```zig
+// Filter + result: only matches entities with Health, yields whether hp > 0
+const IsAlive = struct {
+    pub const QueryFilter = zevy_ecs.With(Health);
+    pub const QueryResultType = bool;
+    pub fn query(ctx: zevy_ecs.QueryContext) bool {
+        return ctx.get(Health).value > 0;
+    }
+};
+
+// Result-only: no constraints, contributes a result field populated at runtime
+const CurrentEntity = struct {
+    pub const QueryResultType = zevy_ecs.Entity;
+    pub fn query(ctx: zevy_ecs.QueryContext) zevy_ecs.Entity {
+        return ctx.entity;
+    }
+};
+
+// Both: requires Health AND yields its raw value as a result field.
+const HealthValue = struct {
+    pub const QueryFilter = zevy_ecs.With(Health);
+    pub const QueryResultType = i32;
+    pub fn query(ctx: zevy_ecs.QueryContext) i32 {
+        return ctx.get(Health).value;
+    }
+};
+
+var q = manager.query(struct {
+    pos: Position,
+    alive: IsAlive,      // filter + result field (bool)
+    hp: HealthValue,     // filter + result field (i32)
+    ent: CurrentEntity,  // result field (Entity)
+});
+while (q.next()) |item| {
+    _ = item.pos;   // *Position
+    _ = item.alive; // bool  — true when Health.value > 0
+    _ = item.hp;    // i32
+    _ = item.ent;   // Entity
 }
 ```
 
@@ -1176,10 +1223,10 @@ pub fn main() !void {
     scheduler.addSystem(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Draw), renderSystem, zevy_ecs.DefaultParamRegistry);
 
     // Run all systems in a specific stage
-    try scheduler.runStage(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update));
+    _ = scheduler.runStage(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update));
 
     // Run all systems in a range of stages
-    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
+    _ = scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
 }
 
 fn movementSystem(
@@ -1241,7 +1288,7 @@ pub fn main() !void {
     scheduler.addSystem(&manager, zevy_ecs.Stage(HashStages.CustomLogic), customSystem, zevy_ecs.DefaultParamRegistry);
 
     // Run stages in a range (includes all custom stages in the range)
-    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update), zevy_ecs.Stage(zevy_ecs.Stages.PostUpdate));
+    _ = scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update), zevy_ecs.Stage(zevy_ecs.Stages.PostUpdate));
 }
 
 fn physicsSystem(
@@ -1290,7 +1337,7 @@ pub fn main() !void {
     try scheduler.registerState(&manager, GameState);
 
     // Set initial state (or use NextState in a startup system)
-    try scheduler.transitionTo(&manager, GameState, .MainMenu);
+    _ = scheduler.transitionTo(&manager, GameState, .MainMenu);
 
     // Add state-specific systems - pass raw functions and param registry
     // Systems run when entering/exiting states
@@ -1302,7 +1349,7 @@ pub fn main() !void {
     scheduler.addSystem(&manager, zevy_ecs.InState(GameState.Playing), gameplaySystem, zevy_ecs.DefaultParamRegistry);
 
     // In your game loop, run systems for the active state
-    try scheduler.runActiveStateSystems(&manager, GameState);
+    _ = scheduler.runActiveStateSystems(&manager, GameState);
 }
 
 fn menuSystem(
@@ -1312,7 +1359,7 @@ fn menuSystem(
     if (state.isActive(.MainMenu)) {
         // Handle menu input
         // Transition to playing when user presses start
-        next.set(.Playing); // Immediate transition - triggers OnExit/OnEnter
+        _ = next.set(.Playing); // Immediate transition - triggers OnExit/OnEnter
     }
 }
 
@@ -1357,7 +1404,7 @@ pub fn main() !void {
     scheduler.addSystem(&manager, zevy_ecs.Stage(zevy_ecs.Stages.Update), inputHandlerSystem, zevy_ecs.DefaultParamRegistry);
 
     // Run the stages - cleanup happens automatically in Last stage
-    try scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
+    _ = scheduler.runStages(&manager, zevy_ecs.Stage(zevy_ecs.Stages.First), zevy_ecs.Stage(zevy_ecs.Stages.Last));
 }
 
 fn inputSystem(

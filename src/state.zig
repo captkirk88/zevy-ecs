@@ -31,8 +31,8 @@ pub fn StateManager(comptime StateEnum: type) type {
         }
 
         /// Transition to a new state (queues the transition)
-        pub fn transitionTo(self: *Self, state: StateEnum) error{StateNotRegistered}!void {
-            try self.scheduler.transitionTo(self.ecs, StateEnum, state);
+        pub fn transitionTo(self: *Self, state: StateEnum) scheduler_mod.ErrorGroup {
+            return self.scheduler.transitionTo(self.ecs, StateEnum, state);
         }
     };
 }
@@ -95,11 +95,11 @@ test "Scheduler state transition" {
     try scheduler.registerState(&ecs, GameState);
 
     // Transition to Menu state (immediate)
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(scheduler.isInState(GameState, .Menu));
 
     // Transition to Playing state
-    try scheduler.transitionTo(&ecs, GameState, .Playing);
+    _ = scheduler.transitionTo(&ecs, GameState, .Playing);
     try std.testing.expect(scheduler.isInState(GameState, .Playing));
     try std.testing.expect(!scheduler.isInState(GameState, .Menu));
 }
@@ -123,7 +123,7 @@ test "Scheduler get active state name" {
     try std.testing.expect(scheduler.getActiveStateName() == null);
 
     // Set initial state (immediate)
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // Verify we can get the state name
     const state_name = scheduler.getActiveStateName();
@@ -147,11 +147,11 @@ test "Scheduler state transition processing" {
     try scheduler.registerState(&ecs, GameState);
 
     // Transition is immediate
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(scheduler.isInState(GameState, .Menu));
 
     // Transition to another state
-    try scheduler.transitionTo(&ecs, GameState, .Playing);
+    _ = scheduler.transitionTo(&ecs, GameState, .Playing);
     try std.testing.expect(scheduler.isInState(GameState, .Playing));
 }
 
@@ -169,7 +169,7 @@ test "Scheduler unregistered state transition" {
     };
 
     // Should error when transitioning to unregistered state type
-    try std.testing.expectError(error.StateNotRegistered, scheduler.transitionTo(&ecs, GameState, .Menu));
+    try std.testing.expectError(error.StateNotRegistered, scheduler.transitionTo(&ecs, GameState, .Menu).throw());
 }
 
 test "States parameter in system" {
@@ -191,7 +191,7 @@ test "States parameter in system" {
     try scheduler.registerState(&ecs, GameState);
 
     // Set initial state (immediate)
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // System that uses State and NextState parameters
     const params = @import("systems.params.zig");
@@ -210,7 +210,7 @@ test "States parameter in system" {
             std.debug.assert(active.? == .Menu);
 
             // Transition to playing state using NextState (immediate)
-            try next_state.set(.Playing);
+            try next_state.set(.Playing).throw();
         }
     }.run;
 
@@ -317,7 +317,7 @@ test "OnEnter and OnExit systems" {
     scheduler.addSystem(&ecs, OnExit(GameState.Playing), playing_exit_handle, registry.DefaultParamRegistry);
 
     // Transition to Menu state - should trigger OnEnter(Menu)
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(get_flag(&ecs, MenuEntered));
     try std.testing.expect(!get_flag(&ecs, MenuExited));
     try std.testing.expect(!get_flag(&ecs, PlayingEntered));
@@ -330,7 +330,7 @@ test "OnEnter and OnExit systems" {
     set_flag(&ecs, PlayingExited, false);
 
     // Transition to Playing state - should trigger OnExit(Menu) and OnEnter(Playing)
-    try scheduler.transitionTo(&ecs, GameState, .Playing);
+    _ = scheduler.transitionTo(&ecs, GameState, .Playing);
     try std.testing.expect(!get_flag(&ecs, MenuEntered));
     try std.testing.expect(get_flag(&ecs, MenuExited));
     try std.testing.expect(get_flag(&ecs, PlayingEntered));
@@ -343,7 +343,7 @@ test "OnEnter and OnExit systems" {
     set_flag(&ecs, PlayingExited, false);
 
     // Transition to Menu state again - should trigger OnExit(Playing) and OnEnter(Menu)
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expect(get_flag(&ecs, MenuEntered));
     try std.testing.expect(!get_flag(&ecs, MenuExited));
     try std.testing.expect(!get_flag(&ecs, PlayingEntered));
@@ -429,10 +429,10 @@ test "InState systems" {
     scheduler.addSystem(&ecs, InState(GameState.Paused), paused_handle, registry.DefaultParamRegistry);
 
     // Transition to Menu state
-    try scheduler.transitionTo(&ecs, GameState, .Menu);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
 
     // Run InState systems for Menu
-    try scheduler.runInStateSystems(&ecs, GameState, .Menu);
+    _ = scheduler.runInStateSystems(&ecs, GameState, .Menu);
     try std.testing.expect(get_flag(&ecs, MenuSystemRan));
     try std.testing.expect(!get_flag(&ecs, PlayingSystemRan));
     try std.testing.expect(!get_flag(&ecs, PausedSystemRan));
@@ -443,10 +443,10 @@ test "InState systems" {
     set_flag(&ecs, PausedSystemRan, false);
 
     // Transition to Playing state
-    try scheduler.transitionTo(&ecs, GameState, .Playing);
+    _ = scheduler.transitionTo(&ecs, GameState, .Playing);
 
     // Run InState systems for Playing
-    try scheduler.runInStateSystems(&ecs, GameState, .Playing);
+    _ = scheduler.runInStateSystems(&ecs, GameState, .Playing);
     try std.testing.expect(!get_flag(&ecs, MenuSystemRan));
     try std.testing.expect(get_flag(&ecs, PlayingSystemRan));
     try std.testing.expect(!get_flag(&ecs, PausedSystemRan));
@@ -457,7 +457,7 @@ test "InState systems" {
     set_flag(&ecs, PausedSystemRan, false);
 
     // Test runActiveStateSystems convenience method
-    try scheduler.runActiveStateSystems(&ecs, GameState);
+    _ = scheduler.runActiveStateSystems(&ecs, GameState);
     try std.testing.expect(!get_flag(&ecs, MenuSystemRan));
     try std.testing.expect(get_flag(&ecs, PlayingSystemRan));
     try std.testing.expect(!get_flag(&ecs, PausedSystemRan));
@@ -468,10 +468,10 @@ test "InState systems" {
     set_flag(&ecs, PausedSystemRan, false);
 
     // Transition to Paused state
-    try scheduler.transitionTo(&ecs, GameState, .Paused);
+    _ = scheduler.transitionTo(&ecs, GameState, .Paused);
 
     // Run InState systems using convenience method
-    try scheduler.runActiveStateSystems(&ecs, GameState);
+    _ = scheduler.runActiveStateSystems(&ecs, GameState);
     try std.testing.expect(!get_flag(&ecs, MenuSystemRan));
     try std.testing.expect(!get_flag(&ecs, PlayingSystemRan));
     try std.testing.expect(get_flag(&ecs, PausedSystemRan));

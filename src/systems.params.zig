@@ -1,7 +1,7 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
 const zevy_mem = @import("zevy_mem");
-
+const sched = @import("scheduler.zig");
 const events = @import("events.zig");
 const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
@@ -393,8 +393,8 @@ pub fn NextState(comptime StateEnum: type) type {
         state_mgr: state.StateManager(StateEnum),
 
         /// Transition to a specific state value immediately
-        pub fn set(self: *Self, state_enum: StateEnum) error{StateNotRegistered}!void {
-            return try self.state_mgr.transitionTo(state_enum);
+        pub fn set(self: *Self, state_enum: StateEnum) sched.ErrorGroup {
+            return self.state_mgr.transitionTo(state_enum);
         }
     };
 }

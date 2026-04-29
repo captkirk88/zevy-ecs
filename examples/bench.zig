@@ -644,9 +644,11 @@ fn setupScheduledMixedSystems(manager: *Manager, scheduler: *Scheduler) void {
 /// *Note*: This runs 7 systems through all entity counts (up to 1,000,000 entities as in the benchmarks above) split into
 /// stages according to the scheduler stages (Update / Draw / Last) so that each system runs in the stage it was added to
 fn benchSchedulerMixedSystems(scheduler: *Scheduler, manager: *Manager) void {
-    scheduler.runStages(manager, Stage(Stages.First), Stage(Stages.Last)) catch |err| {
+    const eg = scheduler.runStages(manager, Stage(Stages.First), Stage(Stages.Last));
+    var iter = eg.iterator();
+    while (iter.next()) |err| {
         std.debug.print("Error running scheduler stage: {s}\n", .{@errorName(err)});
-    };
+    }
 }
 
 fn benchRunCrudSystem(e: *Manager, system_handle: zevy_ecs.UntypedSystemHandle) void {

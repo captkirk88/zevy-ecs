@@ -189,6 +189,49 @@ pub const StageEntry = union(enum) {
     chain: []systems.UntypedSystemHandle,
 };
 
+/// Holds all errors collected.
+/// Inspect with `hasErrors`, `first`, or `iterator`.
+pub const ErrorGroup = struct {
+    buf: [capacity]u16,
+    len: u8,
+
+    pub const capacity = 64;
+
+    pub const none: ErrorGroup = std.mem.zeroes(ErrorGroup);
+
+    /// Returns true if any system in the stage returned an error.
+    pub fn hasErrors(self: *const ErrorGroup) bool {
+        return self.len > 0;
+    }
+
+    /// Returns the first captured error, or null if there were none.
+    pub fn first(self: *const ErrorGroup) ?anyerror {
+        if (self.len == 0) return null;
+        return @errorFromInt(self.buf[0]);
+    }
+
+    pub const Iterator = struct {
+        group: *const ErrorGroup,
+        idx: u8,
+
+        pub fn next(self: *Iterator) ?anyerror {
+            if (self.idx >= self.group.len) return null;
+            const err = @errorFromInt(self.group.buf[self.idx]);
+            self.idx += 1;
+            return err;
+        }
+    };
+
+    pub fn iterator(self: *const ErrorGroup) Iterator {
+        return .{ .group = self, .idx = 0 };
+    }
+
+    pub fn throw(self: *const ErrorGroup) !void {
+        if (self.len == 0) return;
+        return @errorFromInt(self.buf[0]);
+    }
+};
+
 /// Manages system execution order and stages.
 ///
 /// Systems can be added to stages, and stages can be run in order.
@@ -395,79 +438,73 @@ pub const Scheduler = struct {
     /// Run all systems in a stage.
     /// Single-entry stages run inline to avoid async overhead; multi-entry stages
     /// dispatch concurrently. Commands flushing is deferred until all work completes.
-    pub inline fn runStage(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) anyerror!void {
-        const list = self.systems.get(stage.value) orelse return error.StageHasNoSystems;
+    /// Returns an `ErrorGroup` containing every error raised by a system task.
+    /// If the stage does not exist or has no entries, returns `ErrorGroup.none`.
+    pub inline fn runStage(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId) ErrorGroup {
+        const list = self.systems.get(stage.value) orelse return ErrorGroup.none;
         if (list.items.len == 0) {
             discardHandledComponentEventsIfLastStage(ecs, stage);
-            return;
+            return ErrorGroup.none;
         }
 
         ecs.defer_command_flush.store(true, .release);
         defer ecs.defer_command_flush.store(false, .release);
 
-        var first_err: ?anyerror = null;
+        var capture: ErrorGroupCapture = .{};
 
         if (list.items.len == 1) {
             switch (list.items[0]) {
                 .single => |handle| {
-                    runSingleTask(ecs, handle) catch |err| {
-                        first_err = err;
-                    };
+                    runSingleTask(ecs, handle) catch |err| capture.add(err);
                 },
                 .chain => |handles| {
-                    runChainTask(ecs, handles) catch |err| {
-                        first_err = err;
-                    };
+                    runChainTask(ecs, handles) catch |err| capture.add(err);
                 },
             }
         } else {
             const io = self.threaded.io();
+            var group: std.Io.Group = .init;
 
-            // Pre-allocate futures to avoid OOM after tasks are already dispatched.
-            var futures = try std.ArrayList(std.Io.Future(anyerror!void)).initCapacity(self.allocator, list.items.len);
-            defer futures.deinit(self.allocator);
-
-            // Dispatch each stage entry as an async task.
+            // Dispatch all stage entries into a single Group; tasks run concurrently.
             for (list.items) |entry| {
                 switch (entry) {
                     .single => |handle| {
-                        futures.appendAssumeCapacity(io.async(runSingleTask, .{ ecs, handle }));
+                        group.async(io, runSingleTaskGroupWrapper, .{ ecs, handle, &capture });
                     },
                     .chain => |handles| {
-                        futures.appendAssumeCapacity(io.async(runChainTask, .{ ecs, handles }));
+                        group.async(io, runChainTaskGroupWrapper, .{ ecs, handles, &capture });
                     },
                 }
             }
 
-            // Await all futures. Always wait for everything even on error.
-            for (futures.items) |*future| {
-                if (future.await(io)) |_| {} else |err| {
-                    if (first_err == null) first_err = err;
-                }
-            }
+            // Wait for all tasks to finish.
+            group.await(io) catch |err| capture.add(err);
         }
 
         ecs.defer_command_flush.store(false, .release);
 
         // Flush all queued Commands serially on the main thread.
-        ecs.flushQueuedCommands() catch |err| {
-            if (first_err == null) first_err = err;
-        };
+        ecs.flushQueuedCommands() catch |err| capture.add(err);
 
         discardHandledComponentEventsIfLastStage(ecs, stage);
 
-        if (first_err) |err| return err;
+        return capture.toErrorGroup();
     }
 
-    pub fn runStages(self: *Scheduler, ecs: *ecs_mod.Manager, start: StageId, end: StageId) anyerror!void {
-        if (start.value > end.value) return;
+    /// Run all stages in `[start, end]` (inclusive) in sorted order.
+    /// Returns the first non-empty `ErrorGroup` encountered (fail-fast), or
+    /// `ErrorGroup.none` if all stages succeeded.
+    pub fn runStages(self: *Scheduler, ecs: *ecs_mod.Manager, start: StageId, end: StageId) ErrorGroup {
+        if (start.value > end.value) return ErrorGroup.none;
 
         for (self.stage_order.items) |stage_value| {
             if (stage_value < start.value) continue;
             if (stage_value > end.value) break;
 
-            try self.runStage(ecs, StageId.init(stage_value));
+            const eg = self.runStage(ecs, StageId.init(stage_value));
+            if (eg.hasErrors()) return eg;
         }
+        return ErrorGroup.none;
     }
 
     pub fn getStageInfo(self: *Scheduler, allocator: std.mem.Allocator) std.ArrayList(StageInfo) {
@@ -595,11 +632,15 @@ pub const Scheduler = struct {
         ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
         state: StateEnum,
-    ) error{StateNotRegistered}!void {
+    ) ErrorGroup {
         const type_hash = reflect.typeHash(StateEnum);
 
+        var egc: ErrorGroupCapture = .{};
         // Verify the state enum type is registered
-        if (!self.states.contains(type_hash)) return error.StateNotRegistered;
+        if (!self.states.contains(type_hash)) {
+            egc.add(error.StateNotRegistered);
+            return egc.toErrorGroup();
+        }
 
         const value_hash = reflect.hash(@tagName(state));
         const value_name = @tagName(state);
@@ -607,7 +648,7 @@ pub const Scheduler = struct {
         // Don't transition if already in this state
         if (self.active_state) |current| {
             if (current.enum_type_hash == type_hash and current.value_hash == value_hash) {
-                return;
+                return ErrorGroup.none;
             }
         }
 
@@ -619,7 +660,8 @@ pub const Scheduler = struct {
                 const old_stage_offset: u32 = @intCast(@as(u32, @truncate(old_combined_hash)) % 100_000);
                 const exit_stage = Stage(Stages.StateOnExit).add(old_stage_offset);
                 // Run the OnExit stage if it exists (don't error if it doesn't)
-                self.runStage(ecs, exit_stage) catch {};
+                const eg = self.runStage(ecs, exit_stage);
+                egc.addFromGroup(eg);
             }
         }
 
@@ -636,7 +678,9 @@ pub const Scheduler = struct {
         const new_stage_offset: u32 = @intCast(@as(u32, @truncate(new_combined_hash)) % 100_000);
         const enter_stage = Stage(Stages.StateOnEnter).add(new_stage_offset);
         // Run the OnEnter stage if it exists (don't error if it doesn't)
-        self.runStage(ecs, enter_stage) catch {};
+        const eg = self.runStage(ecs, enter_stage);
+        egc.addFromGroup(eg);
+        return egc.toErrorGroup();
     }
 
     /// Run InState systems for a specific state value
@@ -646,23 +690,22 @@ pub const Scheduler = struct {
         ecs: *ecs_mod.Manager,
         comptime StateEnum: type,
         state: StateEnum,
-    ) !void {
+    ) ErrorGroup {
         const type_hash = reflect.typeHash(StateEnum);
         const value_hash = reflect.hash(@tagName(state));
         const combined_hash = reflect.hashWithSeed(std.mem.asBytes(&value_hash), type_hash);
         const stage_offset: u32 = @intCast(@as(u32, @truncate(combined_hash)) % 100_000);
         const state_stage = Stage(Stages.StateUpdate).add(stage_offset);
-
-        // Run the InState stage if it exists (don't error if it doesn't)
-        self.runStage(ecs, state_stage) catch {};
+        return self.runStage(ecs, state_stage);
     }
 
     /// Run InState systems for the currently active state
     /// This is a convenience method that automatically runs the correct InState systems
-    pub fn runActiveStateSystems(self: *Scheduler, ecs: *ecs_mod.Manager, comptime StateEnum: type) !void {
+    pub fn runActiveStateSystems(self: *Scheduler, ecs: *ecs_mod.Manager, comptime StateEnum: type) ErrorGroup {
         if (self.getActiveState(StateEnum)) |active_state| {
-            try self.runInStateSystems(ecs, StateEnum, active_state);
+            return self.runInStateSystems(ecs, StateEnum, active_state);
         }
+        return ErrorGroup.none;
     }
 
     /// Get a StateManager wrapper for use in systems
@@ -678,6 +721,38 @@ pub const Scheduler = struct {
 // Private helpers for async task dispatch
 // ============================================================================
 
+/// Thread-safe collector of all per-task errors during concurrent stage execution.
+/// Uses an atomic index to claim write slots without requiring an `Io` instance.
+const ErrorGroupCapture = struct {
+    buf: [ErrorGroup.capacity]u16 = [1]u16{0} ** ErrorGroup.capacity,
+    next_idx: std.atomic.Value(u8) = .init(0),
+
+    /// Claim a slot with an atomic increment and store the error integer.
+    fn add(self: *ErrorGroupCapture, err: anyerror) void {
+        const idx = self.next_idx.fetchAdd(1, .acq_rel);
+        if (idx < ErrorGroup.capacity) {
+            self.buf[idx] = @intFromError(err);
+        }
+    }
+
+    pub fn addFromGroup(self: *ErrorGroupCapture, group: ErrorGroup) void {
+        var it = group.iterator();
+        while (it.next()) |err| {
+            self.add(err);
+        }
+    }
+
+    /// Build an `ErrorGroup` after all tasks have finished (`group.await` barrier).
+    fn toErrorGroup(self: *const ErrorGroupCapture) ErrorGroup {
+        const count = self.next_idx.load(.acquire);
+        const len: u8 = if (count > ErrorGroup.capacity) ErrorGroup.capacity else @intCast(count);
+        var eg: ErrorGroup = ErrorGroup.none;
+        eg.len = len;
+        @memcpy(eg.buf[0..len], self.buf[0..len]);
+        return eg;
+    }
+};
+
 fn runSingleTask(ecs: *ecs_mod.Manager, handle: systems.UntypedSystemHandle) anyerror!void {
     return ecs.runSystemUntyped(void, handle);
 }
@@ -686,6 +761,17 @@ fn runChainTask(ecs: *ecs_mod.Manager, handles: []systems.UntypedSystemHandle) a
     for (handles) |handle| {
         try ecs.runSystemUntyped(void, handle);
     }
+}
+
+/// `std.Io.Group` variant of `runSingleTask`: errors are captured via `ErrorGroupCapture`
+/// because Group tasks must return `void`.
+fn runSingleTaskGroupWrapper(ecs: *ecs_mod.Manager, handle: systems.UntypedSystemHandle, capture: *ErrorGroupCapture) void {
+    runSingleTask(ecs, handle) catch |err| capture.add(err);
+}
+
+/// `std.Io.Group` variant of `runChainTask`: errors are captured via `ErrorGroupCapture`.
+fn runChainTaskGroupWrapper(ecs: *ecs_mod.Manager, handles: []systems.UntypedSystemHandle, capture: *ErrorGroupCapture) void {
+    runChainTask(ecs, handles) catch |err| capture.add(err);
 }
 
 inline fn insertStageValueSorted(allocator: std.mem.Allocator, stage_values: *std.ArrayList(i32), stage_value: i32) error{OutOfMemory}!void {
@@ -911,7 +997,9 @@ test "Scheduler runStage on non-existing stage" {
     var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
-    try std.testing.expectError(error.StageHasNoSystems, scheduler.runStage(&ecs, .init(9999)));
+    // A missing stage is a silent no-op: returns ErrorGroup.none.
+    const eg = scheduler.runStage(&ecs, .init(9999));
+    try std.testing.expect(!eg.hasErrors());
 }
 
 test "Scheduler assign outside scope" {
@@ -935,7 +1023,7 @@ test "Scheduler assign outside scope" {
     scheduler.addSystem(&ecs, custom_stage, test_system, registry.DefaultParamRegistry);
 
     // Run stages from First to PostUpdate, which includes the custom stage
-    try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
+    _ = scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
 
     var out_ref = ecs.getResource(bool).?;
     defer out_ref.deinit();
@@ -995,7 +1083,7 @@ test "Scheduler runStages executes custom stages in sorted order" {
     scheduler.addSystem(&ecs, early_stage, record_early, registry.DefaultParamRegistry);
     scheduler.addSystem(&ecs, middle_stage, record_middle, registry.DefaultParamRegistry);
 
-    try scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
+    _ = scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
 
     const trace_res = ecs.getResource(ExecutionTrace).?;
     defer trace_res.deinit();
@@ -1039,15 +1127,15 @@ test "Scheduler discards handled component events in Last stage" {
     scheduler.addSystem(&ecs, Stage(Stages.Update), add_tag_system, registry.DefaultParamRegistry);
     scheduler.addSystem(&ecs, Stage(Stages.PostUpdate), count_added, registry.DefaultParamRegistry);
 
-    try scheduler.runStage(&ecs, Stage(Stages.Update));
+    _ = scheduler.runStage(&ecs, Stage(Stages.Update));
     try std.testing.expectEqual(@as(usize, 1), ecs.component_added.count());
     try std.testing.expect(!ecs.component_added.peek().?.handled);
 
-    try scheduler.runStage(&ecs, Stage(Stages.PostUpdate));
+    _ = scheduler.runStage(&ecs, Stage(Stages.PostUpdate));
     try std.testing.expectEqual(@as(usize, 1), ecs.component_added.count());
     try std.testing.expect(ecs.component_added.peek().?.handled);
 
-    try scheduler.runStage(&ecs, Stage(Stages.Last));
+    _ = scheduler.runStage(&ecs, Stage(Stages.Last));
     try std.testing.expectEqual(@as(usize, 0), ecs.component_added.count());
 }
 
@@ -1176,7 +1264,7 @@ test "State management without registration throws errors" {
 
     // Test 1: transitionTo without registration should return error.StateNotRegistered
     const transition_result = scheduler.transitionTo(&ecs, GameState, .Menu);
-    try std.testing.expectError(error.StateNotRegistered, transition_result);
+    try std.testing.expectError(error.StateNotRegistered, transition_result.throw());
 
     // Test 2: Verify isInState returns false when state not registered
     const is_in_state = scheduler.isInState(GameState, .Menu);
@@ -1221,7 +1309,7 @@ test "Concurrent stage: two independent systems both run" {
     scheduler.addSystem(&ecs, Stage(Stages.Update), sysA, registry.DefaultParamRegistry);
     scheduler.addSystem(&ecs, Stage(Stages.Update), sysB, registry.DefaultParamRegistry);
 
-    try scheduler.runStage(&ecs, Stage(Stages.Update));
+    _ = scheduler.runStage(&ecs, Stage(Stages.Update));
 
     {
         const ra = ecs.getResource(AValue).?;
@@ -1277,7 +1365,7 @@ test "chain(): systems within a chain run in order" {
 
     scheduler.addSystem(&ecs, Stage(Stages.Update), chain(.{ sys1, sys2, sys3 }), registry.DefaultParamRegistry);
 
-    try scheduler.runStage(&ecs, Stage(Stages.Update));
+    _ = scheduler.runStage(&ecs, Stage(Stages.Update));
 
     const ra = ecs.getResource(A).?;
     defer ra.deinit();
@@ -1327,7 +1415,7 @@ test "Concurrent stage: Commands deferred flush adds components" {
 
     scheduler.addSystem(&ecs, Stage(Stages.Update), prebuilt, registry.DefaultParamRegistry);
 
-    try scheduler.runStage(&ecs, Stage(Stages.Update));
+    _ = scheduler.runStage(&ecs, Stage(Stages.Update));
 
     // Component must exist after runStage — proving deferred flush ran.
     const tag = try ecs.getComponent(entity, Tag);
