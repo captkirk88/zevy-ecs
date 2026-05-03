@@ -498,7 +498,7 @@ fn systemTargetTracking(query: Query(TargetTrackingQueryInclude)) void {
 // CRUD System: collect work from a query, explicitly release it, then mutate the world.
 fn systemCrudAddRemoveComponents(commands: Commands, query: Query(TargetTrackingQueryInclude)) !void {
     var released_query = query;
-    defer released_query.deinit();
+    errdefer released_query.deinit();
 
     var spawn_snapshot: ?Position = null;
 

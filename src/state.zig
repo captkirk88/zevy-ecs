@@ -3,6 +3,7 @@ const reflect = @import("zevy_reflect");
 const ecs_mod = @import("ecs.zig");
 const scheduler_mod = @import("scheduler.zig");
 const Scheduler = scheduler_mod.Scheduler;
+const errors = @import("errors.zig");
 
 /// StateManager provides a convenient interface for systems to access state management
 /// This is a wrapper around the Scheduler's integrated state management
@@ -31,7 +32,7 @@ pub fn StateManager(comptime StateEnum: type) type {
         }
 
         /// Transition to a new state (queues the transition)
-        pub fn transitionTo(self: *Self, state: StateEnum) scheduler_mod.ErrorGroup {
+        pub fn transitionTo(self: *Self, state: StateEnum) errors.ErrorGroup {
             return self.scheduler.transitionTo(self.ecs, StateEnum, state);
         }
     };

@@ -1,5 +1,12 @@
 const std = @import("std");
 
+pub const EnumGroup = enum(u8) {
+    pub const Self = @This();
+    handled = 0,
+    unhandled,
+    both = Self.handled | Self.unhandled,
+};
+
 /// A generic event store that maintains events in a queue-like structure
 /// while allowing iteration without consuming events.
 /// Internally uses a ring buffer for efficient operations.

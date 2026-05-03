@@ -202,7 +202,7 @@ pub const CommandsInner = opaque {
 
     /// Enqueue all queued commands onto the manager's deferred command queue.
     pub fn queue(self: Commands) error{OutOfMemory}!void {
-        try commandsInner(self)._manager.enqueueCommandBuffer(commandsInner(self).buffer.moveTo());
+        try commandsInner(self)._manager.enqueueCommandBuffer(commandsInner(self).buffer.take());
     }
 
     /// Execute all queued commands and clear the buffer (retaining capacity for reuse).
@@ -256,8 +256,7 @@ pub const EntityCommands = struct {
     pub fn add(self: *EntityCommands, comptime T: type, value: T) error{OutOfMemory}!void {
         if (self.existing_entity) |ent| {
             try self.commands.addComponent(ent, T, value);
-        } else {
-            const pending_ptr = self.pending.?;
+        } else if (self.pending) |pending_ptr| {
             const Data = struct { pending: *PendingEntity, value: T };
             try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr, .value = value }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
@@ -269,12 +268,11 @@ pub const EntityCommands = struct {
         }
     }
 
-    /// Queue removing a component from this entity. Returns self for chaining.
+    /// Queue removing a component from this entity.
     pub fn remove(self: *EntityCommands, comptime T: type) anyerror!void {
         if (self.existing_entity) |ent| {
             try self.commands.removeComponent(ent, T);
-        } else {
-            const pending_ptr = self.pending.?;
+        } else if (self.pending) |pending_ptr| {
             const Data = struct { pending: *PendingEntity };
             try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
@@ -286,12 +284,11 @@ pub const EntityCommands = struct {
         }
     }
 
-    /// Queue destroying this entity. Returns self for chaining.
+    /// Queue destroying this entity. For pending entities, this simply drops the pending entity without creating it. For existing entities, this queues a destroy command on the parent Commands.
     pub fn destroy(self: *EntityCommands) error{OutOfMemory}!void {
         if (self.existing_entity) |ent| {
             try self.commands.destroyEntity(ent);
-        } else {
-            const pending_ptr = self.pending.?;
+        } else if (self.pending) |pending_ptr| {
             const Data = struct { pending: *PendingEntity };
             try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
@@ -308,8 +305,11 @@ pub const EntityCommands = struct {
     pub fn entity(self: *const EntityCommands) ecs.Entity {
         if (self.existing_entity) |ent| {
             return ent;
+        } else if (self.pending) |pending_ptr| {
+            return pending_ptr.get();
+        } else {
+            @panic("EntityCommands must have either pending (commands.create()) or existing entity");
         }
-        return self.pending.?.get();
     }
 
     /// Get the PendingEntity reference (only valid for pending entities).
@@ -318,12 +318,8 @@ pub const EntityCommands = struct {
         return self.pending;
     }
 
-    pub fn hasPending(self: *const EntityCommands) bool {
-        return self.pending != null;
-    }
-
-    pub fn hasExisting(self: *const EntityCommands) bool {
-        return self.existing_entity != null;
+    pub fn getExisting(self: *const EntityCommands) ?ecs.Entity {
+        return self.existing_entity;
     }
 
     /// Get a component from this entity.
@@ -349,7 +345,8 @@ pub const EntityCommands = struct {
 
     pub fn deinit(self: *EntityCommands) void {
         self.flush() catch |err| @panic(@errorName(err));
-        if (self.pending) |p| commandsInner(self.commands)._allocator.destroy(p);
-        self.ebuf.deinit(commandsInner(self.commands)._allocator);
+        const inner = commandsInner(self.commands);
+        if (self.pending) |p| inner._allocator.destroy(p);
+        self.ebuf.deinit(inner._allocator);
     }
 };

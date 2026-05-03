@@ -26,15 +26,20 @@ pub const CommandBuffer = struct {
         self.bytes.deinit(allocator);
     }
 
+    /// Check if the command buffer is empty (contains no commands).
+    ///
+    /// **Note**: that a non-empty buffer may still contain commands that do nothing, so this only checks for the presence of any command entries, not their effects.
     pub fn isEmpty(self: *const CommandBuffer) bool {
         return self.bytes.items.len == 0;
     }
 
+    /// Clear the command buffer while retaining its allocated capacity for reuse.
     pub fn clearRetainingCapacity(self: *CommandBuffer) void {
         self.bytes.clearRetainingCapacity();
     }
 
-    pub fn moveTo(self: *CommandBuffer) CommandBuffer {
+    /// Move the command buffer out, leaving an empty buffer in its place.
+    pub fn take(self: *CommandBuffer) CommandBuffer {
         const moved = self.*;
         self.* = .init();
         return moved;

@@ -393,7 +393,7 @@ pub fn NextState(comptime StateEnum: type) type {
         state_mgr: state.StateManager(StateEnum),
 
         /// Transition to a specific state value immediately
-        pub fn set(self: *Self, state_enum: StateEnum) sched.ErrorGroup {
+        pub fn set(self: *Self, state_enum: StateEnum) errors.ErrorGroup {
             return self.state_mgr.transitionTo(state_enum);
         }
     };

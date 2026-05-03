@@ -1,6 +1,6 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
-const errs = @import("errors.zig");
+pub const errors = @import("errors.zig");
 const qry = @import("query.zig");
 const world = @import("world.zig");
 const sys = @import("systems.zig");
@@ -10,8 +10,6 @@ const registry = @import("systems.registry.zig");
 const scheduler = @import("scheduler.zig");
 const sparse = @import("sparse_set.zig");
 
-/// Error enum
-pub const errors = errs.ECSError;
 pub const Manager = ecs.Manager;
 pub const Entity = ecs.Entity;
 pub const Ref = ecs.Ref;
@@ -164,4 +162,5 @@ test {
     std.testing.refAllDecls(scheduler);
     std.testing.refAllDecls(schedule.state);
     std.testing.refAllDecls(events);
+    std.testing.refAllDecls(errors);
 }

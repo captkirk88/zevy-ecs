@@ -6,6 +6,9 @@ const systems = @import("systems.zig");
 const params = @import("systems.params.zig");
 const state_mod = @import("state.zig");
 const reflect = @import("zevy_reflect");
+const errors = @import("errors.zig");
+const ErrorGroup = errors.ErrorGroup;
+const ErrorGroupCapture = errors.ErrorGroupCapture;
 
 const is_debug = @import("builtin").mode == .Debug;
 
@@ -187,49 +190,6 @@ pub const StageEntry = union(enum) {
     /// Multiple systems run sequentially within a single concurrent task.
     /// Slice is owned by the Scheduler and freed during deinit/removeStage.
     chain: []systems.UntypedSystemHandle,
-};
-
-/// Holds all errors collected.
-/// Inspect with `hasErrors`, `first`, or `iterator`.
-pub const ErrorGroup = struct {
-    buf: [capacity]u16,
-    len: u8,
-
-    pub const capacity = 64;
-
-    pub const none: ErrorGroup = std.mem.zeroes(ErrorGroup);
-
-    /// Returns true if any system in the stage returned an error.
-    pub fn hasErrors(self: *const ErrorGroup) bool {
-        return self.len > 0;
-    }
-
-    /// Returns the first captured error, or null if there were none.
-    pub fn first(self: *const ErrorGroup) ?anyerror {
-        if (self.len == 0) return null;
-        return @errorFromInt(self.buf[0]);
-    }
-
-    pub const Iterator = struct {
-        group: *const ErrorGroup,
-        idx: u8,
-
-        pub fn next(self: *Iterator) ?anyerror {
-            if (self.idx >= self.group.len) return null;
-            const err = @errorFromInt(self.group.buf[self.idx]);
-            self.idx += 1;
-            return err;
-        }
-    };
-
-    pub fn iterator(self: *const ErrorGroup) Iterator {
-        return .{ .group = self, .idx = 0 };
-    }
-
-    pub fn throw(self: *const ErrorGroup) !void {
-        if (self.len == 0) return;
-        return @errorFromInt(self.buf[0]);
-    }
 };
 
 /// Manages system execution order and stages.
@@ -720,38 +680,6 @@ pub const Scheduler = struct {
 // ============================================================================
 // Private helpers for async task dispatch
 // ============================================================================
-
-/// Thread-safe collector of all per-task errors during concurrent stage execution.
-/// Uses an atomic index to claim write slots without requiring an `Io` instance.
-const ErrorGroupCapture = struct {
-    buf: [ErrorGroup.capacity]u16 = [1]u16{0} ** ErrorGroup.capacity,
-    next_idx: std.atomic.Value(u8) = .init(0),
-
-    /// Claim a slot with an atomic increment and store the error integer.
-    fn add(self: *ErrorGroupCapture, err: anyerror) void {
-        const idx = self.next_idx.fetchAdd(1, .acq_rel);
-        if (idx < ErrorGroup.capacity) {
-            self.buf[idx] = @intFromError(err);
-        }
-    }
-
-    pub fn addFromGroup(self: *ErrorGroupCapture, group: ErrorGroup) void {
-        var it = group.iterator();
-        while (it.next()) |err| {
-            self.add(err);
-        }
-    }
-
-    /// Build an `ErrorGroup` after all tasks have finished (`group.await` barrier).
-    fn toErrorGroup(self: *const ErrorGroupCapture) ErrorGroup {
-        const count = self.next_idx.load(.acquire);
-        const len: u8 = if (count > ErrorGroup.capacity) ErrorGroup.capacity else @intCast(count);
-        var eg: ErrorGroup = ErrorGroup.none;
-        eg.len = len;
-        @memcpy(eg.buf[0..len], self.buf[0..len]);
-        return eg;
-    }
-};
 
 fn runSingleTask(ecs: *ecs_mod.Manager, handle: systems.UntypedSystemHandle) anyerror!void {
     return ecs.runSystemUntyped(void, handle);
