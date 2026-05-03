@@ -481,12 +481,6 @@ pub fn ResMutInner(comptime T: type) type {
             const inner: *_Inner = @ptrCast(@alignCast(self));
             return inner.guard.get();
         }
-
-        /// Set the resource value.
-        pub fn set(self: *Self, value: T) void {
-            const inner: *_Inner = @ptrCast(@alignCast(self));
-            inner.guard.get().* = value;
-        }
     };
 }
 
