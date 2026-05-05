@@ -303,6 +303,10 @@ pub const Scheduler = struct {
         self.allocator.destroy(self.threaded);
     }
 
+    pub fn io(self: *Scheduler) std.Io {
+        return self.threaded.io();
+    }
+
     fn ensureStageList(self: *Scheduler, stage: StageId, initial_capacity: usize) error{OutOfMemory}!*std.ArrayList(StageEntry) {
         const gop = try self.systems.getOrPut(stage.value);
         if (!gop.found_existing) {
@@ -422,23 +426,23 @@ pub const Scheduler = struct {
                 },
             }
         } else {
-            const io = self.threaded.io();
+            const io_ = self.threaded.io();
             var group: std.Io.Group = .init;
 
             // Dispatch all stage entries into a single Group; tasks run concurrently.
             for (list.items) |entry| {
                 switch (entry) {
                     .single => |handle| {
-                        group.async(io, runSingleTaskGroupWrapper, .{ ecs, handle, &capture });
+                        group.async(io_, runSingleTaskGroupWrapper, .{ ecs, handle, &capture });
                     },
                     .chain => |handles| {
-                        group.async(io, runChainTaskGroupWrapper, .{ ecs, handles, &capture });
+                        group.async(io_, runChainTaskGroupWrapper, .{ ecs, handles, &capture });
                     },
                 }
             }
 
             // Wait for all tasks to finish.
-            group.await(io) catch |err| capture.add(err);
+            group.await(io_) catch |err| capture.add(err);
         }
 
         ecs.defer_command_flush.store(false, .release);
