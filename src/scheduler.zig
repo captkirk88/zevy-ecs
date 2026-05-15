@@ -447,8 +447,8 @@ pub const Scheduler = struct {
 
         ecs.defer_command_flush.store(false, .release);
 
-        // Flush all queued Commands serially on the main thread.
-        ecs.flushQueuedCommands() catch |err| capture.add(err);
+        // Flush all queued Commands concurrently if thread pool available.
+        ecs.flushQueuedCommands(self.io()) catch |err| capture.add(err);
 
         discardHandledComponentEventsIfLastStage(ecs, stage);
 

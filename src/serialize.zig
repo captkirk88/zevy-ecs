@@ -76,9 +76,9 @@ pub const ResourceSnapshot = struct {
         allocator: std.mem.Allocator,
         manager: *ecs.Manager,
         comptime T: type,
-    ) error{ OutOfMemory, ResourceNotFound, InvalidResourceData }!ResourceSnapshot {
+    ) anyerror!ResourceSnapshot {
         const type_hash = reflect.typeHash(T);
-        const entry = ecs.resourceEntryByHash(manager, type_hash) orelse return error.ResourceNotFound;
+        const entry = ecs.resourceEntryByHash(manager, type_hash) orelse std.debug.panic("Resource not found: {s}", .{@typeName(T)});
         const resource_size = entry.size;
         const data_copy = try allocator.alloc(u8, resource_size);
         errdefer allocator.free(data_copy);

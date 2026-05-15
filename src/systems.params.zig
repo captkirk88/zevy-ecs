@@ -246,7 +246,7 @@ const EventReaderSystemParamImpl = struct {
         var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
             const store = try events.EventStore(EventType).init(e.allocator, 16);
             try e.addResourceRetained(events.EventStore(EventType), store);
-            break :blk e.getResource(events.EventStore(EventType)) orelse return error.ResourceNotFound;
+            break :blk e.getResource(events.EventStore(EventType)) orelse std.debug.panic("Resource not found: {s}", .{@typeName(events.EventStore(EventType))});
         };
         const guard = ref.lockWrite();
         return ParamType{ ._ref = ref, ._guard = guard, .event_store = guard.get() };
@@ -303,7 +303,7 @@ const EventWriterSystemParamImpl = struct {
         var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
             const store = try events.EventStore(EventType).init(e.allocator, 16);
             try e.addResourceRetained(events.EventStore(EventType), store);
-            break :blk e.getResource(events.EventStore(EventType)) orelse return error.ResourceNotFound;
+            break :blk e.getResource(events.EventStore(EventType)) orelse std.debug.panic("Resource not found: {s}", .{@typeName(events.EventStore(EventType))});
         };
         const guard = ref.lockWrite();
         return ParamType{ ._ref = ref, ._guard = guard, .event_store = guard.get() };
@@ -495,7 +495,7 @@ pub fn ResMut(comptime T: type) type {
 const ResourceSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const ResourceType = BaseType(ParamType).ResType;
-        const ref = e.getResource(ResourceType) orelse return error.ResourceNotFound;
+        const ref = e.getResource(ResourceType) orelse std.debug.panic("Resource not found: {s}", .{@typeName(ResourceType)});
         const inner = try e.allocator.create(BaseType(ParamType)._Inner);
         inner.* = .{ .ref = ref, .guard = ref.lockRead() };
         return @ptrCast(inner);
@@ -515,7 +515,7 @@ pub const ResourceSystemParam = SystemParam(DeclMatcher(true, &.{ "is_res", "Res
 const ResourceMutSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const ResourceType = BaseType(ParamType).ResMutType;
-        const ref = e.getResource(ResourceType) orelse return error.ResourceNotFound;
+        const ref = e.getResource(ResourceType) orelse std.debug.panic("Resource not found: {s}", .{@typeName(ResourceType)});
         const inner = try e.allocator.create(BaseType(ParamType)._Inner);
         inner.* = .{ .ref = ref, .guard = ref.lockWrite() };
         return @ptrCast(inner);
@@ -833,7 +833,7 @@ const CommandsSystemParamImpl = struct {
         const commands: Commands = @ptrCast(@alignCast(ptr));
         commands.queue() catch |err| @panic(@errorName(err));
         if (!e.defer_command_flush.load(.acquire)) {
-            e.flushQueuedCommands() catch |err| @panic(@errorName(err));
+            e.flushQueuedCommands(null) catch |err| @panic(@errorName(err));
         }
         commands.destroy();
     }

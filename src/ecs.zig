@@ -166,7 +166,15 @@ pub const Manager = struct {
         try self.queued_commands.append(self.allocator, owned_buffer);
     }
 
-    pub fn flushQueuedCommands(self: *Manager) anyerror!void {
+    fn flushBufferTask(manager: *Manager, buffer: *command_buffer.CommandBuffer) anyerror!void {
+        try buffer.flush(manager.allocator, manager);
+    }
+
+    fn flushBufferTaskGroupWrapper(manager: *Manager, buffer: *command_buffer.CommandBuffer, capture: *errs.ErrorGroupCapture) void {
+        flushBufferTask(manager, buffer) catch |err| capture.add(err);
+    }
+
+    pub fn flushQueuedCommands(self: *Manager, threaded: ?std.Io) anyerror!void {
         var first_err: ?anyerror = null;
         var pending = std.ArrayList(command_buffer.CommandBuffer).empty;
         defer pending.deinit(self.allocator);
@@ -181,10 +189,37 @@ pub const Manager = struct {
 
             if (!has_pending) break;
 
-            for (pending.items) |*buffer| {
-                if (buffer.flush(self.allocator, @ptrCast(self))) |_| {} else |err| {
-                    if (first_err == null) first_err = err;
+            if (threaded) |io_| {
+                // Dispatch buffer flushing concurrently via std.Io.Group
+                var capture: errs.ErrorGroupCapture = .{};
+                var group: std.Io.Group = .init;
+
+                for (pending.items) |*buffer| {
+                    group.concurrent(io_, flushBufferTaskGroupWrapper, .{ self, buffer, &capture }) catch |err| capture.add(err);
                 }
+
+                // Wait for all buffers to finish flushing
+                group.await(io_) catch |err| capture.add(err);
+
+                if (capture.hasErrors() and first_err == null) {
+                    // Extract the first error from the group
+                    const eg = capture.toErrorGroup();
+                    var it = eg.iterator();
+                    if (it.next()) |err_val| {
+                        first_err = err_val;
+                    }
+                }
+            } else {
+                // Sequential fallback when no thread pool available
+                for (pending.items) |*buffer| {
+                    if (buffer.flush(self.allocator, @ptrCast(self))) |_| {} else |err| {
+                        if (first_err == null) first_err = err;
+                    }
+                }
+            }
+
+            // Clean up all buffers
+            for (pending.items) |*buffer| {
                 buffer.deinit(self.allocator);
             }
             pending.clearAndFree(self.allocator);

@@ -94,6 +94,10 @@ pub const ErrorGroupCapture = struct {
         }
     }
 
+    pub fn hasErrors(self: *const ErrorGroupCapture) bool {
+        return self.next_idx.load(.acquire) > 0;
+    }
+
     /// Build an `ErrorGroup` after all tasks have finished (`group.await` barrier).
     pub fn toErrorGroup(self: *const ErrorGroupCapture) ErrorGroup {
         const count = self.next_idx.load(.acquire);

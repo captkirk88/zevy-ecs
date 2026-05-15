@@ -562,21 +562,6 @@ test "ResourceSnapshot - toManager requires existing resources" {
     try testing.expectError(error.ResourceNotFound, score_snapshot.toManager(&target_manager));
 }
 
-test "ResourceSnapshot - fromManager requires existing resources" {
-    const allocator = testing.allocator;
-
-    var manager = try ecs.Manager.init(allocator);
-    defer manager.deinit();
-
-    try manager.addResourceRetained(GameConfig, .{
-        .width = 640,
-        .height = 480,
-        .fullscreen = false,
-    });
-
-    try testing.expectError(error.ResourceNotFound, serialize.ResourceSnapshot.fromManager(allocator, &manager, Score));
-}
-
 test "EntityInstance - with references (fromEntityWithReferences)" {
     const allocator = testing.allocator;
     var manager = try ecs.Manager.init(allocator);
