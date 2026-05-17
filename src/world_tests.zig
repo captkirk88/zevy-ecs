@@ -61,3 +61,53 @@ test "World.removeComponent on last component leaves entity with no components" 
     defer std.testing.allocator.free(comps);
     try std.testing.expect(comps.len == 0);
 }
+
+test "World.removeComponent calls deinit on the removed component" {
+    var world = World.init(std.testing.allocator);
+    defer world.deinit();
+
+    var deinit_count: usize = 0;
+
+    const Managed = struct {
+        counter: *usize,
+        pub fn deinit(self: *@This()) void {
+            self.counter.* += 1;
+        }
+    };
+
+    const entity = Entity{ .id = 0, .generation = 0 };
+    try world.add(entity, .{ Managed{ .counter = &deinit_count }, A{ .value = 1 } });
+
+    try std.testing.expectEqual(@as(usize, 0), deinit_count);
+    _ = try world.removeComponent(entity, Managed);
+    try std.testing.expectEqual(@as(usize, 1), deinit_count);
+
+    // A is still present; no extra deinit should have fired
+    try std.testing.expect(world.has(entity, A));
+    try std.testing.expectEqual(@as(usize, 1), deinit_count);
+}
+
+test "World.removeComponent calls deinit(allocator) on the removed component" {
+    var world = World.init(std.testing.allocator);
+    defer world.deinit();
+
+    var deinit_count: usize = 0;
+
+    const ManagedAlloc = struct {
+        counter: *usize,
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            _ = allocator;
+            self.counter.* += 1;
+        }
+    };
+
+    const entity = Entity{ .id = 0, .generation = 0 };
+    try world.add(entity, .{ ManagedAlloc{ .counter = &deinit_count }, A{ .value = 1 } });
+
+    try std.testing.expectEqual(@as(usize, 0), deinit_count);
+    _ = try world.removeComponent(entity, ManagedAlloc);
+    try std.testing.expectEqual(@as(usize, 1), deinit_count);
+
+    try std.testing.expect(world.has(entity, A));
+    try std.testing.expectEqual(@as(usize, 1), deinit_count);
+}

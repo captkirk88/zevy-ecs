@@ -807,6 +807,7 @@ pub const World = struct {
         removeWithStorage(storage_guard.get(), entity);
     }
 
+    /// Remove an entity from a specific archetype storage, used internally during migration and component removal
     fn removeWithStorage(storage: *ArchetypeStorage.Inner, entity: Entity) void {
         if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
             const arch = entry.archetype;
@@ -815,9 +816,9 @@ pub const World = struct {
             arch.entities.items[idx] = arch.entities.items[last_idx];
             arch.entities.items.len -= 1;
             for (arch.component_arrays, 0..) |*arr, i| {
-                const comp_size = arch.component_sizes[i];
-                const off = idx * comp_size;
-                const last_off = last_idx * comp_size;
+                const comp_size = arch.component_sizes[i]; // Size of this component type in bytes
+                const off = idx * comp_size; // Offset of the element to remove in this component array from the archetype index
+                const last_off = last_idx * comp_size; // Offset of the last element in this component array
                 if (idx != last_idx) {
                     @memmove(arr.items[off .. off + comp_size], arr.items[last_off .. last_off + comp_size]);
                 }
@@ -925,6 +926,17 @@ pub const World = struct {
                     dst_i += 1;
                 }
 
+                // Call deinit on the removed component if it has one
+                if (comptime (reflect.verifyFuncWithArgs(T, "deinit", &[_]type{}, null).isOk() or
+                    reflect.verifyFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator}, null).isOk()))
+                {
+                    const comp_size = src_arch.component_sizes[remove_idx];
+                    const arr = &src_arch.component_arrays[remove_idx];
+                    const off = src_idx * comp_size;
+                    const ptr: *T = @ptrCast(@alignCast(arr.items.ptr + off));
+                    callComponentDeinit(T, ptr, self.allocator);
+                }
+
                 removeWithStorage(storage, entity);
                 try ArchetypeStorage.setWithStorage(storage, entity, .{ .archetype = dst_arch, .index = dst_idx });
                 return true;
@@ -957,6 +969,21 @@ pub const World = struct {
             const dst_signature = ArchetypeSignature{ .types = new_types.items[0..n] };
             const dst_sizes = new_sizes.items[0..n];
             const dst_data = new_data.items[0..n];
+            // Call deinit on the removed component if it has one (data was already copied above)
+            if (comptime (reflect.verifyFuncWithArgs(T, "deinit", &[_]type{}, null).isOk() or
+                reflect.verifyFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator}, null).isOk()))
+            {
+                for (src_types, 0..) |h, i| {
+                    if (h == t_info.hash) {
+                        const comp_size = src_arch.component_sizes[i];
+                        const arr = &src_arch.component_arrays[i];
+                        const off = src_idx * comp_size;
+                        const ptr: *T = @ptrCast(@alignCast(arr.items.ptr + off));
+                        callComponentDeinit(T, ptr, self.allocator);
+                        break;
+                    }
+                }
+            }
             // Remove entity from old archetype (swap-and-pop) - data already copied above
             removeWithStorage(storage, entity);
             // Add to new archetype
@@ -1102,6 +1129,17 @@ pub const World = struct {
                     dst_i += 1;
                 }
 
+                // Call deinit on the removed component if it has one
+                if (comptime (reflect.verifyFuncWithArgs(T, "deinit", &[_]type{}, null).isOk() or
+                    reflect.verifyFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator}, null).isOk()))
+                {
+                    const comp_size = src_sizes[remove_idx];
+                    const src_arr = &src_arrays[remove_idx];
+                    const src_offset = item.src_idx * comp_size;
+                    const ptr: *T = @ptrCast(@alignCast(src_arr.items.ptr + src_offset));
+                    callComponentDeinit(T, ptr, self.allocator);
+                }
+
                 if (removeAtWithStorage(storage, src_arch, item.entity, item.src_idx)) |swapped_entry| {
                     const swapped_entity = src_arch.entities.items[swapped_entry.index];
                     swapped_ids[swapped_count] = swapped_entity.id;
@@ -1127,3 +1165,13 @@ pub const World = struct {
         return @import("query.zig").Query(Components).init(&self.archetypes);
     }
 };
+
+/// Call `deinit()` or `deinit(allocator)` on `ptr` if T declares either signature.
+/// This is fully resolved at compile time — no overhead for types without a deinit.
+fn callComponentDeinit(comptime T: type, ptr: *T, allocator: std.mem.Allocator) void {
+    if (comptime reflect.verifyFuncWithArgs(T, "deinit", &[_]type{}, null).isOk()) {
+        ptr.deinit();
+    } else if (comptime reflect.verifyFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator}, null).isOk()) {
+        ptr.deinit(allocator);
+    }
+}
