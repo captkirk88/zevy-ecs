@@ -68,7 +68,7 @@ fn localSystem(local: Local(u32)) void {
     if (!local.isSet()) {
         local.set(0);
     }
-    const val = local.get();
+    const val = local.getPtr();
     local.set(val.* + 1);
 }
 

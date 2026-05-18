@@ -115,15 +115,15 @@ pub fn LocalInner(comptime T: type) type {
         }
 
         /// Get the local value.
-        pub fn get(self: *Self) *T {
+        pub fn getPtr(self: *Self) *T {
             const s: *_Storage = @ptrCast(@alignCast(self));
             return &s._value;
         }
 
         /// Get the local value, returns null if not set.
-        pub fn value(self: *Self) ?*T {
+        pub fn get(self: *Self) ?T {
             const s: *_Storage = @ptrCast(@alignCast(self));
-            if (s._set) return &s._value;
+            if (s._set) return s._value;
             return null;
         }
 
@@ -877,7 +877,7 @@ test "LocalSystemParam basic" {
     defer ecs_instance.deinit();
     const local_ptr = try LocalSystemParam.apply(&ecs_instance, Local(i32));
     local_ptr.set(99);
-    try std.testing.expect(local_ptr.get().* == 99);
+    try std.testing.expect(local_ptr.getPtr().* == 99);
 }
 
 test "EventReaderSystemParam basic" {
