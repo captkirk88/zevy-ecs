@@ -103,40 +103,36 @@ pub fn LocalInner(comptime T: type) type {
         }.get else void;
 
         pub const _Storage = struct {
-            _value: T = undefined,
-            _set: bool = false,
+            _value: ?T = null,
         };
 
         /// Set the local value (persists across invocations).
         pub fn set(self: *Self, val: T) void {
             const s: *_Storage = @ptrCast(@alignCast(self));
+            if (s._value) |_| {
+                std.debug.panic("Local({s}) already set", .{@typeName(LocalType)});
+            }
             s._value = val;
-            s._set = true;
         }
 
         /// Get the local value.
-        pub fn getPtr(self: *Self) *T {
+        pub fn getPtr(self: *Self) ?*T {
             const s: *_Storage = @ptrCast(@alignCast(self));
-            return &s._value;
+            if (s._value) |*val| {
+                return &val.*;
+            } else {
+                return null;
+            }
         }
 
         /// Get the local value, returns null if not set.
         pub fn get(self: *Self) ?T {
             const s: *_Storage = @ptrCast(@alignCast(self));
-            if (s._set) return s._value;
-            return null;
-        }
-
-        /// Reset the local value (clears persistent state).
-        pub fn clear(self: *Self) void {
-            const s: *_Storage = @ptrCast(@alignCast(self));
-            s._set = false;
-        }
-
-        /// Returns true if the value has been set.
-        pub fn isSet(self: *Self) bool {
-            const s: *_Storage = @ptrCast(@alignCast(self));
-            return s._set;
+            if (s._value) |val| {
+                return val;
+            } else {
+                return null;
+            }
         }
     };
 }
@@ -158,7 +154,7 @@ const LocalSystemParamImpl = struct {
     pub fn apply(_: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const StorageType = zevy_reflect.BaseType(ParamType)._Storage;
         const static_storage = struct {
-            var storage: StorageType = .{ ._set = false };
+            var storage: StorageType = .{};
         };
         return @ptrCast(@alignCast(&static_storage.storage));
     }
@@ -877,7 +873,7 @@ test "LocalSystemParam basic" {
     defer ecs_instance.deinit();
     const local_ptr = try LocalSystemParam.apply(&ecs_instance, Local(i32));
     local_ptr.set(99);
-    try std.testing.expect(local_ptr.getPtr().* == 99);
+    try std.testing.expect(local_ptr.getPtr().?.* == 99);
 }
 
 test "EventReaderSystemParam basic" {

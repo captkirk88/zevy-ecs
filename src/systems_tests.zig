@@ -65,11 +65,12 @@ fn multiParamSystem(res: Res(DeltaTime), query: Query(struct { pos: Position, ve
 }
 
 fn localSystem(local: Local(u32)) void {
-    if (!local.isSet()) {
+    if (local.get() == null) {
         local.set(0);
     }
-    const val = local.getPtr();
-    local.set(val.* + 1);
+    if (local.getPtr()) |val| {
+        val.* += 1;
+    }
 }
 
 fn eventWriterSystem(writer: EventWriter(u32)) void {
