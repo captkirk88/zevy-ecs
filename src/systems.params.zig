@@ -16,7 +16,7 @@ const Commands = commands_mod.Commands;
 const CommandsInner = commands_mod.CommandsInner;
 const EntityCommands = commands_mod.EntityCommands;
 
-const BaseType = reflect.BaseType;
+const BaseType = zevy_reflect.BaseType;
 
 fn typeHasDecls(comptime T: type, comptime decl_names: []const []const u8) bool {
     switch (@typeInfo(T)) {
@@ -156,7 +156,7 @@ const LocalSystemParamMatcher = struct {
 
 const LocalSystemParamImpl = struct {
     pub fn apply(_: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
-        const StorageType = BaseType(ParamType)._Storage;
+        const StorageType = zevy_reflect.BaseType(ParamType)._Storage;
         const static_storage = struct {
             var storage: StorageType = .{ ._set = false };
         };
