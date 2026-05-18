@@ -393,9 +393,14 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
                 const param_type = param.type.?;
                 // Check if the type has a debugInfo decl (which should be a const string) and use that, otherwise use @typeName
                 const type_name: ParamDebugInfo = blk2: {
-                    const param_base = switch (@typeInfo(param_type)) {
-                        .pointer => |pointer_info| pointer_info.child,
-                        else => param_type,
+                    // Walk pointer wrappers so params like *Local(T) still resolve
+                    // to LocalInner(T).debugInfo instead of falling back to @typeName.
+                    const param_base = blk_base: {
+                        var t = param_type;
+                        while (@typeInfo(t) == .pointer) {
+                            t = @typeInfo(t).pointer.child;
+                        }
+                        break :blk_base t;
                     };
                     const type_info = @typeInfo(param_base);
                     // Only check for debugInfo on struct/union/enum types

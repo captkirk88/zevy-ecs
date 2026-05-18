@@ -20,7 +20,7 @@ pub const StageId = struct {
         return StageId{ .value = value };
     }
 
-    pub fn eql(self: *const StageId, other: StageId) bool {
+    pub inline fn eql(self: *const StageId, other: StageId) bool {
         return self.value == other.value;
     }
 
@@ -32,7 +32,7 @@ pub const StageId = struct {
         return StageId{ .value = self.value + @as(i32, @intCast(offset)) };
     }
 
-    pub fn subtract(self: StageId, offset: u32) StageId {
+    pub fn sub(self: StageId, offset: u32) StageId {
         return StageId{ .value = self.value - @as(i32, @intCast(offset)) };
     }
 };
@@ -42,13 +42,16 @@ pub const StageId = struct {
 /// Predefined stages map to specific ranges for ordering, custom stages use hash-based IDs.
 pub inline fn Stage(comptime T: type) StageId {
     // Check if T has a priority field for explicit ordering
-    switch (comptime reflect.getReflectInfo(T)) {
-        .type => |type_info| {
-            if (type_info.hasDecl("priority")) {
-                return T.priority;
-            }
-        },
-        else => {},
+    const type_info: ?reflect.TypeInfo = switch (comptime reflect.getReflectInfo(T)) {
+        .type => |type_info| type_info,
+        .raw => |ty| reflect.TypeInfo.from(ty),
+        else => null,
+    };
+
+    if (type_info) |ti| {
+        if (ti.hasDecl("priority")) {
+            return @field(T, "priority");
+        }
     }
 
     // Generate hash-based ID in user custom range (2,000,000 to ~2.1B)

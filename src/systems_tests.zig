@@ -140,10 +140,10 @@ fn conditionalSystem() void {}
 
 const GameState = enum { menu, playing, paused };
 
-fn actualFuncSystem(
+fn allParamsSystem(
     commands: Commands,
     res: Res(DeltaTime),
-    local: *Local(u32),
+    local: Local(u32),
     query: Query(struct { pos: Position, no_velocity: Without(Velocity) }),
     single: params.Single(struct { vel: Velocity }),
     event_reader: EventReader(u32),
@@ -151,6 +151,8 @@ fn actualFuncSystem(
     on_added: params.OnAdded(Position),
     on_removed: params.OnRemoved(Position),
     relation_mgr: params.Relations,
+    state: params.State(GameState),
+    next_state: params.NextState(GameState),
 ) void {
     _ = commands;
     _ = res;
@@ -162,6 +164,8 @@ fn actualFuncSystem(
     _ = on_added;
     _ = on_removed;
     _ = relation_mgr;
+    _ = state;
+    _ = next_state;
 }
 
 fn mutateRes(res: ResMut(DeltaTime)) void {
@@ -599,7 +603,7 @@ test "SystemDebugInfo contains parameter information" {
     try manager.addComponent(pos_entity, Position, Position{ .x = 5.0, .y = 6.0 });
     try manager.removeComponent(pos_entity, Position);
 
-    const system = ToSystem(actualFuncSystem, DefaultRegistry);
+    const system = ToSystem(allParamsSystem, DefaultRegistry);
 
     if (is_debug) {
         std.debug.print("\nSystem signature: {s}\n", .{system.debug_info.signature});
@@ -610,7 +614,7 @@ test "SystemDebugInfo contains parameter information" {
         }
 
         // Should have 10 params (including Commands)
-        try std.testing.expect(system.debug_info.params.len == 10);
+        try std.testing.expect(system.debug_info.params.len == 12);
 
         // Verify param types
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[0].name, "Commands") != null);
@@ -623,5 +627,7 @@ test "SystemDebugInfo contains parameter information" {
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[7].name, "OnAdded") != null);
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[8].name, "OnRemoved") != null);
         try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[9].name, "Relations") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[10].name, "State") != null);
+        try std.testing.expect(std.mem.indexOf(u8, system.debug_info.params[11].name, "NextState") != null);
     }
 }
