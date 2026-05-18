@@ -69,7 +69,7 @@ fn localSystem(local: Local(u32)) void {
         local.set(0);
     }
     const val = local.get();
-    local.set(val + 1);
+    local.set(val.* + 1);
 }
 
 fn eventWriterSystem(writer: EventWriter(u32)) void {
