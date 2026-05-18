@@ -48,9 +48,9 @@ pub const ArchetypeStorage = struct {
 
     pub const EntityIterator = struct {
         guard: ReadGuard,
-        iter: SparseSet(EntityMapEntry).Iterator,
+        iter: SparseSet(EntityMapEntry).ConstIterator,
 
-        pub fn next(self: *EntityIterator) ?SparseSet(EntityMapEntry).Entry {
+        pub fn next(self: *EntityIterator) ?SparseSet(EntityMapEntry).ConstEntry {
             return self.iter.next();
         }
 
@@ -198,6 +198,6 @@ pub const ArchetypeStorage = struct {
     /// Iterate over all entity entries (cache-friendly, no null checks)
     pub fn entityIterator(self: *ArchetypeStorage) EntityIterator {
         var guard = self.inner.lockRead();
-        return .{ .guard = guard, .iter = guard.get().entity_sparse_set.iterator() };
+        return .{ .guard = guard, .iter = guard.get().entity_sparse_set.constIterator() };
     }
 };

@@ -111,3 +111,4 @@ test "World.removeComponent calls deinit(allocator) on the removed component" {
     try std.testing.expect(world.has(entity, A));
     try std.testing.expectEqual(@as(usize, 1), deinit_count);
 }
+

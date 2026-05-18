@@ -86,6 +86,11 @@ pub const World = struct {
         const src_arch = entry.archetype;
         const src_idx = entry.index;
         const dst_arch = try dest.archetypes.getOrCreateWithStorage(dest_storage, src_arch.signature, src_arch.component_sizes);
+        // Copy deinit fn pointers from source (same component types → same fns).
+        // Guard against same-world copy where src_arch == dst_arch (aliased memory).
+        if (dst_arch != src_arch) {
+            @memcpy(dst_arch.component_deinit_fns, src_arch.component_deinit_fns);
+        }
         const dst_idx = dst_arch.entities.items.len;
 
         if (dst_idx == 0) {
@@ -201,6 +206,18 @@ pub const World = struct {
                 const dst_len = dst_i;
                 const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
                 const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+                // Populate deinit fns: src components in order, new component at insert_idx.
+                {
+                    var src_fi: usize = 0;
+                    for (0..dst_len) |di| {
+                        if (di == insert_idx) {
+                            dst_arch.component_deinit_fns[di] = comptime makeComponentDeinitFn(FieldType);
+                        } else {
+                            dst_arch.component_deinit_fns[di] = src_arch.component_deinit_fns[src_fi];
+                            src_fi += 1;
+                        }
+                    }
+                }
                 const dst_idx = dst_arch.entities.items.len;
 
                 if (dst_idx == 0) {
@@ -311,6 +328,24 @@ pub const World = struct {
             const signature_mig = ArchetypeSignature{ .types = hashes };
             removeWithStorage(storage, entity); // Remove from old archetype before adding to new
             try self.archetypes.addWithStorage(storage, entity, signature_mig, sizes_mig, data_mig);
+            // Populate deinit fns for the new archetype: copy from src for old components,
+            // use comptime fn pointers for newly added component types.
+            if (ArchetypeStorage.getWithStorage(storage, entity)) |new_entry| {
+                const new_arch = new_entry.archetype;
+                for (hashes, 0..) |h, di| {
+                    new_arch.component_deinit_fns[di] = blk: {
+                        // Component came from src archetype — reuse its fn pointer.
+                        for (src_types, 0..) |sh, sfi| {
+                            if (sh == h) break :blk src_arch.component_deinit_fns[sfi];
+                        }
+                        // New component — generate fn pointer at compile time.
+                        inline for (info.@"struct".fields) |field| {
+                            if (reflect.typeHash(field.type) == h) break :blk comptime makeComponentDeinitFn(field.type);
+                        }
+                        break :blk null;
+                    };
+                }
+            }
             // scratch.deinit() (deferred above) frees all temp buffers in one shot
         } else {
             if (field_count == 0) {
@@ -370,6 +405,11 @@ pub const World = struct {
             const stack_signature = ArchetypeSignature{ .types = &sorted_hashes };
 
             const archetype_ptr = try self.archetypes.getOrCreateWithStorage(storage, stack_signature, &sizes);
+            // Set deinit fn pointers (idempotent — same type always yields the same fn pointer).
+            inline for (sorted_indices, 0..) |orig_idx, sorted_idx| {
+                const T = info.@"struct".fields[orig_idx].type;
+                archetype_ptr.component_deinit_fns[sorted_idx] = comptime makeComponentDeinitFn(T);
+            }
 
             const idx = archetype_ptr.entities.items.len;
 
@@ -499,6 +539,18 @@ pub const World = struct {
             const dst_len = dst_i;
             const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
             const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+            // Populate deinit fns: src components in order, new component T at insert_idx.
+            {
+                var src_fi: usize = 0;
+                for (0..dst_len) |di| {
+                    if (di == insert_idx) {
+                        dst_arch.component_deinit_fns[di] = comptime makeComponentDeinitFn(T);
+                    } else {
+                        dst_arch.component_deinit_fns[di] = src_arch.component_deinit_fns[src_fi];
+                        src_fi += 1;
+                    }
+                }
+            }
 
             const SortCtx = struct {
                 items: []BatchItem,
@@ -682,6 +734,11 @@ pub const World = struct {
 
         // Get or create archetype
         const archetype_ptr = try self.archetypes.getOrCreateWithStorage(storage, stack_signature, &sizes);
+        // Set deinit fn pointers (idempotent — same type always yields the same fn pointer).
+        inline for (sorted_indices, 0..) |orig_idx, sorted_idx| {
+            const T = info.@"struct".fields[orig_idx].type;
+            archetype_ptr.component_deinit_fns[sorted_idx] = comptime makeComponentDeinitFn(T);
+        }
 
         // Reserve capacity in archetype for batch
         try archetype_ptr.entities.ensureTotalCapacity(self.allocator, archetype_ptr.entities.items.len + entities.len);
@@ -804,7 +861,12 @@ pub const World = struct {
     pub fn remove(self: *World, entity: Entity) void {
         var storage_guard = self.archetypes.writeGuard();
         defer storage_guard.deinit();
-        removeWithStorage(storage_guard.get(), entity);
+        const storage = storage_guard.get();
+        // Call component deinit before the swap-and-pop so components are cleaned up.
+        if (ArchetypeStorage.getWithStorage(storage, entity)) |entry| {
+            entry.archetype.callDeinitAt(entry.index);
+        }
+        removeWithStorage(storage, entity);
     }
 
     /// Remove an entity from a specific archetype storage, used internally during migration and component removal
@@ -895,6 +957,16 @@ pub const World = struct {
 
                 const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
                 const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+                // Populate deinit fns: src components minus the removed one.
+                {
+                    var dst_fi: usize = 0;
+                    for (src_arch.component_deinit_fns, 0..) |fn_ptr, src_fi| {
+                        if (src_fi != remove_idx) {
+                            dst_arch.component_deinit_fns[dst_fi] = fn_ptr;
+                            dst_fi += 1;
+                        }
+                    }
+                }
                 const dst_idx = dst_arch.entities.items.len;
 
                 if (dst_idx == 0) {
@@ -988,6 +1060,17 @@ pub const World = struct {
             removeWithStorage(storage, entity);
             // Add to new archetype
             try self.archetypes.addWithStorage(storage, entity, dst_signature, dst_sizes, dst_data);
+            // Populate deinit fns for the new archetype (src minus removed T).
+            if (ArchetypeStorage.getWithStorage(storage, entity)) |new_entry| {
+                const dst_arch_scratch = new_entry.archetype;
+                var dst_fi: usize = 0;
+                for (src_arch.component_deinit_fns, 0..) |fn_ptr, src_fi| {
+                    if (src_types[src_fi] != t_info.hash) {
+                        dst_arch_scratch.component_deinit_fns[dst_fi] = fn_ptr;
+                        dst_fi += 1;
+                    }
+                }
+            }
             // scratch.deinit() (deferred above) frees all temp buffers
             return true;
         }
@@ -1078,6 +1161,16 @@ pub const World = struct {
 
             const dst_signature = ArchetypeSignature{ .types = dst_hashes[0..dst_len] };
             const dst_arch = try self.archetypes.getOrCreateWithStorage(storage, dst_signature, dst_sizes[0..dst_len]);
+            // Populate deinit fns: src components minus the removed one.
+            {
+                var dst_fi: usize = 0;
+                for (src_arch.component_deinit_fns, 0..) |fn_ptr, src_fi| {
+                    if (src_fi != remove_idx) {
+                        dst_arch.component_deinit_fns[dst_fi] = fn_ptr;
+                        dst_fi += 1;
+                    }
+                }
+            }
 
             const SortCtx = struct {
                 items: []BatchItem,
@@ -1174,4 +1267,19 @@ fn callComponentDeinit(comptime T: type, ptr: *T, allocator: std.mem.Allocator) 
     } else if (comptime reflect.verifyFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator}, null).isOk()) {
         ptr.deinit(allocator);
     }
+}
+
+/// Generate a type-erased deinit fn pointer for component type T.
+/// Returns null when T has no deinit method — callers can skip the slot entirely.
+fn makeComponentDeinitFn(comptime T: type) ?archetype.ComponentDeinitFn {
+    if (comptime !(reflect.verifyFuncWithArgs(T, "deinit", &[_]type{}, null).isOk() or
+        reflect.verifyFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator}, null).isOk()))
+    {
+        return null;
+    }
+    return &struct {
+        fn call(ptr: *anyopaque, alloc: std.mem.Allocator) void {
+            callComponentDeinit(T, @ptrCast(@alignCast(ptr)), alloc);
+        }
+    }.call;
 }

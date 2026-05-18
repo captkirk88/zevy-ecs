@@ -171,7 +171,6 @@ fn SystemWithArgsContext(comptime Args: type) type {
 }
 
 /// Specialized trampoline for systems with injected arguments
-/// Specialized trampoline for systems with injected arguments
 fn makeSystemTrampolineWithArgs(comptime system_fn: anytype, comptime ReturnType: type, comptime ParamRegistry: type, comptime Args: type) *const fn (*ecs_mod.Manager, ?*anyopaque) anyerror!ReturnType {
     const system_type = @TypeOf(system_fn);
     if (!comptime reflect.hasFuncWithArgs(ParamRegistry, "apply", &[_]type{ *ecs_mod.Manager, type })) {
@@ -455,6 +454,8 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
 }
 
 /// Infers the return type of a system function, unwrapping error unions to get the payload type if necessary.
+///
+/// TODO: Rename this to `SystemReturnType`
 pub fn ToSystemReturnType(comptime system_fn: anytype) type {
     const FnInfo = @typeInfo(@TypeOf(system_fn));
 
@@ -540,7 +541,7 @@ pub fn runIf(comptime predicate: anytype, comptime system: anytype, comptime Par
     return pipe(
         predicate,
         struct {
-            pub var system_handle: ?System(void) = null;
+            pub var system_handle: ?System(ToSystemReturnType(system)) = null;
 
             pub fn run(cond: bool, commands: Commands) !void {
                 if (cond) {

@@ -18,6 +18,10 @@ pub const ArchetypeSignature = struct {
     }
 };
 
+/// Erased deinit function for a single component instance.
+/// Called with a type-erased pointer to the component and the world allocator.
+pub const ComponentDeinitFn = *const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void;
+
 /// Stores all entities with the same component set (archetype)
 pub const Archetype = struct {
     allocator: std.mem.Allocator,
@@ -26,6 +30,9 @@ pub const Archetype = struct {
     // For each component type, a contiguous array of bytes
     component_arrays: []std.ArrayList(u8),
     component_sizes: []usize,
+    // Per-component deinit fn pointer; null when the component type has no deinit method.
+    // Set by world.zig after archetype creation when types are known at compile time.
+    component_deinit_fns: []?ComponentDeinitFn,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -43,7 +50,9 @@ pub const Archetype = struct {
             }),
             .component_arrays = try allocator.alloc(std.ArrayList(u8), component_sizes.len),
             .component_sizes = try allocator.alloc(usize, component_sizes.len),
+            .component_deinit_fns = try allocator.alloc(?ComponentDeinitFn, component_sizes.len),
         };
+        @memset(archetype.component_deinit_fns, null);
         for (component_sizes, 0..) |size, i| {
             const byte_capacity = initial_capacity * size;
             archetype.component_arrays[i] = (std.ArrayList(u8).initCapacity(allocator, byte_capacity) catch |err| {
@@ -55,12 +64,29 @@ pub const Archetype = struct {
     }
 
     pub fn deinit(self: *Archetype) void {
+        // Call component deinit for every entity still in this archetype
+        for (0..self.entities.items.len) |entity_idx| {
+            self.callDeinitAt(entity_idx);
+        }
         self.entities.deinit(self.allocator);
         for (self.component_arrays) |*arr| arr.deinit(self.allocator);
         self.allocator.free(self.component_arrays);
         self.allocator.free(self.component_sizes);
+        self.allocator.free(self.component_deinit_fns);
         self.allocator.free(self.signature.types);
         self.allocator.destroy(self);
+    }
+
+    /// Call the deinit fn for every component of the entity at `entity_idx`.
+    /// No-op for components whose type has no deinit method.
+    pub fn callDeinitAt(self: *const Archetype, entity_idx: usize) void {
+        for (self.component_deinit_fns, 0..) |maybe_fn, comp_idx| {
+            if (maybe_fn) |deinit_fn| {
+                const comp_size = self.component_sizes[comp_idx];
+                const ptr: *anyopaque = @ptrCast(self.component_arrays[comp_idx].items.ptr + entity_idx * comp_size);
+                deinit_fn(ptr, self.allocator);
+            }
+        }
     }
 
     /// Add an entity and its component data to this archetype
