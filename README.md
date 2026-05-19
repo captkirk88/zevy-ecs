@@ -1462,6 +1462,11 @@ See [BENCHMARK.md](BENCHMARK.md) for detailed benchmark results.
 - [zevy-reflect](https://github.com/captkirk88/zevy-reflect) - Reflection utilities for Zig.
 - [zevy-mem](https://github.com/captkirk88/zevy-mem) - Memory allocators and utilities for Zig.
 
+
+## Projects
+- [zevy-raylib](https://github.com/captkirk88/zevy-raylib)
+- [zevy-alloy](https://github.com/captkirk88/zevy-alloy)
+
 ## Contributing
 
 Contributions are welcome!
