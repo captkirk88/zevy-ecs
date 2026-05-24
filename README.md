@@ -22,6 +22,12 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 - **Extensible parameter system**: Create custom system parameters by implementing `matches`, `apply`, and optional `deinit` functions
 - **Zero runtime overhead**: All system parameter resolution happens at compile time
 
+## Build Modules
+- `zevy_ecs` - Main ECS functionality (entities, components, queries, systems, resources, events, relations)
+- `plugins` - Plugin system for modular functionality
+- `app` - Application framework with lifecycle management and plugin support
+- `benchmark` - Benchmarking for performance testing
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
