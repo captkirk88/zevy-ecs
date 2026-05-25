@@ -831,7 +831,7 @@ const CommandsSystemParamImpl = struct {
         if (!e.defer_command_flush.load(.acquire)) {
             e.flushQueuedCommands(null) catch |err| @panic(@errorName(err));
         }
-        commands.destroy();
+        commands.deinit();
     }
 };
 

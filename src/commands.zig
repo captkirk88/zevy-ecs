@@ -48,10 +48,6 @@ pub const CommandsInner = opaque {
     }
 
     pub fn deinit(self: Commands) void {
-        commandsInner(self).buffer.deinit(commandsInner(self)._allocator);
-    }
-
-    pub fn destroy(self: Commands) void {
         const inner = commandsInner(self);
         const _allocator = inner._allocator;
         inner.buffer.deinit(_allocator);
