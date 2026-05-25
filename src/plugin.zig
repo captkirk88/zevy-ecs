@@ -253,7 +253,7 @@ pub const PluginManager = struct {
         for (self.plugins.items) |entry| {
             entry.interface.vtable.build(entry.interface.ptr, manager, self) catch |err| {
                 std.debug.panic(
-                    "Failed to build plugin '{s}': {s}",
+                    "Failed to build plugin '{s}' error: {s}",
                     .{ entry.name, @errorName(err) },
                 );
             };

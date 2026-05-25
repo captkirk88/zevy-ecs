@@ -516,6 +516,36 @@ pub const Manager = struct {
         ref.deinit();
     }
 
+    pub fn addResourceRef(self: *Manager, comptime T: type, ref: Ref(T)) error{ OutOfMemory, ResourceAlreadyExists, RefDeinitialized }!void {
+        const type_hash = comptime reflect.typeHash(T);
+        var guard = self.resources.lock();
+        defer guard.deinit();
+        const result = try guard.get().getOrPut(type_hash);
+        if (result.found_existing) return error.ResourceAlreadyExists;
+
+        const deinit_fn = struct {
+            pub fn deinit(resource_ptr: *anyopaque) void {
+                const typed_ptr: Ref(T) = @ptrCast(@alignCast(resource_ptr));
+                typed_ptr.deinit();
+            }
+        }.deinit;
+        var soft_ref = ref;
+        if (ref.strongCount() == 0) {
+            return error.RefDeinitialized;
+        } else if (ref.strongCount() == 1) {
+            // Clone the Ref to create a Manager-owned reference. The caller's Ref will still be valid and must be deinitialized by the caller when done.
+            soft_ref = soft_ref.clone();
+        }
+        const resource_entry = ResourceEntry.init(
+            @ptrCast(@alignCast(soft_ref)),
+            type_hash,
+            @sizeOf(T),
+            deinit_fn,
+        );
+
+        result.value_ptr.* = resource_entry;
+    }
+
     /// Get a reference-counted handle to a resource of type T, or null if it doesn't exist.
     ///
     /// Example:

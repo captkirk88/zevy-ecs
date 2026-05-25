@@ -293,6 +293,26 @@ test "Manager - addResource" {
     try std.testing.expect(res_guard.get().max_players == 10);
 }
 
+test "Manager - addResourceRef with ArcRwLock Ref" {
+    var manager = try Manager.init(std.testing.allocator);
+    defer manager.deinit();
+
+    const config = GameConfig{ .difficulty = 9, .max_players = 99 };
+    const resource_ref = try @import("zevy_mem").pointers.ArcRwLock(GameConfig).init(std.testing.allocator, config);
+    defer resource_ref.deinit();
+
+    // Ownership of this Ref is transferred to the manager.
+    try manager.addResourceRef(GameConfig, resource_ref.clone());
+
+    var retrieved_ref = manager.getResource(GameConfig).?;
+    defer retrieved_ref.deinit();
+    var retrieved_guard = retrieved_ref.lockRead();
+    defer retrieved_guard.deinit();
+
+    try std.testing.expect(retrieved_guard.get().difficulty == 9);
+    try std.testing.expect(retrieved_guard.get().max_players == 99);
+}
+
 test "Manager - addResource duplicate fails" {
     var manager = try Manager.init(std.testing.allocator);
     defer manager.deinit();
