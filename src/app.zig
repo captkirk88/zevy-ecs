@@ -46,7 +46,7 @@ pub fn App(comptime SystemParamRegistry: type) type {
         pub fn addPlugin(self: *Self, comptime PluginType: type, plugin: PluginType) *Self {
             const inner = appInner(self);
             if (inner.is_empty) return self;
-            inner.plugin_man.add(PluginType, plugin) catch |err| handleError(self.io(), err);
+            inner.plugin_man.add(PluginType, plugin) catch |err| handleError(err, @errorReturnTrace());
             return self;
         }
 
