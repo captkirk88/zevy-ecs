@@ -83,6 +83,7 @@ pub fn Ref(comptime T: type) type {
 /// ECS Manager responsible for entity lifecycle, archetype management, resources, and systems.
 pub const Manager = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     next_entity_id: u32,
     generations: std.ArrayList(u32), // Generation per entity ID
     free_ids: std.ArrayList(u32), // Reusable entity IDs
@@ -103,9 +104,13 @@ pub const Manager = struct {
 
     /// Initialize the ECS with an optional custom allocator.
     /// If no allocator is provided, the default page allocator is used.
-    pub fn init(allocator: std.mem.Allocator) !Manager {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        init_io: std.Io,
+    ) !Manager {
         var manager = Manager{
             .allocator = allocator,
+            .io = init_io,
             .next_entity_id = 0,
             .generations = try std.ArrayList(u32).initCapacity(allocator, 1024),
             .free_ids = try std.ArrayList(u32).initCapacity(allocator, 256),
@@ -848,7 +853,7 @@ pub fn _removeComponentBatch(self: *Manager, entities: []const Entity, comptime 
 }
 
 test "Query with just Entity" {
-    var ecs_instance = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs_instance = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs_instance.deinit();
     const amount = 100;
     for (0..amount) |_| {
@@ -866,7 +871,7 @@ test "Query with just Entity" {
 }
 
 test "Create entity using create() with null or empty" {
-    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs.deinit();
     const amount = 100;
     for (0..amount) |_| {
@@ -886,7 +891,7 @@ test "Create entity using create() with null or empty" {
 
 // Focused test to exercise migration/remove and check archetype invariants
 test "World migration and archetype invariants" {
-    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs.deinit();
 
     const A = struct { a: u32 };
@@ -936,7 +941,7 @@ test "World migration and archetype invariants" {
 }
 
 test "removeSystem removes cached system" {
-    var ecs = try Manager.init(std.testing.allocator);
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     // Create a test resource to verify system execution
@@ -974,7 +979,7 @@ test "removeSystem removes cached system" {
 }
 
 test "removeSystem with same function cached twice returns same handle" {
-    var ecs = try Manager.init(std.testing.allocator);
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     const TestCounter = struct { count: u32 };
@@ -1007,7 +1012,7 @@ test "removeSystem with same function cached twice returns same handle" {
 }
 
 test "Entity destruction and reuse" {
-    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs.deinit();
 
     const entity1 = ecs.createEmpty();
@@ -1029,10 +1034,10 @@ test "Entity destruction and reuse" {
 }
 
 test "copyEntityFrom copies components between managers" {
-    var ecs_src = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs_src = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs_src.deinit();
 
-    var ecs_dst = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs_dst = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs_dst.deinit();
 
     const Position = struct { x: f32, y: f32 };
@@ -1056,10 +1061,10 @@ test "copyEntityFrom copies components between managers" {
 }
 
 test "moveEntityTo moves components and destroys source" {
-    var ecs_src = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs_src = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs_src.deinit();
 
-    var ecs_dst = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs_dst = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs_dst.deinit();
 
     const Position = struct { x: f32, y: f32 };
@@ -1078,7 +1083,7 @@ test "moveEntityTo moves components and destroys source" {
 }
 
 test "copyEntityFrom same manager duplicates components" {
-    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs.deinit();
 
     const Position = struct { x: f32, y: f32 };
@@ -1105,7 +1110,7 @@ test "copyEntityFrom same manager duplicates components" {
 }
 
 test "getOrAddResource" {
-    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs.deinit();
 
     const MyResource = struct {
@@ -1119,7 +1124,7 @@ test "getOrAddResource" {
 }
 
 test "addResource keeps manager-owned reference" {
-    var ecs = try Manager.init(std.testing.allocator);
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     const res = try ecs.addResource(u32, 42);
@@ -1136,7 +1141,7 @@ test "addResource keeps manager-owned reference" {
 }
 
 test "Scheduler resource survives repeated access" {
-    var ecs = try Manager.init(std.testing.allocator);
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     const TestEvent = struct { value: u32 };
@@ -1177,7 +1182,7 @@ test "Scheduler resource survives repeated access" {
 
 // Stress test to try to surface migration/invariant issues
 test "World randomized churn stress test" {
-    var ecs = Manager.init(std.testing.allocator) catch unreachable;
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
     defer ecs.deinit();
 
     const A = struct { a: u32 };

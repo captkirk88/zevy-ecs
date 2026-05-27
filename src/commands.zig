@@ -62,6 +62,10 @@ pub const CommandsInner = opaque {
         return commandsInner(self)._allocator;
     }
 
+    pub fn io(self: Commands) std.Io {
+        return commandsInner(self)._manager.io;
+    }
+
     /// Create a deferred entity and return EntityCommands for chaining operations.
     /// The entity is NOT created immediately — call EntityCommands.flush() to create it.
     ///

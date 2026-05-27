@@ -205,7 +205,7 @@ fn onAddedRemovedSystem(added: params.OnAdded(Position), removed: params.OnRemov
 }
 
 test "System - basic execution" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const system = ToSystem(simpleSystem, DefaultRegistry);
@@ -213,7 +213,7 @@ test "System - basic execution" {
 }
 
 test "System - with resource parameter" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const dt = DeltaTime{ .value = 0.016 };
@@ -224,7 +224,7 @@ test "System - with resource parameter" {
 }
 
 test "System - with query parameter" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..5) |i| {
@@ -237,7 +237,7 @@ test "System - with query parameter" {
 }
 
 test "System - query parameter can be explicitly deinited before writes" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..4) |i| {
@@ -262,7 +262,7 @@ test "System - query parameter can be explicitly deinited before writes" {
 }
 
 test "System - with multiple parameters" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const dt = DeltaTime{ .value = 0.016 };
@@ -279,7 +279,7 @@ test "System - with multiple parameters" {
 }
 
 test "System - Local parameter" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const system = ToSystem(localSystem, DefaultRegistry);
@@ -291,7 +291,7 @@ test "System - Local parameter" {
 }
 
 test "System - EventWriter and EventReader" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const write_sys = ToSystem(eventWriterSystem, DefaultRegistry);
@@ -302,7 +302,7 @@ test "System - EventWriter and EventReader" {
 }
 
 test "System - createSystemCached" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const handle = manager.createSystemCached(simpleSystem, DefaultRegistry);
@@ -310,7 +310,7 @@ test "System - createSystemCached" {
 }
 
 test "System - cacheSystem" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create a system manually
@@ -324,7 +324,7 @@ test "System - cacheSystem" {
 }
 
 test "System - ToSystemWithArgs" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const system = ToSystemWithArgs(systemWithArgs, .{ @as(i32, 5), @as(i32, 4) }, DefaultRegistry);
@@ -332,7 +332,7 @@ test "System - ToSystemWithArgs" {
 }
 
 test "System - pipe functionality" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const piped = systems.pipe(producer, consumer, DefaultRegistry);
@@ -340,7 +340,7 @@ test "System - pipe functionality" {
 }
 
 test "System - pipe propagates error from first system" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const piped = systems.pipe(producerError, consumer, DefaultRegistry);
@@ -349,7 +349,7 @@ test "System - pipe propagates error from first system" {
 }
 
 test "System - runIf conditional" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const conditional = systems.runIf(predicateTrue, conditionalSystem, DefaultRegistry);
@@ -357,7 +357,7 @@ test "System - runIf conditional" {
 }
 
 test "System - chain runs systems sequentially" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const counter = ChainCounter{ .value = 2 };
@@ -375,7 +375,7 @@ test "System - chain runs systems sequentially" {
 }
 
 test "System - resource mutation" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const dt = DeltaTime{ .value = 1.0 };
@@ -389,7 +389,7 @@ test "System - resource mutation" {
 }
 
 test "System - error handling" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const system = ToSystem(errorSys, DefaultRegistry);
@@ -399,7 +399,7 @@ test "System - error handling" {
 }
 
 test "System - return value" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const system = ToSystem(returnSys, DefaultRegistry);
@@ -409,7 +409,7 @@ test "System - return value" {
 }
 
 test "System - OnAdded and OnRemoved system params" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
     const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     // Ensure no leftover component events from earlier tests
@@ -426,7 +426,7 @@ test "System - OnAdded and OnRemoved system params" {
 }
 
 test "System signature populated in Debug mode" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const TestSystem = struct {
@@ -447,7 +447,7 @@ test "System signature populated in Debug mode" {
 }
 
 test "SystemHandle signature in Debug mode" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const TestSystem = struct {
@@ -469,7 +469,7 @@ test "SystemHandle signature in Debug mode" {
 }
 
 test "UntypedSystemHandle signature in Debug mode" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const TestSystem = struct {
@@ -492,7 +492,7 @@ test "UntypedSystemHandle signature in Debug mode" {
 }
 
 test "UntypedSystemHandle format includes sig in Debug mode" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const TestSystem = struct {
@@ -523,7 +523,7 @@ test "UntypedSystemHandle format includes sig in Debug mode" {
 }
 
 test "SystemHandle format with {d} shows only number" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const TestSystem = struct {
@@ -551,7 +551,7 @@ test "SystemHandle format with {d} shows only number" {
 test "Multiple systems have different debug sigs" {
     if (!is_debug) return error.SkipZigTest;
 
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Use systems with different signatures to get different output
@@ -573,7 +573,7 @@ test "Multiple systems have different debug sigs" {
 }
 
 test "System with injected args has correct debug name" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const TestSystem = struct {
@@ -589,7 +589,7 @@ test "System with injected args has correct debug name" {
 }
 
 test "SystemDebugInfo contains parameter information" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Setup resources and entities for the system

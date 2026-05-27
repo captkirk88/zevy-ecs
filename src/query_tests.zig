@@ -31,7 +31,7 @@ const Team = struct {
 };
 
 test "Query - basic iteration with single component" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entities with Position
@@ -52,7 +52,7 @@ test "Query - basic iteration with single component" {
 }
 
 test "Query - multiple components" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entities with Position and Velocity
@@ -82,7 +82,7 @@ test "Query - multiple components" {
 }
 
 test "Query - Without(T) filters archetypes without yielding a field" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entities with Position and Health
@@ -124,7 +124,7 @@ test "Query - Without(T) filters archetypes without yielding a field" {
 }
 
 test "Query - With(T) filters archetypes without yielding a field" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..4) |i| {
@@ -155,7 +155,7 @@ test "Query - With(T) filters archetypes without yielding a field" {
 }
 
 test "Query - With and Without tuple payloads" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     _ = manager.create(.{ Position{ .x = 1.0, .y = 0.0 }, Health{ .value = 100 }, Team{ .id = 1 } });
@@ -180,7 +180,7 @@ test "Query - With and Without tuple payloads" {
 }
 
 test "Query - with Entity field" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var entities: [5]Entity = undefined;
@@ -202,7 +202,7 @@ test "Query - with Entity field" {
 }
 
 test "Query - only Entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..20) |_| {
@@ -221,7 +221,7 @@ test "Query - only Entity" {
 }
 
 test "Query - empty query (no entities match)" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entities with Position only
@@ -242,7 +242,7 @@ test "Query - empty query (no entities match)" {
 }
 
 test "Query - mutation through query" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..10) |i| {
@@ -272,7 +272,7 @@ test "Query - mutation through query" {
 }
 
 test "Query - entity() returns the last yielded entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var expected_entities: [4]Entity = undefined;
@@ -294,7 +294,7 @@ test "Query - entity() returns the last yielded entity" {
 }
 
 test "Query - optional components" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entities with Position and Velocity
@@ -333,7 +333,7 @@ test "Query - optional components" {
 }
 
 test "Query - multiple archetypes" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create different archetype combinations, all having Position
@@ -373,7 +373,7 @@ test "Query - multiple archetypes" {
 }
 
 test "Query - complex Without tuple pattern" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Entities with Position, Velocity
@@ -416,7 +416,7 @@ test "Query - complex Without tuple pattern" {
 }
 
 test "Query - large dataset iteration" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const count = 10_000;
@@ -440,7 +440,7 @@ test "Query - large dataset iteration" {
 }
 
 test "Query - entity and multiple components" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var entities: [10]Entity = undefined;
@@ -466,7 +466,7 @@ test "Query - entity and multiple components" {
 }
 
 test "Query - mixed optional and required components" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Entities with Position, Velocity, Health
@@ -507,7 +507,7 @@ test "Query - mixed optional and required components" {
 }
 
 test "Query - empty entity set" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var q = manager.query(struct { pos: Position });
@@ -521,7 +521,7 @@ test "Query - empty entity set" {
 }
 
 test "Query - query result consistency across multiple iterations" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..5) |i| {
@@ -550,7 +550,7 @@ test "Query - query result consistency across multiple iterations" {
 }
 
 test "Query - component with pointer field" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Component that holds a pointer
@@ -614,7 +614,7 @@ test "Query - component with pointer field" {
 }
 
 test "Query - component with slice field" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Component that holds a slice
@@ -659,7 +659,7 @@ test "Query - component with slice field" {
 }
 
 test "Query - component with multiple pointer types" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Component with different pointer types
@@ -710,7 +710,7 @@ test "Query - component with multiple pointer types" {
 }
 
 test "Query - hasNext" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     for (0..3) |i| {
@@ -757,7 +757,7 @@ const ActiveUnit = struct {
 };
 
 test "Query - custom filter type with With(T)" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Entities with Position + Health
@@ -788,7 +788,7 @@ test "Query - custom filter type with With(T)" {
 }
 
 test "Query - custom filter type with Without(T)" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Entities with Position + Health
@@ -814,7 +814,7 @@ test "Query - custom filter type with Without(T)" {
 }
 
 test "Query - custom filter with tuple payload (multiple requires)" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Position + Velocity
@@ -839,7 +839,7 @@ test "Query - custom filter with tuple payload (multiple requires)" {
 }
 
 test "Query - custom filter with struct return (multiple constraints)" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Position + Health (matches: has Health, no Armor)
@@ -869,7 +869,7 @@ test "Query - custom filter with struct return (multiple constraints)" {
 }
 
 test "Query - multiple custom filters combined" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Position + Velocity + Health (matches all filters)
@@ -903,7 +903,7 @@ test "Query - multiple custom filters combined" {
 }
 
 test "Query - custom filter combined with explicit With/Without" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Position + Health + Team (matches)
@@ -956,7 +956,7 @@ const HealthValue = struct {
 };
 
 test "Query - custom type with QueryResultType only (no QueryFilter)" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const e1 = manager.create(.{Position{ .x = 1.0, .y = 0.0 }});
@@ -983,7 +983,7 @@ test "Query - custom type with QueryResultType only (no QueryFilter)" {
 }
 
 test "Query - custom type with both QueryFilter and QueryResultType" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Entities with Health (matched)

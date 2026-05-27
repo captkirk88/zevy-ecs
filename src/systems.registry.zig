@@ -169,8 +169,7 @@ pub fn flattenParamTypes(comptime T: type, merged_types: *[]const type) void {
 }
 
 test "merged SystemParamRegistry" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     const CustomParam = struct {
         pub fn matches(comptime T: type) bool {
@@ -198,8 +197,7 @@ test "merged SystemParamRegistry" {
 }
 
 test "CustomSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     const CustomParam = struct {
         pub fn matches(comptime T: type) bool {
@@ -217,9 +215,8 @@ test "CustomSystemParam basic" {
 
 test "CustomSystemParam with Query, Res, Local fields" {
     const query = @import("query.zig");
-    const allocator = std.testing.allocator;
 
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     const res_val: i32 = 7;
     try ecs_instance.addResourceRetained(i32, res_val);

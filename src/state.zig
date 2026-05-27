@@ -44,7 +44,7 @@ pub fn StateManager(comptime StateEnum: type) type {
 
 test "Scheduler register state type" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -65,7 +65,7 @@ test "Scheduler register state type" {
 
 test "Scheduler duplicate state registration" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -82,7 +82,7 @@ test "Scheduler duplicate state registration" {
 
 test "Scheduler state transition" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -107,7 +107,7 @@ test "Scheduler state transition" {
 
 test "Scheduler get active state name" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -134,7 +134,7 @@ test "Scheduler get active state name" {
 
 test "Scheduler state transition processing" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -158,7 +158,7 @@ test "Scheduler state transition processing" {
 
 test "Scheduler unregistered state transition" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -175,7 +175,7 @@ test "Scheduler unregistered state transition" {
 
 test "States parameter in system" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -227,7 +227,7 @@ test "States parameter in system" {
 
 test "OnEnter and OnExit systems" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -353,7 +353,7 @@ test "OnEnter and OnExit systems" {
 
 test "InState systems" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);

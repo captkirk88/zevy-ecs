@@ -124,7 +124,7 @@ pub fn new(init: std.process.Init, comptime ParamRegistry: type) *App(ParamRegis
     };
     new_app.* = AppInner{
         .is_empty = false,
-        .ecs_man = zevy_ecs.Manager.init(allocator) catch |err| {
+        .ecs_man = zevy_ecs.Manager.init(allocator, init.io) catch |err| {
             handleError(err, @errorReturnTrace());
             return appFromInner(ParamRegistry, &empty.app);
         },

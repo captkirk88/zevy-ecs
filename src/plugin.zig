@@ -39,7 +39,7 @@ const Plugin = PluginTemplate.Interface;
 ///
 /// Example:
 /// ```zig
-/// var manager = zevy_ecs.Manager.init(allocator);
+/// var manager = zevy_ecs.Manager.init(allocator, io);
 /// defer manager.deinit();
 ///
 /// var plugin_manager = PluginManager.init(allocator);
@@ -300,7 +300,7 @@ test "Plugin basic functionality" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -336,7 +336,7 @@ test "PluginManager add single plugin" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -372,7 +372,7 @@ test "PluginManager addAt single plugin" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -423,7 +423,7 @@ test "PluginManager add multiple plugins" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -460,7 +460,7 @@ test "PluginManager prevents duplicate plugins" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -528,7 +528,7 @@ test "Plugin with deinit for proper memory cleanup" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -592,7 +592,7 @@ test "PluginManager continues deinit on plugin error" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -653,7 +653,7 @@ test "PluginManager getNames returns correct plugin names" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -693,7 +693,7 @@ test "PluginManager addPlugin" {
         }
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
@@ -740,7 +740,7 @@ test "PluginManager addBundle" {
         plugin_two: PluginTwo = .{},
     };
 
-    var manager = try zevy_ecs.Manager.init(std.testing.allocator);
+    var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var plugin_manager = PluginManager.init(std.testing.allocator);

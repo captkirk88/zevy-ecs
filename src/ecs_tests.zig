@@ -53,7 +53,7 @@ const GameConfig = packed struct {
 };
 
 test "Manager - createEmpty entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const entity1 = manager.createEmpty();
@@ -67,7 +67,7 @@ test "Manager - createEmpty entity" {
 }
 
 test "Manager - create entity with components" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
@@ -81,7 +81,7 @@ test "Manager - create entity with components" {
 }
 
 test "Manager - create multiple entities" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     var entities: [100]Entity = undefined;
@@ -98,7 +98,7 @@ test "Manager - create multiple entities" {
 }
 
 test "Manager - createBatch" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 5.0, .y = 10.0 };
@@ -116,7 +116,7 @@ test "Manager - createBatch" {
 }
 
 test "Manager - isAlive with valid entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const entity = manager.createEmpty();
@@ -124,7 +124,7 @@ test "Manager - isAlive with valid entity" {
 }
 
 test "Manager - isAlive with invalid entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const fake_entity = Entity{ .id = 999, .generation = 0 };
@@ -132,7 +132,7 @@ test "Manager - isAlive with invalid entity" {
 }
 
 test "Manager - addComponent to entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const entity = manager.createEmpty();
@@ -147,7 +147,7 @@ test "Manager - addComponent to entity" {
 }
 
 test "Manager - addComponent to dead entity fails" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const fake_entity = Entity{ .id = 999, .generation = 0 };
@@ -158,7 +158,7 @@ test "Manager - addComponent to dead entity fails" {
 }
 
 test "Manager - getComponent returns component" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 100.0, .y = 200.0 };
@@ -171,7 +171,7 @@ test "Manager - getComponent returns component" {
 }
 
 test "Manager - getComponent mutability" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 50.0, .y = 60.0 };
@@ -192,7 +192,7 @@ test "Manager - getComponent mutability" {
 }
 
 test "Manager - getComponent returns null for missing component" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
@@ -203,7 +203,7 @@ test "Manager - getComponent returns null for missing component" {
 }
 
 test "Manager - hasComponent returns true when present" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 1.0, .y = 2.0 };
@@ -214,7 +214,7 @@ test "Manager - hasComponent returns true when present" {
 }
 
 test "Manager - hasComponent returns false when absent" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 1.0, .y = 2.0 };
@@ -225,7 +225,7 @@ test "Manager - hasComponent returns false when absent" {
 }
 
 test "Manager - removeComponent" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
@@ -241,7 +241,7 @@ test "Manager - removeComponent" {
 }
 
 test "Manager - addComponent panics for Relation types" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const entity = manager.createEmpty();
@@ -253,7 +253,7 @@ test "Manager - addComponent panics for Relation types" {
 }
 
 test "Manager - removeComponent panics for Relation types" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const entity = manager.createEmpty();
@@ -263,7 +263,7 @@ test "Manager - removeComponent panics for Relation types" {
 }
 
 test "Manager - getAllComponents" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 5.0, .y = 10.0 };
@@ -279,7 +279,7 @@ test "Manager - getAllComponents" {
 }
 
 test "Manager - addResource" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 5, .max_players = 10 };
@@ -294,7 +294,7 @@ test "Manager - addResource" {
 }
 
 test "Manager - addResourceRef with ArcRwLock Ref" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 9, .max_players = 99 };
@@ -314,7 +314,7 @@ test "Manager - addResourceRef with ArcRwLock Ref" {
 }
 
 test "Manager - addResource duplicate fails" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config1 = GameConfig{ .difficulty = 5, .max_players = 10 };
@@ -326,7 +326,7 @@ test "Manager - addResource duplicate fails" {
 }
 
 test "Manager - getResource returns resource" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 7, .max_players = 15 };
@@ -344,7 +344,7 @@ test "Manager - getResource returns resource" {
 }
 
 test "Manager - getResource returns null for missing resource" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const retrieved = manager.getResource(GameConfig);
@@ -352,7 +352,7 @@ test "Manager - getResource returns null for missing resource" {
 }
 
 test "Manager - hasResource" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     try std.testing.expect(!manager.hasResource(GameConfig));
@@ -364,7 +364,7 @@ test "Manager - hasResource" {
 }
 
 test "Manager - removeResource" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 4, .max_players = 8 };
@@ -378,7 +378,7 @@ test "Manager - removeResource" {
 }
 
 test "Manager - listResourceTypeHashes" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 1, .max_players = 4 };
@@ -394,7 +394,7 @@ test "Manager - listResourceTypeHashes" {
 }
 
 test "Manager - query basic" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos1 = Position{ .x = 1.0, .y = 2.0 };
@@ -425,7 +425,7 @@ test "Manager - entity eql method" {
 }
 
 test "Manager - multiple component types per entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
@@ -440,7 +440,7 @@ test "Manager - multiple component types per entity" {
 }
 
 test "Manager - component migration when adding to existing entity" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const pos = Position{ .x = 1.0, .y = 2.0 };
@@ -463,7 +463,7 @@ test "Manager - component migration when adding to existing entity" {
 }
 
 test "Manager - stress test entity creation and component access" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const count = 10_000;
@@ -489,7 +489,7 @@ test "Manager - stress test entity creation and component access" {
 }
 
 test "Manager - resource mutation through pointer" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 1, .max_players = 2 };
@@ -513,7 +513,7 @@ test "Manager - resource mutation through pointer" {
 }
 
 test "Manager - component with pointer field" {
-    var manager = try Manager.init(std.testing.allocator);
+    var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Allocate a byte on the test allocator and store its pointer in the component
@@ -545,7 +545,7 @@ test "Manager - component with pointer to another component" {
         }
         debug_allocator.deinit();
     }
-    var manager = try Manager.init(debug_allocator.allocator());
+    var manager = try Manager.init(debug_allocator.allocator(), std.testing.io);
     defer manager.deinit();
 
     // Allocate a byte on the test allocator and store its pointer in the first component

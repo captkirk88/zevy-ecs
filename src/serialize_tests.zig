@@ -94,7 +94,7 @@ test "ComponentInstance - readFrom with insufficient data" {
 
 test "EntityInstance - fromEntity and toEntity" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entity with components
@@ -131,7 +131,7 @@ test "EntityInstance - fromEntity and toEntity" {
 
 test "EntityInstance - writeTo and readFrom" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create entity
@@ -176,7 +176,7 @@ test "EntityInstance - writeTo and readFrom" {
 
 test "EntityInstance - empty entity" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create empty entity
@@ -195,7 +195,7 @@ test "EntityInstance - empty entity" {
 
 test "EntityInstance - roundtrip serialization" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create multiple entities
@@ -251,7 +251,7 @@ test "EntityInstance - roundtrip serialization" {
 
 test "Manager - createFromComponents" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create component instances
@@ -280,7 +280,7 @@ test "Manager - createFromComponents" {
 
 test "Manager - createFromComponents empty" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     const components = [_]serialize.ComponentInstance{};
@@ -371,7 +371,7 @@ test "ComponentWriter and ComponentReader - writeComponents and readComponents" 
 
 test "EntityInstance - with relation component (Entity field)" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create two entities - parent and child
@@ -415,7 +415,7 @@ test "EntityInstance - with relation component (Entity field)" {
 
 test "EntityInstance - serialize and deserialize with relation component" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Define a custom relation component with Entity field
@@ -474,7 +474,7 @@ test "EntityInstance - serialize and deserialize with relation component" {
 test "ResourceSnapshot - fromManager and toManager" {
     const allocator = testing.allocator;
 
-    var source_manager = try ecs.Manager.init(allocator);
+    var source_manager = try ecs.Manager.init(allocator, std.testing.io);
     defer source_manager.deinit();
 
     try source_manager.addResourceRetained(GameConfig, .{
@@ -506,7 +506,7 @@ test "ResourceSnapshot - fromManager and toManager" {
     var restored_score = try serialize.ResourceSnapshot.readFrom(&reader, allocator);
     defer restored_score.deinit(allocator);
 
-    var target_manager = try ecs.Manager.init(allocator);
+    var target_manager = try ecs.Manager.init(allocator, std.testing.io);
     defer target_manager.deinit();
 
     try target_manager.addResourceRetained(GameConfig, .{
@@ -537,7 +537,7 @@ test "ResourceSnapshot - fromManager and toManager" {
 test "ResourceSnapshot - toManager requires existing resources" {
     const allocator = testing.allocator;
 
-    var source_manager = try ecs.Manager.init(allocator);
+    var source_manager = try ecs.Manager.init(allocator, std.testing.io);
     defer source_manager.deinit();
 
     try source_manager.addResourceRetained(GameConfig, .{
@@ -550,7 +550,7 @@ test "ResourceSnapshot - toManager requires existing resources" {
     var score_snapshot = try serialize.ResourceSnapshot.fromManager(allocator, &source_manager, Score);
     defer score_snapshot.deinit(allocator);
 
-    var target_manager = try ecs.Manager.init(allocator);
+    var target_manager = try ecs.Manager.init(allocator, std.testing.io);
     defer target_manager.deinit();
 
     try target_manager.addResourceRetained(GameConfig, .{
@@ -564,7 +564,7 @@ test "ResourceSnapshot - toManager requires existing resources" {
 
 test "EntityInstance - with references (fromEntityWithReferences)" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Create parent entity
@@ -604,10 +604,10 @@ test "EntityInstance - with references (fromEntityWithReferences)" {
 
 test "EntityInstance - roundtrip with relation component" {
     const allocator = testing.allocator;
-    var manager1 = try ecs.Manager.init(allocator);
+    var manager1 = try ecs.Manager.init(allocator, std.testing.io);
     defer manager1.deinit();
 
-    var manager2 = try ecs.Manager.init(allocator);
+    var manager2 = try ecs.Manager.init(allocator, std.testing.io);
     defer manager2.deinit();
 
     // Define relation component
@@ -650,7 +650,7 @@ test "EntityInstance - roundtrip with relation component" {
 
 test "EntityInstance - multiple Entity fields in component" {
     const allocator = testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     // Component with multiple Entity fields

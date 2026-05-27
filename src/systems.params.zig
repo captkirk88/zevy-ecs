@@ -838,8 +838,7 @@ const CommandsSystemParamImpl = struct {
 pub const CommandsSystemParam = SystemParam(ExactBaseMatcher(true, CommandsInner), CommandsSystemParamImpl);
 
 test "ResourceSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     const value: i32 = 42;
     try ecs_instance.addResourceRetained(i32, value);
@@ -849,8 +848,7 @@ test "ResourceSystemParam basic" {
 }
 
 test "ResourceMutSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     try ecs_instance.addResourceRetained(i32, 1);
 
@@ -868,8 +866,7 @@ test "ResourceMutSystemParam basic" {
 }
 
 test "LocalSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     const local_ptr = try LocalSystemParam.apply(&ecs_instance, Local(i32));
     local_ptr.set(99);
@@ -877,8 +874,7 @@ test "LocalSystemParam basic" {
 }
 
 test "EventReaderSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     var reader = try EventReaderSystemParam.apply(&ecs_instance, EventReader(u32));
     defer EventReaderSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&reader)), EventReader(u32));
@@ -886,8 +882,7 @@ test "EventReaderSystemParam basic" {
 }
 
 test "EventWriterSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var ecs_instance = try ecs.Manager.init(allocator);
+    var ecs_instance = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer ecs_instance.deinit();
     var writer = try EventWriterSystemParam.apply(&ecs_instance, EventWriter(u32));
     defer EventWriterSystemParam.deinit(&ecs_instance, @ptrCast(@alignCast(&writer)), EventWriter(u32));
@@ -895,8 +890,7 @@ test "EventWriterSystemParam basic" {
 }
 
 test "OnAddedSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const Position = struct { x: f32, y: f32 };
@@ -914,8 +908,7 @@ test "OnAddedSystemParam basic" {
 }
 
 test "OnRemovedSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const Position = struct { x: f32, y: f32 };
@@ -932,8 +925,7 @@ test "OnRemovedSystemParam basic" {
 }
 
 test "RelationsSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const Child = @import("relations.zig").Child;
@@ -959,8 +951,7 @@ test "RelationsSystemParam basic" {
 }
 
 test "SingleSystemParam basic" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     // Create an entity with Position component
@@ -974,8 +965,7 @@ test "SingleSystemParam basic" {
 }
 
 test "CommandsSystemParam advanced" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const commands = try CommandsSystemParam.apply(&manager, Commands);
@@ -1039,8 +1029,7 @@ test "CommandsSystemParam advanced" {
 }
 
 test "Commands deferred entity creation" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const commands = try CommandsSystemParam.apply(&manager, Commands);
@@ -1090,8 +1079,7 @@ test "Commands deferred entity creation" {
 }
 
 test "Commands deferred entity creation supports aligned component payloads" {
-    const allocator = std.testing.allocator;
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
     const commands = try CommandsSystemParam.apply(&manager, Commands);

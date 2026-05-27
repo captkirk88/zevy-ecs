@@ -30,7 +30,7 @@ const SocketData = struct {
 test "RelationManager - basic init/deinit" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -42,7 +42,7 @@ test "RelationManager - basic init/deinit" {
 test "RelationManager - non-indexed relation (zero overhead)" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -71,7 +71,7 @@ test "RelationManager - non-indexed relation (zero overhead)" {
 test "RelationManager - indexed relation creates index lazily" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -98,7 +98,7 @@ test "RelationManager - indexed relation creates index lazily" {
 test "RelationManager - indexed relation reverse queries" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -131,7 +131,7 @@ test "RelationManager - indexed relation reverse queries" {
 test "RelationManager - exclusive relation replaces existing" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -170,7 +170,7 @@ test "RelationManager - exclusive relation replaces existing" {
 test "RelationManager - non-exclusive relations allow multiple" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -203,7 +203,7 @@ test "RelationManager - non-exclusive relations allow multiple" {
 test "RelationManager - relation with custom data" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -227,7 +227,7 @@ test "RelationManager - relation with custom data" {
 test "RelationManager - remove relation" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -260,7 +260,7 @@ test "RelationManager - remove relation" {
 test "RelationManager - removeEntity cleans up all relations" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -297,7 +297,7 @@ test "RelationManager - removeEntity cleans up all relations" {
 test "RelationManager - has() checks relation existence" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -323,7 +323,7 @@ test "RelationManager - has() checks relation existence" {
 test "RelationManager - query entities with relations" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -359,7 +359,7 @@ test "RelationManager - query entities with relations" {
 test "RelationManager - mixed indexed and non-indexed relations" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -391,7 +391,7 @@ test "RelationManager - mixed indexed and non-indexed relations" {
 test "RelationManager - hierarchy traversal" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -438,7 +438,7 @@ test "RelationManager - hierarchy traversal" {
 test "RelationManager - memory efficiency for sparse relations" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_manager = RelationManager.init(allocator);
@@ -469,7 +469,7 @@ test "RelationManager - memory efficiency for sparse relations" {
 test "RelationManager - auto index update when Relation component added directly" {
     const allocator = std.testing.allocator;
 
-    var manager = try ecs.Manager.init(allocator);
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
     defer manager.deinit();
 
     var rel_ref = manager.getResource(RelationManager).?;

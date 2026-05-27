@@ -806,7 +806,7 @@ test "Scheduler registerEventType" {
         message: []const u8,
     };
 
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -846,7 +846,7 @@ test "Scheduler registerEventType" {
 
 test "Scheduler addStage" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -888,7 +888,7 @@ test "Scheduler addStage" {
 
 test "Scheduler getStageInfo" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -926,7 +926,7 @@ test "Scheduler getStageInfo" {
 
 test "Scheduler runStage on non-existing stage" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -939,7 +939,7 @@ test "Scheduler runStage on non-existing stage" {
 
 test "Scheduler assign outside scope" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -969,7 +969,7 @@ test "Scheduler assign outside scope" {
 
 test "Scheduler runStages executes custom stages in sorted order" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -1033,7 +1033,7 @@ test "Scheduler runStages executes custom stages in sorted order" {
 
 test "Scheduler discards handled component events in Last stage" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -1076,7 +1076,7 @@ test "Scheduler discards handled component events in Last stage" {
 
 test "Custom stage types with explicit priorities" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -1117,7 +1117,7 @@ test "Custom stage types with explicit priorities" {
 
 test "Custom stage types with hash-based IDs" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -1185,7 +1185,7 @@ test "StageInRange returns base if in range and maps out-of-range to within rang
 
 test "State management without registration throws errors" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     var scheduler = try Scheduler.init(allocator);
@@ -1216,7 +1216,7 @@ test "State management without registration throws errors" {
 
 test "Concurrent stage: two independent systems both run" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     // Two distinct resource types written by separate systems.
@@ -1264,7 +1264,7 @@ test "Concurrent stage: two independent systems both run" {
 
 test "chain(): systems within a chain run in order" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     // Use distinct resource types so each system has a unique signature and
@@ -1323,7 +1323,7 @@ test "chain(): systems within a chain run in order" {
 
 test "Concurrent stage: Commands deferred flush adds components" {
     const allocator = std.testing.allocator;
-    var ecs = try ecs_mod.Manager.init(allocator);
+    var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
     const commands_mod = @import("commands.zig");
