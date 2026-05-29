@@ -68,7 +68,13 @@ pub const ErrorGroup = struct {
     }
 
     pub fn throw(self: *const ErrorGroup) !void {
+        const builtin = @import("builtin");
         if (self.len == 0) return;
+        if (builtin.mode == .Debug and !builtin.is_test) {
+            // In debug mode, throw the first error for easier debugging.
+            const first_err = @errorFromInt(self.buf[0]);
+            std.debug.panic("ErrorGroup threw: {s}\n", .{@errorName(first_err)});
+        }
         return @errorFromInt(self.buf[0]);
     }
 };

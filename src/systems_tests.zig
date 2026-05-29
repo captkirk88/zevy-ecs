@@ -102,9 +102,8 @@ fn queryEarlyDeinitSystem(commands: Commands, query: Query(struct { pos: Positio
     released_query.deinit();
 
     for (captured_entities.items) |entity| {
-        var entity_commands = try commands.entity(entity);
-        _ = try entity_commands.add(Velocity, .{ .dx = 1.0, .dy = 2.0 });
-        try entity_commands.flush();
+        var entity_commands = commands.entity(entity);
+        try entity_commands.add(Velocity, .{ .dx = 1.0, .dy = 2.0 }).flush();
     }
 }
 

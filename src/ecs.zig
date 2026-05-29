@@ -91,6 +91,7 @@ pub const Manager = struct {
     resources: *zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)), // TypeHash -> ResourceEntry
     resource_codecs: std.AutoHashMap(u64, ResourceCodec),
     systems: std.AutoHashMap(u64, *anyopaque), // SystemHash -> System pointer
+    scheduler: *scheduler_mod.Scheduler,
 
     relations: Ref(relations.RelationManager),
 
@@ -118,6 +119,7 @@ pub const Manager = struct {
             .resources = try zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)).init(allocator, std.AutoHashMap(u64, ResourceEntry).init(allocator)),
             .resource_codecs = std.AutoHashMap(u64, ResourceCodec).init(allocator),
             .systems = std.AutoHashMap(u64, *anyopaque).init(allocator),
+            .scheduler = undefined,
             .component_added = try events.EventStore(ComponentEvent).init(allocator, 64),
             .component_removed = try events.EventStore(ComponentEvent).init(allocator, 64),
             .command_queue_mutex = .init,
@@ -127,6 +129,20 @@ pub const Manager = struct {
         };
 
         manager.relations = try manager.addResource(relations.RelationManager, relations.RelationManager.init(allocator));
+
+        var scheduler_ptr: ?*scheduler_mod.Scheduler = null;
+        errdefer {
+            if (scheduler_ptr) |sched| {
+                sched.deinit();
+                allocator.destroy(sched);
+            }
+        }
+
+        const scheduler = try allocator.create(scheduler_mod.Scheduler);
+        scheduler.* = try scheduler_mod.Scheduler.init(allocator);
+        scheduler_ptr = scheduler;
+        manager.scheduler = scheduler;
+        scheduler_ptr = null;
 
         return manager;
     }
@@ -155,6 +171,8 @@ pub const Manager = struct {
         }
         self.systems.deinit();
 
+        self.scheduler.deinit();
+        self.allocator.destroy(self.scheduler);
         self.component_added.deinit();
         self.component_removed.deinit();
     }
@@ -503,11 +521,17 @@ pub const Manager = struct {
     ///
     /// The returned `Ref(T)` is a reference-counted handle to the resource. Call `deinit()` on the Ref when done to release it.
     pub fn addResource(self: *Manager, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
+        if (comptime T == scheduler_mod.Scheduler) @compileError("Scheduler may not be added as a Manager resource; Manager owns the scheduler directly.");
         const type_hash = comptime reflect.typeHash(T);
         var guard = self.resources.lock();
         defer guard.deinit();
         const result = try guard.get().getOrPut(type_hash);
-        if (result.found_existing) return error.ResourceAlreadyExists;
+        if (result.found_existing) {
+            if (builtin.mode == .Debug) {
+                std.debug.panic("Resource of type {s} already exists. Use getResource() to access it or removeResource() to replace it.", .{comptime reflect.TypeInfo.from(T).toStringEx(true)});
+            }
+            return error.ResourceAlreadyExists;
+        }
 
         const resource = try self.initResourceEntry(T, value);
         result.value_ptr.* = resource.entry;
@@ -522,6 +546,7 @@ pub const Manager = struct {
     }
 
     pub fn addResourceRef(self: *Manager, comptime T: type, ref: Ref(T)) error{ OutOfMemory, ResourceAlreadyExists, RefDeinitialized }!void {
+        if (comptime T == scheduler_mod.Scheduler) @compileError("Scheduler may not be added as a Manager resource; Manager owns the scheduler directly.");
         const type_hash = comptime reflect.typeHash(T);
         var guard = self.resources.lock();
         defer guard.deinit();
@@ -566,6 +591,7 @@ pub const Manager = struct {
     /// Returns a cloned `Ref(T)` handle. Caller must call `.deinit()` when done.
     /// Use `.lockRead()` for shared access or `.lockWrite()` for mutable access.
     pub fn getResource(self: *Manager, comptime T: type) ?Ref(T) {
+        if (comptime T == scheduler_mod.Scheduler) @compileError("Scheduler is not stored as a resource. Manager owns the scheduler directly.");
         const type_hash = reflect.typeHash(T);
         var guard = self.resources.lock();
         defer guard.deinit();
@@ -582,6 +608,7 @@ pub const Manager = struct {
     ///
     /// If no allocator is specified, defaults to the `Manager`'s allocator.
     pub fn getOrAddResource(self: *Manager, comptime T: type, default_value: T, allocator: ?std.mem.Allocator) error{OutOfMemory}!Ref(T) {
+        if (comptime T == scheduler_mod.Scheduler) @compileError("Scheduler may not be added as a Manager resource; Manager owns the scheduler directly.");
         if (self.getResource(T)) |res| {
             if (comptime reflect.hasFuncWithArgs(T, "deinit", &[_]type{std.mem.Allocator})) {
                 @constCast(&default_value).deinit(allocator orelse self.allocator);
@@ -600,6 +627,7 @@ pub const Manager = struct {
 
     /// Check if a resource of type T exists.
     pub fn hasResource(self: *Manager, comptime T: type) bool {
+        if (comptime T == scheduler_mod.Scheduler) @compileError("Scheduler is not a Manager resource. Manager owns the scheduler directly.");
         const type_hash = reflect.typeHash(T);
         var guard = self.resources.lock();
         defer guard.deinit();
@@ -609,6 +637,7 @@ pub const Manager = struct {
     /// Remove and deallocate a resource.
     /// Only deallocates memory if it was allocated by addResource (allocated field is true).
     pub fn removeResource(self: *Manager, comptime T: type) void {
+        if (comptime T == scheduler_mod.Scheduler) @compileError("Scheduler is not a Manager resource. Manager owns the scheduler directly.");
         const type_hash = reflect.typeHash(T);
         var guard = self.resources.lock();
         const res = guard.get().fetchRemove(type_hash) orelse {
@@ -668,39 +697,8 @@ pub const Manager = struct {
     /// The returned SystemHandle can be used to run the system later.
     /// If the system is already cached, returns the existing handle instead of creating a duplicate.
     pub fn createSystemCached(self: *Manager, comptime system_fn: anytype, comptime ParamRegistry: type) sys.SystemHandle(sys.ToSystemReturnType(system_fn)) {
-        const ReturnType = sys.ToSystemReturnType(system_fn);
-
-        // Generate a stable hash from the function type name and parameter registry type
-        // Using type names ensures stability across optimization levels
-        const FnType = @TypeOf(system_fn);
-        const param_registry_name = @typeName(ParamRegistry);
-        const fn_hash = reflect.typeHash(FnType);
-        const system_hash = reflect.hashWithSeed(param_registry_name, fn_hash);
-
-        // Check if system already exists
-        if (self.systems.get(system_hash)) |_| {
-            const debug_info = if (is_debug) blk: {
-                break :blk sys.SystemDebugInfo{
-                    .signature = @typeName(@TypeOf(system_fn)),
-                    .params = &[_]sys.ParamDebugInfo{},
-                };
-            } else {};
-            return sys.SystemHandle(ReturnType){ .handle = system_hash, .debug_info = debug_info };
-        }
-
-        // Create and cache new system
-        const s = self.createSystem(system_fn, ParamRegistry);
-        const sys_ptr = self.allocator.create(@TypeOf(s)) catch |err| @panic(@errorName(err));
-        sys_ptr.* = s;
-        const anyopaque_ptr: *anyopaque = @ptrCast(@alignCast(sys_ptr));
-        self.systems.put(system_hash, anyopaque_ptr) catch |err| @panic(@errorName(err));
-        const debug_info = if (is_debug) blk: {
-            break :blk sys.SystemDebugInfo{
-                .signature = @typeName(@TypeOf(system_fn)),
-                .params = &[_]sys.ParamDebugInfo{},
-            };
-        } else {};
-        return sys.SystemHandle(ReturnType){ .handle = system_hash, .debug_info = debug_info };
+        const system = sys.ToSystem(system_fn, ParamRegistry);
+        return self.cacheSystem(system);
     }
 
     /// Run a cached system by its SystemHandle.
@@ -762,9 +760,14 @@ pub const Manager = struct {
 
     pub fn removeSystem(self: *Manager, sys_handle: anytype) void {
         const sys_ptr = self.systems.fetchRemove(sys_handle.handle) orelse return;
-
-        const system: *sys.System(@TypeOf(sys_handle).return_type) = @ptrCast(@alignCast(sys_ptr.value));
-        self.allocator.destroy(system);
+        const SystemType = @TypeOf(sys_handle);
+        if (comptime sys.getSystemTypeFromType(SystemType) == .untyped) {
+            const system: *sys.System(void) = @ptrCast(@alignCast(sys_ptr.value));
+            self.allocator.destroy(system);
+        } else {
+            const system: *sys.System(SystemType.return_type) = @ptrCast(@alignCast(sys_ptr.value));
+            self.allocator.destroy(system);
+        }
     }
 };
 
@@ -1140,25 +1143,19 @@ test "addResource keeps manager-owned reference" {
     try std.testing.expectEqual(@as(u32, 42), guard.get().*);
 }
 
-test "Scheduler resource survives repeated access" {
+test "Manager-owned scheduler survives repeated access" {
     var ecs = try Manager.init(std.testing.allocator, std.testing.io);
     defer ecs.deinit();
 
     const TestEvent = struct { value: u32 };
     const Counter = struct { value: u32 };
 
-    const first = try ecs.getOrAddResource(scheduler_mod.Scheduler, try scheduler_mod.Scheduler.init(std.testing.allocator), null);
-    {
-        var first_guard = first.lockWrite();
-        defer first_guard.deinit();
-        try first_guard.get().registerEvent(&ecs, TestEvent, registry.DefaultParamRegistry);
-    }
-    first.deinit();
+    const first = ecs.scheduler;
+    try first.registerEvent(&ecs, TestEvent, registry.DefaultParamRegistry);
 
     try ecs.addResourceRetained(Counter, .{ .value = 0 });
 
-    const second = ecs.getResource(scheduler_mod.Scheduler) orelse return error.ResourceNotFound;
-    defer second.deinit();
+    const second = ecs.scheduler;
 
     const increment = struct {
         fn run(counter: params.ResMut(Counter)) void {
@@ -1166,12 +1163,8 @@ test "Scheduler resource survives repeated access" {
         }
     }.run;
 
-    {
-        var second_guard = second.lockWrite();
-        defer second_guard.deinit();
-        second_guard.get().addSystem(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update), increment, registry.DefaultParamRegistry);
-        _ = second_guard.get().runStage(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update));
-    }
+    second.addSystem(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update), increment, registry.DefaultParamRegistry);
+    _ = second.runStage(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update));
 
     const counter_ref = ecs.getResource(Counter) orelse return error.ResourceNotFound;
     defer counter_ref.deinit();

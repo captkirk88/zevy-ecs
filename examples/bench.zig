@@ -22,7 +22,7 @@ pub fn main(init: std.process.Init) !void {
     //if (builtin.mode == .Debug) return;
 
     const allocator = init.gpa;
-    var bench = Benchmark.init(allocator, .markdown);
+    var bench = Benchmark.init(init.io, allocator, .markdown);
     defer bench.deinit();
     try runBenchmarks(&bench, allocator, init.io);
 }
@@ -33,7 +33,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Non-batch Creation
     try bench.beginSection("Creation");
     for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
@@ -45,7 +45,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Batch Creation
     try bench.beginSection("Batch Creation");
     for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         const label = try std.fmt.allocPrint(allocator, "Create {d} Entities", .{count});
@@ -57,7 +57,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Mixed Systems
     try bench.beginSection("Mixed Systems");
     inline for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         // Setup entities
@@ -75,18 +75,14 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Scheduler
     try bench.beginSection("Scheduler");
     inline for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         var entities = try setupMixedEntities(&manager, allocator, count);
         defer entities.deinit(allocator);
+        setupScheduledMixedSystems(&manager);
 
-        var scheduler = try Scheduler.init(bench.allocator());
-        defer scheduler.deinit();
-
-        setupScheduledMixedSystems(&manager, &scheduler);
-
-        var stage_infos = scheduler.getStageInfo(allocator);
+        var stage_infos = manager.scheduler.getStageInfo(allocator);
         defer stage_infos.deinit(allocator);
         var active_stages = try std.ArrayList(StageId).initCapacity(allocator, stage_infos.items.len);
         defer active_stages.deinit(allocator);
@@ -100,13 +96,13 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         const label = try std.fmt.allocPrint(allocator, "{d} Entities, {d} Stages", .{ count, stage_count });
         defer allocator.free(label);
 
-        _ = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerMixedSystems, .{ &scheduler, &manager });
+        _ = try bench.run(label, BENCH_OPT_COUNT, benchSchedulerMixedSystems, .{&manager});
     }
 
     // CRUD Systems
     try bench.beginSection("CRUD System");
     inline for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         var entities = try setupMixedEntities(&manager, allocator, count);
@@ -123,7 +119,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Relations
     try bench.beginSection("Relations");
     for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         // Acquire Relations, build the scene graph, then release the lock before benchmarking.
@@ -156,7 +152,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Serialization
     try bench.beginSection("Serialization");
     inline for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         var entities = try setupMixedEntities(&manager, allocator, count);
@@ -171,7 +167,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Deserialization
     try bench.beginSection("Deserialization");
     inline for (counts) |count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         var entities = try setupMixedEntities(&manager, allocator, count);
@@ -186,7 +182,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Resource Serialization
     try bench.beginSection("Resource Serialization");
     inline for (resource_counts) |res_count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         addBenchResources(&manager, res_count);
@@ -200,7 +196,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Resource Deserialization
     try bench.beginSection("Resource Deserialization");
     inline for (resource_counts) |res_count| {
-        var manager = try Manager.init(bench.allocator());
+        var manager = try Manager.init(bench.allocator(), bench.io());
         defer manager.deinit();
 
         addBenchResources(&manager, res_count);
@@ -214,10 +210,10 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     // Manager Transfer
     try bench.beginSection("Manager Transfer");
     inline for (counts) |count| {
-        var src_manager = try Manager.init(bench.allocator());
+        var src_manager = try Manager.init(bench.allocator(), bench.io());
         defer src_manager.deinit();
 
-        var dst_manager = try Manager.init(bench.allocator());
+        var dst_manager = try Manager.init(bench.allocator(), bench.io());
         defer dst_manager.deinit();
 
         var entities = try setupMixedEntities(&src_manager, allocator, count);
@@ -241,7 +237,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
     try bench.print(&stdout_writer.interface);
     try stdout_writer.flush();
 
-    try bench.writeReportWithOptions(io, .{
+    try bench.writeReportWithOptions(.{
         .directory = ".",
         .file_name = "BENCHMARK.md",
     });
@@ -505,7 +501,7 @@ fn systemCrudAddRemoveComponents(commands: Commands, query: Query(TargetTracking
     while (released_query.next()) |item| {
         const pos: *Position = item.pos;
         const target = item.target.entity;
-        var target_commands = try commands.entity(target);
+        var target_commands = commands.entity(target);
 
         // Read from the target entity and update the current entity inline while the query is alive.
         if (try target_commands.get(Position)) |target_pos| {
@@ -530,12 +526,12 @@ fn systemCrudAddRemoveComponents(commands: Commands, query: Query(TargetTracking
 
     if (spawn_snapshot) |snapshot| {
         // Create a short-lived entity after releasing the query so the world can mutate safely.
-        var spawned = try commands.create();
+        var spawned = commands.create();
         defer spawned.deinit();
 
-        _ = try spawned.add(Position, snapshot);
-        _ = try spawned.add(Health, .{ .current = 1, .max = 1 });
-        _ = try spawned.destroy();
+        _ = spawned.add(Position, snapshot)
+            .add(Health, .{ .current = 1, .max = 1 })
+            .destroy();
     }
 }
 
@@ -628,7 +624,8 @@ fn benchMixedSystems(e: *Manager, systems: *const [7]zevy_ecs.UntypedSystemHandl
     }
 }
 
-fn setupScheduledMixedSystems(manager: *Manager, scheduler: *Scheduler) void {
+fn setupScheduledMixedSystems(manager: *Manager) void {
+    const scheduler = manager.scheduler;
     const DefaultRegistry = zevy_ecs.DefaultParamRegistry;
     scheduler.addSystem(manager, Stage(Stages.Update), systemMovement, DefaultRegistry);
     scheduler.addSystem(manager, Stage(Stages.Update), systemHealthRegen, DefaultRegistry);
@@ -643,8 +640,8 @@ fn setupScheduledMixedSystems(manager: *Manager, scheduler: *Scheduler) void {
 ///
 /// *Note*: This runs 7 systems through all entity counts (up to 1,000,000 entities as in the benchmarks above) split into
 /// stages according to the scheduler stages (Update / Draw / Last) so that each system runs in the stage it was added to
-fn benchSchedulerMixedSystems(scheduler: *Scheduler, manager: *Manager) void {
-    const eg = scheduler.runStages(manager, Stage(Stages.First), Stage(Stages.Last));
+fn benchSchedulerMixedSystems(manager: *Manager) void {
+    const eg = manager.scheduler.runStages(manager, Stage(Stages.First), Stage(Stages.Last));
     var iter = eg.iterator();
     while (iter.next()) |err| {
         std.debug.print("Error running scheduler stage: {s}\n", .{@errorName(err)});
@@ -744,7 +741,7 @@ fn systemUpdateTransforms(
         var parent_world_z: f32 = 0;
 
         const parent_entity = child_relation.target;
-        var parent_commands = commands.entity(parent_entity) catch continue;
+        var parent_commands = commands.entity(parent_entity);
         if (parent_commands.get(Transform) catch null) |parent_transform| {
             parent_world_x = parent_transform.world_x;
             parent_world_y = parent_transform.world_y;

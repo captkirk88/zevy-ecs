@@ -26,6 +26,7 @@ pub const ReportOptions = struct {
     title: []const u8 = "Benchmark Results",
 };
 
+_io: std.Io,
 base_allocator: std.mem.Allocator,
 counting_allocator: CountingAllocator,
 output_format: OutputFormat,
@@ -49,14 +50,19 @@ pub const BenchmarkResult = struct {
     }
 };
 
+pub fn io(self: *Self) std.Io {
+    return self._io;
+}
+
 /// Get the counting allocator's interface used for benchmarking
 pub fn allocator(self: *Self) std.mem.Allocator {
     return self.counting_allocator.allocator();
 }
 
 /// Initialize a Benchmark instance with the given allocator and output format.
-pub fn init(base_allocator: std.mem.Allocator, output_format: OutputFormat) Self {
+pub fn init(base_io: std.Io, base_allocator: std.mem.Allocator, output_format: OutputFormat) Self {
     return Self{
+        ._io = base_io,
         .base_allocator = base_allocator,
         .counting_allocator = CountingAllocator.init(base_allocator),
         .output_format = output_format,
@@ -103,10 +109,8 @@ pub fn clearSection(self: *Self) void {
     }
 }
 
-fn measureNow() std.Io.Timestamp {
-    var threaded: std.Io.Threaded = undefined;
-    const io = threaded.io();
-    return std.Io.Timestamp.now(io, std.Io.Clock.awake);
+fn measureNow(self: *Self) std.Io.Timestamp {
+    return std.Io.Timestamp.now(self._io, std.Io.Clock.awake);
 }
 
 fn callBenchmark(comptime func: anytype, args: anytype) anyerror!void {
@@ -158,13 +162,13 @@ pub fn run(self: *Self, name: []const u8, ops: usize, comptime func: anytype, ar
         const remaining_samples = timing_sample_count - sample_index;
         const batch_ops = if (remaining_ops == 0) 0 else @max(remaining_ops / remaining_samples, 1);
 
-        const start = measureNow();
+        const start = self.measureNow();
         var batch_index: usize = 0;
         while (batch_index < batch_ops) : (batch_index += 1) {
             try callBenchmark(func, args);
         }
 
-        const end = measureNow();
+        const end = self.measureNow();
         const batch_duration = @as(u64, @intCast(start.durationTo(end).nanoseconds));
         total_duration += batch_duration;
         sample_times[sample_index] = if (batch_ops > 0) batch_duration / batch_ops else 0;
@@ -214,12 +218,12 @@ pub fn printWithTitle(self: *const Self, writer: *std.Io.Writer, title: []const 
     }
 }
 
-pub fn writeReport(self: *const Self, io: std.Io) !void {
-    try self.writeReportWithOptions(io, .{});
+pub fn writeReport(self: *const Self) !void {
+    try self.writeReportWithOptions(self._io, .{});
 }
 
-pub fn writeReportWithOptions(self: *const Self, io: std.Io, options: ReportOptions) !void {
-    try std.Io.Dir.cwd().createDirPath(io, options.directory);
+pub fn writeReportWithOptions(self: *const Self, options: ReportOptions) !void {
+    try std.Io.Dir.cwd().createDirPath(self._io, options.directory);
 
     const resolved_file_name = blk: {
         if (options.file_name) |file_name| {
@@ -245,10 +249,10 @@ pub fn writeReportWithOptions(self: *const Self, io: std.Io, options: ReportOpti
     defer self.base_allocator.free(path);
 
     var buf: [65536]u8 = undefined;
-    var file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
-    defer file.close(io);
+    var file = try std.Io.Dir.cwd().createFile(self._io, path, .{ .truncate = true });
+    defer file.close(self._io);
 
-    var file_writer = file.writer(io, &buf);
+    var file_writer = file.writer(self._io, &buf);
     try self.printWithTitle(&file_writer.interface, options.title);
     try file_writer.flush();
 }

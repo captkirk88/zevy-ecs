@@ -985,8 +985,8 @@ test "CommandsSystemParam advanced" {
 
     // Test EntityCommands for existing entity
     const entity2 = manager.create(.{});
-    var ent_cmds = try commands.entity(entity2);
-    _ = try ent_cmds.add(Position, Position{ .x = 5.0, .y = 6.0 }); // Add position via EntityCommands
+    var ent_cmds = commands.entity(entity2);
+    _ = ent_cmds.add(Position, Position{ .x = 5.0, .y = 6.0 }); // Add position via EntityCommands
 
     // Resource operations
     const TestResource = struct { value: i32 };
@@ -1009,7 +1009,7 @@ test "CommandsSystemParam advanced" {
     try std.testing.expectError(error.EntityNotAlive, vel_after);
 
     // Check entity2 has position added via EntityCommands
-    var ent2_view = try commands.entity(entity2);
+    var ent2_view = commands.entity(entity2);
     const pos2_opt = try ent2_view.get(Position);
     try std.testing.expect(pos2_opt != null);
     const pos2 = pos2_opt.?;
@@ -1039,7 +1039,7 @@ test "Commands deferred entity creation" {
     const Velocity = struct { dx: f32, dy: f32 };
 
     // Create a deferred entity
-    var ent_cmds = try commands.create();
+    var ent_cmds = commands.create();
     defer ent_cmds.deinit();
 
     // Get the pending entity reference
@@ -1049,8 +1049,8 @@ test "Commands deferred entity creation" {
     try std.testing.expect(pending.entity == null);
 
     // Queue component additions
-    _ = try ent_cmds.add(Position, Position{ .x = 10.0, .y = 20.0 });
-    _ = try ent_cmds.add(Velocity, Velocity{ .dx = 1.0, .dy = 2.0 });
+    _ = ent_cmds.add(Position, Position{ .x = 10.0, .y = 20.0 });
+    _ = ent_cmds.add(Velocity, Velocity{ .dx = 1.0, .dy = 2.0 });
 
     // Entity still not created
     try std.testing.expect(pending.entity == null);
@@ -1089,12 +1089,11 @@ test "Commands deferred entity creation supports aligned component payloads" {
         vec: @Vector(4, f32),
     };
 
-    var ent_cmds = try commands.create();
+    var ent_cmds = commands.create();
     defer ent_cmds.deinit();
 
-    _ = try ent_cmds.add(AlignedComponent, .{ .vec = .{ 1.0, 2.0, 3.0, 4.0 } });
-
-    try ent_cmds.flush();
+    try ent_cmds.add(AlignedComponent, .{ .vec = .{ 1.0, 2.0, 3.0, 4.0 } })
+        .flush();
 
     const stored = try ent_cmds.get(AlignedComponent);
     try std.testing.expect(stored != null);

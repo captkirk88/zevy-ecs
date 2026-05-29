@@ -1,7 +1,10 @@
 const std = @import("std");
 const ecs = @import("ecs.zig");
 const relations_mod = @import("relations.zig");
+const scheduler = @import("scheduler.zig");
+const systems = @import("systems.zig");
 const reflect = @import("reflect.zig");
+const registry = @import("systems.registry.zig");
 const errors = @import("errors.zig");
 const command_buffer = @import("command_buffer.zig");
 
@@ -68,15 +71,13 @@ pub const CommandsInner = opaque {
 
     /// Create a deferred entity and return EntityCommands for chaining operations.
     /// The entity is NOT created immediately — call EntityCommands.flush() to create it.
-    ///
-    /// *Note*: The returned EntityCommands must have flush() called to actually create the entity, unless, you only intend to queue operations that do not require the entity to exist yet (e.g., adding components to an entity that will be created later).
-    pub fn create(self: Commands) !EntityCommands {
-        return try EntityCommands.init(self);
+    pub fn create(self: Commands) EntityCommands {
+        return EntityCommands.init(self);
     }
 
     /// Get EntityCommands for an existing entity.
-    pub fn entity(self: Commands, e: ecs.Entity) !EntityCommands {
-        return try EntityCommands.initWithEntity(self, e);
+    pub fn entity(self: Commands, e: ecs.Entity) EntityCommands {
+        return EntityCommands.initWithEntity(self, e);
     }
 
     /// Queue adding a component to an existing entity.
@@ -200,6 +201,31 @@ pub const CommandsInner = opaque {
         }.execute, null);
     }
 
+    pub fn addSystem(self: Commands, stage: scheduler.StageId, system_fn: anytype, comptime SystemParamRegistry: type) error{OutOfMemory}!void {
+        const SystemType = @TypeOf(system_fn);
+        const Data = struct { stage: scheduler.StageId, system_fn: SystemType };
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .stage = stage, .system_fn = system_fn }, &struct {
+            fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
+                const d: *Data = @ptrCast(@alignCast(ptr));
+                const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
+                const sched = mgr.scheduler;
+                sched.addSystem(mgr, d.stage, d.system_fn, SystemParamRegistry);
+            }
+        }.execute, null);
+    }
+
+    pub fn removeSystem(self: Commands, stage: scheduler.StageId, system_fn: anytype, comptime SystemParamRegistry: type) error{OutOfMemory}!void {
+        const SystemType = @TypeOf(system_fn);
+        const Data = struct { stage: scheduler.StageId, system_fn: SystemType };
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .stage = stage, .system_fn = system_fn }, &struct {
+            fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
+                const d: *Data = @ptrCast(@alignCast(ptr));
+                const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
+                mgr.scheduler.removeSystem(mgr, d.stage, d.system_fn, SystemParamRegistry);
+            }
+        }.execute, null);
+    }
+
     /// Enqueue all queued commands onto the manager's deferred command queue.
     pub fn queue(self: Commands) error{OutOfMemory}!void {
         try commandsInner(self)._manager.enqueueCommandBuffer(commandsInner(self).buffer.take());
@@ -231,8 +257,8 @@ pub const EntityCommands = struct {
     ebuf: CommandBuffer,
 
     /// Initialize EntityCommands for a pending (deferred) entity.
-    pub fn init(cmds: Commands) error{OutOfMemory}!EntityCommands {
-        const pending = try commandsInner(cmds)._allocator.create(PendingEntity);
+    pub fn init(cmds: Commands) EntityCommands {
+        const pending = commandsInner(cmds)._allocator.create(PendingEntity) catch |err| @panic(@errorName(err));
         pending.* = .{};
         return .{
             .commands = cmds,
@@ -243,7 +269,7 @@ pub const EntityCommands = struct {
     }
 
     /// Initialize EntityCommands for an existing entity.
-    pub fn initWithEntity(cmds: Commands, ent: ecs.Entity) error{OutOfMemory}!EntityCommands {
+    pub fn initWithEntity(cmds: Commands, ent: ecs.Entity) EntityCommands {
         return .{
             .commands = cmds,
             .pending = null,
@@ -253,50 +279,51 @@ pub const EntityCommands = struct {
     }
 
     /// Queue adding a component to this entity. Returns self for chaining.
-    pub fn add(self: *EntityCommands, comptime T: type, value: T) error{OutOfMemory}!void {
+    pub fn add(self: *EntityCommands, comptime T: type, value: T) *EntityCommands {
         if (self.existing_entity) |ent| {
-            try self.commands.addComponent(ent, T, value);
+            self.commands.addComponent(ent, T, value) catch |err| @panic(@errorName(err));
         } else if (self.pending) |pending_ptr| {
             const Data = struct { pending: *PendingEntity, value: T };
-            try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr, .value = value }, &struct {
+            self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr, .value = value }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
                     try mgr.addComponent(d.pending.entity.?, T, d.value);
                 }
-            }.execute, null);
+            }.execute, null) catch |err| @panic(@errorName(err));
         }
+        return self;
     }
 
     /// Queue removing a component from this entity.
-    pub fn remove(self: *EntityCommands, comptime T: type) anyerror!void {
+    pub fn remove(self: *EntityCommands, comptime T: type) void {
         if (self.existing_entity) |ent| {
-            try self.commands.removeComponent(ent, T);
+            self.commands.removeComponent(ent, T) catch |err| @panic(@errorName(err));
         } else if (self.pending) |pending_ptr| {
             const Data = struct { pending: *PendingEntity };
-            try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
+            self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
                     try mgr.removeComponent(d.pending.entity.?, T);
                 }
-            }.execute, null);
+            }.execute, null) catch |err| @panic(@errorName(err));
         }
     }
 
     /// Queue destroying this entity. For pending entities, this simply drops the pending entity without creating it. For existing entities, this queues a destroy command on the parent Commands.
-    pub fn destroy(self: *EntityCommands) error{OutOfMemory}!void {
+    pub fn destroy(self: *EntityCommands) void {
         if (self.existing_entity) |ent| {
-            try self.commands.destroyEntity(ent);
+            self.commands.destroyEntity(ent) catch |err| @panic(@errorName(err));
         } else if (self.pending) |pending_ptr| {
             const Data = struct { pending: *PendingEntity };
-            try self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
+            self.ebuf.appendCommand(commandsInner(self.commands)._allocator, Data, .{ .pending = pending_ptr }, &struct {
                 fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                     const d: *Data = @ptrCast(@alignCast(ptr));
                     const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
                     try mgr.destroy(d.pending.entity.?);
                 }
-            }.execute, null);
+            }.execute, null) catch |err| @panic(@errorName(err));
         }
     }
 
@@ -326,7 +353,14 @@ pub const EntityCommands = struct {
     ///
     /// For pending entities, this requires the entity to have been flushed first.
     pub fn get(self: *const EntityCommands, comptime T: type) error{EntityNotAlive}!?*T {
-        return self.commands.manager().getComponent(self.entity(), T);
+        if (self.existing_entity) |ent| {
+            return self.commands.manager().getComponent(ent, T);
+        } else if (self.pending) |pending_ptr| {
+            const ent = pending_ptr.get();
+            return self.commands.manager().getComponent(ent, T);
+        } else {
+            @panic("EntityCommands must have either pending (commands.create()) or existing entity");
+        }
     }
 
     /// Flush this EntityCommands: create the entity (if pending and not yet created)
@@ -350,3 +384,74 @@ pub const EntityCommands = struct {
         self.ebuf.deinit(inner._allocator);
     }
 };
+
+test "Commands.addSystem queues and executes scheduler systems" {
+    const params = @import("systems.params.zig");
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
+    defer manager.deinit();
+
+    var commands = try CommandsInner.init(std.testing.allocator, &manager);
+    defer commands.deinit();
+
+    const TestCounter = struct { count: u32 };
+    try manager.addResourceRetained(TestCounter, .{ .count = 0 });
+
+    const test_system = struct {
+        pub fn run(res: params.ResMut(TestCounter)) void {
+            res.get().count += 1;
+        }
+    }.run;
+
+    const handle = manager.createSystemCached(test_system, registry.DefaultParamRegistry);
+    const update_stage = scheduler.Stage(scheduler.Stages.Update);
+    try commands.addSystem(update_stage, handle, registry.DefaultParamRegistry);
+    try commands.flush(&manager);
+
+    var stage_info = manager.scheduler.getStageInfo(std.testing.allocator);
+    defer stage_info.deinit(std.testing.allocator);
+    var found_update = false;
+    for (stage_info.items) |info| {
+        if (info.stage.value == update_stage.value) {
+            found_update = true;
+            try std.testing.expect(info.system_count == 1);
+            break;
+        }
+    }
+    try std.testing.expect(found_update);
+    try std.testing.expect(manager.systems.count() == 1);
+}
+
+test "Commands.removeSystem removes scheduler stage entry and cached system" {
+    const params = @import("systems.params.zig");
+    var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
+    defer manager.deinit();
+
+    var commands = try CommandsInner.init(std.testing.allocator, &manager);
+    defer commands.deinit();
+
+    const TestCounter = struct { count: u32 };
+    try manager.addResourceRetained(TestCounter, .{ .count = 0 });
+
+    const test_system = struct {
+        pub fn run(res: params.ResMut(TestCounter)) void {
+            res.get().count += 1;
+        }
+    }.run;
+
+    const handle = manager.createSystemCached(test_system, registry.DefaultParamRegistry);
+    const update_stage = scheduler.Stage(scheduler.Stages.Update);
+    try commands.addSystem(update_stage, handle, registry.DefaultParamRegistry);
+    try commands.flush(&manager);
+
+    try commands.removeSystem(update_stage, handle.eraseType(), registry.DefaultParamRegistry);
+    try commands.flush(&manager);
+
+    var stage_info = manager.scheduler.getStageInfo(std.testing.allocator);
+    defer stage_info.deinit(std.testing.allocator);
+    for (stage_info.items) |info| {
+        if (info.stage.value == update_stage.value) {
+            try std.testing.expect(info.system_count == 0);
+        }
+    }
+    try std.testing.expect(manager.systems.count() == 0);
+}

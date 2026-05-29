@@ -1,5 +1,5 @@
 const std = @import("std");
-
+const builtin = @import("builtin");
 const zevy_ecs = @import("zevy_ecs");
 const zevy_reflect = @import("zevy_reflect");
 const zevy_mem = @import("zevy_mem");
@@ -18,7 +18,7 @@ const AppInner = struct {
     is_empty: bool = false,
     plugin_man: plugins.PluginManager,
     ecs_man: zevy_ecs.Manager,
-    scheduler: zevy_ecs.Ref(zevy_ecs.schedule.Scheduler),
+    scheduler: *zevy_ecs.schedule.Scheduler,
     io: std.Io,
     arena: *std.heap.ArenaAllocator,
 };
@@ -38,9 +38,11 @@ pub fn App(comptime SystemParamRegistry: type) type {
     return opaque {
         const Self = @This();
 
-        pub fn SystemParamRegistryType(self: *Self) type {
-            _ = self;
-            return SystemParamRegistry;
+        pub fn addSystem(self: *Self, stage: zevy_ecs.schedule.StageId, system: anytype) *Self {
+            const inner = appInner(self);
+            if (inner.is_empty) return self;
+            inner.scheduler.addSystem(&inner.ecs_man, stage, system, SystemParamRegistry);
+            return self;
         }
 
         pub fn addPlugin(self: *Self, comptime PluginType: type, plugin: PluginType) *Self {
@@ -53,17 +55,37 @@ pub fn App(comptime SystemParamRegistry: type) type {
         pub fn addEvent(self: *Self, comptime EventType: type) *Self {
             const inner = appInner(self);
             if (inner.is_empty) return self;
-            const scheduler = inner.scheduler.lockWrite();
-            defer scheduler.deinit();
-            scheduler.get().registerEvent(&inner.ecs_man, EventType, SystemParamRegistry) catch |err| handleError(err, @errorReturnTrace());
+            inner.scheduler.registerEvent(&inner.ecs_man, EventType, SystemParamRegistry) catch |err| handleError(err, @errorReturnTrace());
             return self;
         }
 
-        pub fn addEventWithCleanupStage(self: *Self, comptime EventType: type, stage: zevy_ecs.schedule.Stage) *Self {
+        pub fn addEventWithCleanupAtStage(self: *Self, comptime EventType: type, stage: zevy_ecs.schedule.StageId) *Self {
             const inner = appInner(self);
             if (inner.is_empty) return self;
-            const scheduler = inner.scheduler.lockWrite();
-            scheduler.get().registerEventWithCleanupAtStage(inner.ecs_man, EventType, stage, SystemParamRegistry) catch |err| handleError(err, @errorReturnTrace());
+            inner.scheduler.registerEventWithCleanupAtStage(inner.ecs_man, EventType, stage, SystemParamRegistry) catch |err| handleError(err, @errorReturnTrace());
+            return self;
+        }
+
+        pub fn addStage(self: *Self, stage: zevy_ecs.schedule.StageId) *Self {
+            const inner = appInner(self);
+            if (inner.is_empty) return self;
+            inner.scheduler.addStage(stage) catch |err| handleError(err, @errorReturnTrace());
+            return self;
+        }
+
+        pub fn registerState(self: *Self, comptime StateEnum: type) *Self {
+            const inner = appInner(self);
+            if (inner.is_empty) return self;
+            inner.scheduler.registerState(&inner.ecs_man, StateEnum) catch |err| handleError(err, @errorReturnTrace());
+            return self;
+        }
+
+        pub fn unregisterState(self: *Self, comptime StateEnum: type) *Self {
+            const inner = appInner(self);
+            if (inner.is_empty) return self;
+            _ = StateEnum;
+            // TODO implement
+            //inner.scheduler.unregisterState(&inner.ecs_man, StateEnum) catch |err| handleError(err, @errorReturnTrace());
             return self;
         }
 
@@ -91,10 +113,41 @@ pub fn App(comptime SystemParamRegistry: type) type {
             return inner.arena.allocator();
         }
 
+        pub fn ecs(self: *Self) *zevy_ecs.Manager {
+            const inner = appInner(self);
+            return &inner.ecs_man;
+        }
+
+        pub fn update(self: *Self) !void {
+            const inner = appInner(self);
+            if (inner.is_empty) return;
+
+            // Start of loop
+            runStage(inner, Stage(Stages.First)) catch |err| handleError(err, @errorReturnTrace());
+
+            // Run inbetween stages
+            runStages(inner, Stage(Stages.First).add(1), Stage(Stages.PreUpdate).sub(1)) catch |err| handleError(err, @errorReturnTrace());
+
+            runStages(inner, Stage(Stages.PreUpdate), Stage(Stages.Update)) catch |err| handleError(err, @errorReturnTrace());
+
+            // Run inbetween stages
+            runStages(inner, Stage(Stages.Update).add(1), Stage(Stages.PreDraw).sub(1)) catch |err| handleError(err, @errorReturnTrace());
+
+            runStages(inner, Stage(Stages.PreDraw), Stage(Stages.PostDraw)) catch |err| handleError(err, @errorReturnTrace());
+
+            // Run inbetween stages
+            runStages(inner, Stage(Stages.PostDraw).add(1), Stage(Stages.Last).sub(1)) catch |err| handleError(err, @errorReturnTrace());
+
+            // End of loop
+            runStage(inner, Stage(Stages.Last)) catch |err| handleError(err, @errorReturnTrace());
+        }
+
+        /// Runs the app's main loop, which continuously updates the app until an `ExitAppEvent` is emitted. If any error occurs during the update process, it logs the error and exits the process.
         pub fn run(self: *Self) !void {
             const inner = appInner(self);
             if (inner.is_empty) return;
             inner.plugin_man.build(&inner.ecs_man) catch |err| handleError(err, @errorReturnTrace());
+            runStages(inner, Stage(Stages.PreStartup), Stage(Stages.Startup)) catch |err| handleError(err, @errorReturnTrace());
             const deinit_errors = inner.plugin_man.deinit(&inner.ecs_man);
             if (deinit_errors) |errors| {
                 const log = std.log.scoped(.zevy_app);
@@ -103,6 +156,27 @@ pub fn App(comptime SystemParamRegistry: type) type {
                     log.err("Plugin: {s}, error: {s}", .{ err.plugin, @errorName(err.err) });
                 }
             }
+
+            var should_exit = false;
+            while (should_exit == false) {
+                {
+                    const exit_app_event = inner.ecs_man.getResource(zevy_ecs.EventStore(ExitAppEvent));
+                    if (exit_app_event) |exit_events| {
+                        defer exit_events.deinit();
+                        const exit_event_lock = exit_events.lockWrite();
+                        defer exit_event_lock.deinit();
+                        var exit_event_iter = exit_event_lock.get().iterator();
+                        if (exit_event_iter.next()) |_| {
+                            should_exit = true;
+                        }
+                    }
+                }
+
+                try self.update();
+            }
+
+            // Exit of app
+            runStages(inner, Stage(Stages.Exit), Stage(Stages.Max)) catch |err| handleError(err, @errorReturnTrace());
         }
 
         pub fn deinit(self: *Self) void {
@@ -113,6 +187,12 @@ pub fn App(comptime SystemParamRegistry: type) type {
     };
 }
 
+/// Event emitted when the application is going to exit
+pub const ExitAppEvent = enum(u8) {
+    Success = 0,
+    Error = 1,
+};
+
 /// Creates a new app instance with the given initialization parameters and system parameter registry.
 ///
 /// Initializes the app's internal state, including the ECS manager, plugin manager, and scheduler. If any initialization step fails, it logs the error and exits the process.
@@ -122,41 +202,72 @@ pub fn new(init: std.process.Init, comptime ParamRegistry: type) *App(ParamRegis
         handleError(err, @errorReturnTrace());
         return appFromInner(ParamRegistry, &empty.app);
     };
+    const ecs_man = zevy_ecs.Manager.init(allocator, init.io) catch |err| {
+        handleError(err, @errorReturnTrace());
+        return appFromInner(ParamRegistry, &empty.app);
+    };
+    const scheduler_ptr = ecs_man.scheduler;
     new_app.* = AppInner{
         .is_empty = false,
-        .ecs_man = zevy_ecs.Manager.init(allocator, init.io) catch |err| {
-            handleError(err, @errorReturnTrace());
-            return appFromInner(ParamRegistry, &empty.app);
-        },
+        .ecs_man = ecs_man,
         .plugin_man = plugins.PluginManager.init(allocator),
-        .scheduler = zevy_mem.pointers.ArcRwLock(zevy_ecs.schedule.Scheduler).init(allocator, zevy_ecs.schedule.Scheduler.init(allocator) catch |err| {
-            handleError(err, @errorReturnTrace());
-            return appFromInner(ParamRegistry, &empty.app);
-        }) catch |err| {
-            handleError(err, @errorReturnTrace());
-            return appFromInner(ParamRegistry, &empty.app);
-        },
+        .scheduler = scheduler_ptr,
         .io = init.io,
         .arena = init.arena,
     };
-    new_app.ecs_man.addResourceRef(zevy_ecs.schedule.Scheduler, new_app.scheduler) catch |err| {
+
+    new_app.scheduler.registerEvent(
+        &new_app.ecs_man,
+        ExitAppEvent,
+        ParamRegistry,
+    ) catch |err| {
         handleError(err, @errorReturnTrace());
         return appFromInner(ParamRegistry, &empty.app);
     };
     return appFromInner(ParamRegistry, new_app);
 }
 
+const Stage = zevy_ecs.schedule.Stage;
+const Stages = zevy_ecs.schedule.Stages;
+
+fn runStages(app: *AppInner, start: zevy_ecs.schedule.StageId, end: zevy_ecs.schedule.StageId) !void {
+    const log = std.log.scoped(.zevy_app);
+    var eg = app.scheduler.runStages(&app.ecs_man, start, end);
+    if (eg.hasErrors()) {
+        var iter = eg.iterator();
+        while (iter.next()) |er| {
+            log.err("Error in stages {d} -> {d}: {s}", .{ start.value, end.value, @errorName(er) });
+            handleError(er, @errorReturnTrace());
+        }
+        std.process.exit(1);
+    }
+}
+
+fn runStage(app: *AppInner, stage: zevy_ecs.schedule.StageId) !void {
+    const log = std.log.scoped(.zevy_app);
+    var eg = app.scheduler.runStage(&app.ecs_man, stage);
+    if (eg.hasErrors()) {
+        var iter = eg.iterator();
+        while (iter.next()) |er| {
+            log.err("Error in stage {d}: {s}", .{ stage.value, @errorName(er) });
+            handleError(er, @errorReturnTrace());
+        }
+        std.process.exit(1);
+    }
+}
+
 fn handleError(err: anyerror, stack_trace: ?*std.builtin.StackTrace) void {
     const log = std.log.scoped(.zevy_app);
     log.err("{s}", .{@errorName(err)});
-    if (stack_trace) |trace| {
-        log.err("Stack trace:\n", .{});
-        std.debug.dumpErrorReturnTrace(trace);
-        std.debug.dumpCurrentStackTrace(.{});
-    } else {
-        std.debug.dumpCurrentStackTrace(.{});
+    if (builtin.mode == .Debug) {
+        if (stack_trace) |trace| {
+            log.err("Stack trace:\n", .{});
+            std.debug.dumpErrorReturnTrace(trace);
+            std.debug.dumpCurrentStackTrace(.{});
+        } else {
+            std.debug.dumpCurrentStackTrace(.{});
+        }
     }
-    const builtin = @import("builtin");
     if (builtin.mode != .Debug and !builtin.is_test) {
         // This is not useful for diagnosing the exit code but gives a hint to the user that something went wrong and they should check the logs.  This is not useful because the error code (u8) may not match a actual error (u16) using `@errorFromInt`.
         std.process.exit(@as(u8, @intCast(@intFromError(err))));
@@ -191,24 +302,12 @@ fn testInit() std.process.Init {
 test "app compiles and runs" {
     var app = new(testInit(), zevy_ecs.DefaultParamRegistry);
     defer app.deinit();
-    try app.run();
+    try app.update();
 }
 
 test "app empty state" {
     var app = appFromInner(zevy_ecs.DefaultParamRegistry, &empty.app);
-    try app.run();
-}
-
-test "app error exit" {
-    var app = new(testInit(), zevy_ecs.DefaultParamRegistry);
-    defer app.deinit();
-
-    const TestResource = struct {
-        value: i32,
-    };
-
-    try app.addResource(TestResource, .{ .value = 69 })
-        .addResource(TestResource, .{ .value = 69 }).run();
+    try app.update();
 }
 
 test "app event registration" {
@@ -220,5 +319,5 @@ test "app event registration" {
     };
 
     try app.addEvent(TestEvent)
-        .addEvent(TestEvent).run();
+        .addEvent(TestEvent).update();
 }

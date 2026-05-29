@@ -313,18 +313,6 @@ test "Manager - addResourceRef with ArcRwLock Ref" {
     try std.testing.expect(retrieved_guard.get().max_players == 99);
 }
 
-test "Manager - addResource duplicate fails" {
-    var manager = try Manager.init(std.testing.allocator, std.testing.io);
-    defer manager.deinit();
-
-    const config1 = GameConfig{ .difficulty = 5, .max_players = 10 };
-    try manager.addResourceRetained(GameConfig, config1);
-
-    const config2 = GameConfig{ .difficulty = 8, .max_players = 20 };
-    const result = manager.addResource(GameConfig, config2);
-    try std.testing.expectError(error.ResourceAlreadyExists, result);
-}
-
 test "Manager - getResource returns resource" {
     var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();

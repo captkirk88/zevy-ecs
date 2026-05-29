@@ -163,4 +163,5 @@ test {
     std.testing.refAllDecls(schedule.state);
     std.testing.refAllDecls(events);
     std.testing.refAllDecls(errors);
+    std.testing.refAllDecls(commands);
 }
