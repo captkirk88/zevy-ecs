@@ -49,6 +49,7 @@ const empty = struct {
 
 const app_vtable: AppVTable = .{
     .addSystem = app_addSystem,
+    .addPlugin = app_addPlugin,
     .addEvent = app_addEvent,
     .addEventWithCleanupAtStage = app_addEventWithCleanupAtStage,
     .addStage = app_addStage,
@@ -204,9 +205,10 @@ pub const AppImpl = opaque {
         return self;
     }
 
-    pub fn addPlugin(self: *Self, comptime PluginType: type, plugin: PluginType) *Self {
+    pub fn addPlugin(self: *Self, plugin: anytype) *Self {
         const inner = appInner(self);
         if (inner.is_empty) return self;
+        const PluginType = @TypeOf(plugin);
         inner.plugin_man.add(PluginType, plugin) catch |err| handleError(err, @errorReturnTrace());
         return self;
     }

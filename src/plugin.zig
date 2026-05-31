@@ -56,6 +56,7 @@ const TestApp = struct {
 
 const test_app_vtable: app.VTable = .{
     .addSystem = test_app_addSystem,
+    .addPlugin = test_app_addPlugin,
     .addEvent = test_app_addEvent,
     .addEventWithCleanupAtStage = test_app_addEventWithCleanupAtStage,
     .addStage = test_app_addStage,

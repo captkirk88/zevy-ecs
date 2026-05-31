@@ -15,7 +15,8 @@ pub const App = struct {
         return self;
     }
 
-    pub fn addPlugin(self: App, comptime PluginType: type, plugin: PluginType) App {
+    pub fn addPlugin(self: App, plugin: anytype) App {
+        const PluginType = @TypeOf(plugin);
         const pluginManager = self.vtable.pluginManager(self.ptr);
         _ = pluginManager.add(PluginType, plugin) catch |err| std.debug.panic("addPlugin failed: {s}", .{@errorName(err)});
         return self;
@@ -99,6 +100,7 @@ pub const App = struct {
 
 pub const VTable = struct {
     addSystem: *const fn (*anyopaque, schedule.StageId, anytype) App,
+    addPlugin: *const fn (*anyopaque, anytype) App,
     addEvent: *const fn (*anyopaque, comptime anytype) App,
     addEventWithCleanupAtStage: *const fn (*anyopaque, comptime anytype, schedule.StageId) App,
     addStage: *const fn (*anyopaque, schedule.StageId) App,

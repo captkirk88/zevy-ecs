@@ -155,10 +155,25 @@ pub fn System(comptime ReturnType: type) type {
 /// Converts a system function into a System struct for caching and later execution.
 pub inline fn ToSystem(system_fn: anytype, comptime SystemParamsRegistry: type) System(ToSystemReturnType(system_fn)) {
     var s = ToSystemWithArgs(system_fn, .{}, SystemParamsRegistry);
-    // Override hash to match createSystemCached's formula (excludes args type for compatibility)
-    const fn_hash = reflect.typeHash(@TypeOf(system_fn));
+    // Hash by function identity (address), not just function type/signature,
+    // so different systems with identical signatures do not collide.
+    const fn_hash = functionIdentityHash(system_fn);
     s.hash = reflect.hashWithSeed(@typeName(SystemParamsRegistry), fn_hash);
     return s;
+}
+
+inline fn functionIdentityHash(system_fn: anytype) u64 {
+    const FnType = @TypeOf(system_fn);
+    return switch (@typeInfo(FnType)) {
+        .@"fn" => @as(u64, @truncate(@intFromPtr(&system_fn))),
+        .pointer => |p| blk: {
+            if (@typeInfo(p.child) != .@"fn") {
+                @compileError("System must be a function or pointer-to-function: " ++ @typeName(FnType));
+            }
+            break :blk @as(u64, @truncate(@intFromPtr(system_fn)));
+        },
+        else => @compileError("System must be a function or pointer-to-function: " ++ @typeName(FnType)),
+    };
 }
 
 /// Context struct to hold both the function pointer and injected arguments
@@ -440,7 +455,7 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
     } else {};
 
     const system_hash = blk: {
-        const fn_hash = reflect.typeHash(@TypeOf(system_fn));
+        const fn_hash = functionIdentityHash(system_fn);
         const reg_hash = reflect.hashWithSeed(@typeName(Registry), fn_hash);
         break :blk reflect.hashWithSeed(@typeName(ArgsType), reg_hash);
     };
