@@ -4,7 +4,7 @@
 //!
 //! Example:
 //! const MyPlugin = struct {
-//!    pub fn build(self: *@This(), manager: *zevy_ecs.Manager, plugin_manager: *PluginManager) anyerror!void {
+//!    pub fn build(self: *@This(), manager: *zevy_ecs.app.App, plugin_manager: *PluginManager) anyerror!void {
 //!       // Setup code here
 //!   }
 //!
@@ -15,8 +15,10 @@
 //! };
 
 const std = @import("std");
-const zevy_ecs = @import("zevy_ecs");
 const reflect = @import("zevy_reflect");
+const zevy_ecs = @import("root.zig");
+const app = zevy_ecs.app;
+const plugins = zevy_ecs.plugins;
 
 /// Template defining the Plugin interface
 ///
@@ -25,7 +27,7 @@ const reflect = @import("zevy_reflect");
 pub const PluginTemplate = reflect.Template(struct {
     pub const Name: []const u8 = "Plugin";
 
-    pub fn build(_: *@This(), _: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
+    pub fn build(_: *@This(), _: *app.App, _: *PluginManager) anyerror!void {
         unreachable;
     }
     pub fn deinit(_: *@This(), _: std.mem.Allocator, _: *zevy_ecs.Manager) anyerror!void {
@@ -34,6 +36,151 @@ pub const PluginTemplate = reflect.Template(struct {
 });
 
 const Plugin = PluginTemplate.Interface;
+
+const TestApp = struct {
+    const Self = @This();
+    manager: *zevy_ecs.Manager,
+    pub fn ecs(self: *Self) *zevy_ecs.Manager {
+        return self.manager;
+    }
+    pub fn scheduler(self: *Self) *zevy_ecs.schedule.Scheduler {
+        return self.manager.scheduler();
+    }
+    pub fn allocator(self: *Self) std.mem.Allocator {
+        return self.manager.allocator();
+    }
+    pub fn io(self: *Self) std.Io {
+        return self.manager.io();
+    }
+};
+
+const test_app_vtable: app.VTable = .{
+    .addSystem = test_app_addSystem,
+    .addEvent = test_app_addEvent,
+    .addEventWithCleanupAtStage = test_app_addEventWithCleanupAtStage,
+    .addStage = test_app_addStage,
+    .registerState = test_app_registerState,
+    .unregisterState = test_app_unregisterState,
+    .addResource = test_app_addResource,
+    .addResourceRef = test_app_addResourceRef,
+    .removeResource = test_app_removeResource,
+    .io = test_app_io,
+    .allocator = test_app_allocator,
+    .ecs = test_app_ecs,
+    .scheduler = test_app_scheduler,
+    .pluginManager = test_app_pluginManager,
+    .update = test_app_update,
+    .run = test_app_run,
+    .deinit = test_app_deinit,
+};
+
+fn test_app_to_interface(app_impl: *TestApp) app.App {
+    return .{
+        .ptr = @ptrCast(@alignCast(app_impl)),
+        .vtable = &test_app_vtable,
+    };
+}
+
+fn test_app_addSystem(self: *anyopaque, stage: zevy_ecs.schedule.StageId, system: anytype) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.manager.scheduler().addSystem(app_impl.manager, stage, system);
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_addPlugin(self: *anyopaque, plugin: anytype) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    _ = plugin;
+    _ = app_impl;
+    std.debug.panic("TestApp wrapper does not support addPlugin");
+}
+
+fn test_app_pluginManager(self: *anyopaque) *plugins.PluginManager {
+    _ = self;
+    std.debug.panic("TestApp wrapper does not support pluginManager", .{});
+}
+
+fn test_app_addEvent(self: *anyopaque, comptime EventType: type) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.scheduler().registerEvent(app_impl.manager, EventType) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_addEventWithCleanupAtStage(self: *anyopaque, comptime EventType: type, stage: zevy_ecs.schedule.StageId) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.scheduler().registerEventWithCleanupAtStage(app_impl.manager, EventType, stage) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_addStage(self: *anyopaque, stage: zevy_ecs.schedule.StageId) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.scheduler().addStage(stage) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_registerState(self: *anyopaque, comptime StateEnum: type) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.scheduler().registerState(app_impl.manager, StateEnum) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_unregisterState(self: *anyopaque, comptime StateEnum: type) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.scheduler().unregisterState(app_impl.manager, StateEnum) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_addResource(self: *anyopaque, comptime ResourceType: type, resource: ResourceType) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.manager.addResourceRetained(ResourceType, resource) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_addResourceRef(self: *anyopaque, comptime ResourceType: type, resource_ref: zevy_ecs.Ref(ResourceType)) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.manager.addResourceRef(ResourceType, resource_ref) catch |err| @panic(@errorName(err));
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_removeResource(self: *anyopaque, comptime ResourceType: type) app.App {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    app_impl.manager.removeResource(ResourceType);
+    return test_app_to_interface(app_impl);
+}
+
+fn test_app_io(self: *anyopaque) std.Io {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    return app_impl.io();
+}
+
+fn test_app_allocator(self: *anyopaque) std.mem.Allocator {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    return app_impl.allocator();
+}
+
+fn test_app_ecs(self: *anyopaque) *zevy_ecs.Manager {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    return app_impl.ecs();
+}
+
+fn test_app_scheduler(self: *anyopaque) *zevy_ecs.schedule.Scheduler {
+    const app_impl: *TestApp = @ptrCast(@alignCast(self));
+    return app_impl.scheduler();
+}
+
+fn test_app_update(self: *anyopaque) anyerror!void {
+    _ = self;
+    std.debug.panic("does not support update", .{});
+}
+
+fn test_app_run(self: *anyopaque) anyerror!void {
+    _ = self;
+    std.debug.panic("does not support run", .{});
+}
+
+fn test_app_deinit(self: *anyopaque) void {
+    _ = self;
+    // No-op for legacy manager-only app interface.
+}
 
 /// Manager for ECS plugins
 ///
@@ -247,11 +394,11 @@ pub const PluginManager = struct {
         return null;
     }
 
-    /// Build all registered plugins
-    pub fn build(self: *PluginManager, manager: *zevy_ecs.Manager) anyerror!void {
+    /// Build all registered plugins using the shared App interface.
+    pub fn build(self: *PluginManager, app_: *app.App) anyerror!void {
         // Build all plugins
         for (self.plugins.items) |entry| {
-            entry.interface.vtable.build(entry.interface.ptr, manager, self) catch |err| {
+            entry.interface.vtable.build(entry.interface.ptr, app_, self) catch |err| {
                 std.debug.panic(
                     "Failed to build plugin '{s}' error: {s}",
                     .{ entry.name, @errorName(err) },
@@ -289,8 +436,8 @@ test "Plugin basic functionality" {
     const TestPlugin = struct {
         const Self = @This();
 
-        pub fn build(_: *Self, manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(bool, true);
+        pub fn build(_: *Self, app_: *app.App, _: *PluginManager) anyerror!void {
+            try app_.ecs().addResourceRetained(bool, true);
         }
 
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
@@ -316,7 +463,9 @@ test "Plugin basic functionality" {
     }
 
     try plugin_manager.add(TestPlugin, .{});
-    try plugin_manager.build(&manager);
+    var test_app = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&test_app);
+    try plugin_manager.build(&app_iface);
     var res_ref = manager.getResource(bool).?;
     defer res_ref.deinit();
     var res_guard = res_ref.lockRead();
@@ -326,8 +475,8 @@ test "Plugin basic functionality" {
 
 test "PluginManager add single plugin" {
     const TestPlugin = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i32, 42);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i32, 42);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -352,7 +501,9 @@ test "PluginManager add single plugin" {
     }
 
     try plugin_manager.add(TestPlugin, .{});
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
     var res_ref = manager.getResource(i32).?;
     defer res_ref.deinit();
     var res_guard = res_ref.lockRead();
@@ -362,8 +513,8 @@ test "PluginManager add single plugin" {
 
 test "PluginManager addAt single plugin" {
     const TestPlugin = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i32, 123);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i32, 123);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -388,7 +539,9 @@ test "PluginManager addAt single plugin" {
     }
 
     try plugin_manager.addAt(TestPlugin, .{}, @src());
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
     var res_ref = manager.getResource(i32).?;
     defer res_ref.deinit();
     var res_guard = res_ref.lockRead();
@@ -398,8 +551,8 @@ test "PluginManager addAt single plugin" {
 
 test "PluginManager add multiple plugins" {
     const TestPlugin1 = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i32, 10);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i32, 10);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -409,8 +562,8 @@ test "PluginManager add multiple plugins" {
     };
 
     const TestPlugin2 = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            const ref = manager.getResource(i32).?;
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            const ref = app_.ecs().getResource(i32).?;
             defer ref.deinit();
             var res_guard = ref.lockWrite();
             defer res_guard.deinit();
@@ -440,7 +593,9 @@ test "PluginManager add multiple plugins" {
 
     try plugin_manager.add(TestPlugin1, .{});
     try plugin_manager.add(TestPlugin2, .{});
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
     var res_ref2 = manager.getResource(i32).?;
     defer res_ref2.deinit();
     var res_guard2 = res_ref2.lockRead();
@@ -450,8 +605,8 @@ test "PluginManager add multiple plugins" {
 
 test "PluginManager prevents duplicate plugins" {
     const TestPlugin = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i32, 42);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i32, 42);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -462,6 +617,8 @@ test "PluginManager prevents duplicate plugins" {
 
     var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
 
     var plugin_manager = PluginManager.init(std.testing.allocator);
     defer {
@@ -482,7 +639,7 @@ test "PluginManager prevents duplicate plugins" {
     try std.testing.expectError(error.PluginAlreadyExists, plugin_manager.add(TestPlugin, .{}));
     try std.testing.expectError(error.PluginAlreadyExists, plugin_manager.add(TestPlugin, .{}));
 
-    try plugin_manager.build(&manager);
+    try plugin_manager.build(&app_iface);
 
     // Should only have been added and built once
     var res_ref = manager.getResource(i32).?;
@@ -505,13 +662,14 @@ test "Plugin with deinit for proper memory cleanup" {
         // Plugin owns allocated memory that must be freed
         allocated_data: []u8,
 
-        pub fn build(self: *Self, manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
+        pub fn build(self: *Self, app_: *app.App, _: *PluginManager) anyerror!void {
+            const allocator = app_.allocator();
             // Allocate some data during build
-            self.allocated_data = try manager.allocator.alloc(u8, 64);
+            self.allocated_data = try allocator.alloc(u8, 64);
             @memset(self.allocated_data, 0xAB);
 
             // Add a resource to verify build ran
-            try manager.addResourceRetained(CleanupTracker, .{});
+            _ = app_.addResource(CleanupTracker, .{});
         }
 
         pub fn deinit(self: *@This(), _: std.mem.Allocator, manager: *zevy_ecs.Manager) anyerror!void {
@@ -524,18 +682,20 @@ test "Plugin with deinit for proper memory cleanup" {
             }
 
             // Free the allocated data
-            manager.allocator.free(self.allocated_data);
+            manager.allocator().free(self.allocated_data);
         }
     };
 
     var manager = try zevy_ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
     var plugin_manager = PluginManager.init(std.testing.allocator);
 
     // Add and build the plugin
     try plugin_manager.add(TestPluginWithDeinit, .{ .allocated_data = &.{} });
-    try plugin_manager.build(&manager);
+    try plugin_manager.build(&app_iface);
 
     // Verify build ran
     var tracker_ref = manager.getResource(CleanupTracker).?;
@@ -565,8 +725,8 @@ test "Plugin with deinit for proper memory cleanup" {
 // Ensure PluginManager continues deinitializing other plugins even if one deinit errors
 test "PluginManager continues deinit on plugin error" {
     const FailingPlugin = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i32, 1);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i32, 1);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -577,8 +737,8 @@ test "PluginManager continues deinit on plugin error" {
     };
 
     const SuccessPlugin = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(bool, false);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(bool, false);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, manager: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -619,7 +779,9 @@ test "PluginManager continues deinit on plugin error" {
     try plugin_manager.addPlugin(success_iface);
     std.debug.print("Added SuccessPlugin (raw)\n", .{});
     std.debug.print("Plugin count after add: {d}\n", .{plugin_manager.len()});
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
 
     _ = plugin_manager.deinit(&manager);
     deinit_done = true;
@@ -632,8 +794,8 @@ test "PluginManager continues deinit on plugin error" {
 }
 test "PluginManager getNames returns correct plugin names" {
     const TestPluginA = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i32, 1);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i32, 1);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -643,8 +805,8 @@ test "PluginManager getNames returns correct plugin names" {
     };
 
     const TestPluginB = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(f32, 2.0);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(f32, 2.0);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -670,7 +832,9 @@ test "PluginManager getNames returns correct plugin names" {
 
     try plugin_manager.add(TestPluginA, .{});
     try plugin_manager.add(TestPluginB, .{});
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
 
     const names = plugin_manager.getNames(std.testing.allocator);
     defer std.testing.allocator.free(names);
@@ -683,8 +847,8 @@ test "PluginManager getNames returns correct plugin names" {
 
 test "PluginManager addPlugin" {
     const RawPlugin = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(u8, 255);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(u8, 255);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -704,7 +868,9 @@ test "PluginManager addPlugin" {
     PluginTemplate.populate(&interface, &rawPlugin);
 
     try plugin_manager.addPlugin(interface);
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
     var res_ref = manager.getResource(u8).?;
     defer res_ref.deinit();
     var res_guard = res_ref.lockRead();
@@ -714,8 +880,8 @@ test "PluginManager addPlugin" {
 
 test "PluginManager addBundle" {
     const PluginOne = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(i16, 16);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(i16, 16);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -725,8 +891,8 @@ test "PluginManager addBundle" {
     };
 
     const PluginTwo = struct {
-        pub fn build(_: *@This(), manager: *zevy_ecs.Manager, _: *PluginManager) anyerror!void {
-            try manager.addResourceRetained(f64, 3.14);
+        pub fn build(_: *@This(), app_: *app.App, _: *PluginManager) anyerror!void {
+            _ = app_.addResource(f64, 3.14);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator, e: *zevy_ecs.Manager) anyerror!void {
             _ = self;
@@ -748,7 +914,9 @@ test "PluginManager addBundle" {
 
     try plugin_manager.addBundle(PluginBundle, .{});
 
-    try plugin_manager.build(&manager);
+    var app_ = TestApp{ .manager = &manager };
+    var app_iface = test_app_to_interface(&app_);
+    try plugin_manager.build(&app_iface);
     var res_ref_i16 = manager.getResource(i16).?;
     defer res_ref_i16.deinit();
     var res_guard_i16 = res_ref_i16.lockRead();

@@ -21,10 +21,10 @@ pub const StageId = struct {
     };
 
     value: i32,
-    operation: AtomicOperation,
+    op: AtomicOperation,
 
     pub inline fn init(value: i32) StageId {
-        return StageId{ .value = value, .operation = .async };
+        return StageId{ .value = value, .op = .async };
     }
 
     pub inline fn eql(self: *const StageId, other: StageId) bool {
@@ -32,19 +32,19 @@ pub const StageId = struct {
     }
 
     pub fn toString(self: StageId) []const u8 {
-        return std.fmt.comptimePrint("StageId{{ value: {d}, op: {s} }}", .{ self.value, if (self.operation == .sync) "Sync" else "Async" });
+        return std.fmt.comptimePrint("StageId{{ value: {d}, op: {s} }}", .{ self.value, if (self.op == .sync) "Sync" else "Async" });
     }
 
-    pub fn withOperation(self: StageId, operation: AtomicOperation) StageId {
-        return StageId{ .value = self.value, .operation = operation };
+    pub fn withOp(self: StageId, operation: AtomicOperation) StageId {
+        return StageId{ .value = self.value, .op = operation };
     }
 
     pub fn add(self: StageId, offset: u32) StageId {
-        return StageId{ .value = self.value + @as(i32, @intCast(offset)), .operation = self.operation };
+        return StageId{ .value = self.value + @as(i32, @intCast(offset)), .op = self.op };
     }
 
     pub fn sub(self: StageId, offset: u32) StageId {
-        return StageId{ .value = self.value - @as(i32, @intCast(offset)), .operation = self.operation };
+        return StageId{ .value = self.value - @as(i32, @intCast(offset)), .op = self.op };
     }
 };
 
@@ -63,12 +63,12 @@ pub inline fn Stage(comptime T: type) StageId {
         const operation = if (ti.hasDecl("operation")) @field(T, "operation") else StageId.AtomicOperation.async;
         if (ti.hasDecl("priority")) {
             const priority = @field(T, "priority");
-            return StageId{ .value = priority.value, .operation = operation };
+            return StageId{ .value = priority.value, .op = operation };
         }
         if (ti.hasDecl("operation")) {
             const hash = reflect.typeHash(T);
             const max_custom_range = std.math.maxInt(i32) - 2_000_000 - 100_000; // Leave buffer before Last
-            return StageId{ .value = @intCast(2_000_000 + (@as(u32, @truncate(hash)) % @as(u32, max_custom_range))), .operation = operation };
+            return StageId{ .value = @intCast(2_000_000 + (@as(u32, @truncate(hash)) % @as(u32, max_custom_range))), .op = operation };
         }
     }
 
@@ -76,7 +76,7 @@ pub inline fn Stage(comptime T: type) StageId {
     // Reserve space before Last/Exit/Max stages
     const hash = reflect.typeHash(T);
     const max_custom_range = std.math.maxInt(i32) - 2_000_000 - 100_000; // Leave buffer before Last
-    return StageId{ .value = @intCast(2_000_000 + (@as(u32, @truncate(hash)) % @as(u32, max_custom_range))), .operation = .async };
+    return StageId{ .value = @intCast(2_000_000 + (@as(u32, @truncate(hash)) % @as(u32, max_custom_range))), .op = .async };
 }
 
 /// Get a stage ID that falls within a specified range.
@@ -87,7 +87,7 @@ pub inline fn StageInRange(comptime T: type, start: StageId, end: StageId) Stage
         const range_size_i32 = end.value - start.value;
         const offset_u32 = @as(u32, @truncate(hash)) % @as(u32, range_size_i32);
         const offset: i32 = @intCast(offset_u32);
-        return StageId{ .value = start.value + offset, .operation = base_stage.operation };
+        return StageId{ .value = start.value + offset, .op = base_stage.op };
     }
     return base_stage;
 }
@@ -117,27 +117,48 @@ pub const Stages = struct {
     /// Initialization stage.
     pub const PreStartup = struct {
         pub const priority: StageId = StageId.init(Min.priority.value);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     pub const Startup = struct {
         // 1,000
         pub const priority: StageId = StageId.init(STAGE_GAP / 100);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     /// First stage to be ran in the beginning of a update/draw/logic loop.
     pub const First = struct {
         // 100,000
         pub const priority: StageId = StageId.init(STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .async;
     };
     pub const PreUpdate = struct {
         // 200,000
         pub const priority: StageId = StageId.init(2 * STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .async;
+    };
+    pub const PreFixedUpdate = struct {
+        // 225,000
+        pub const priority: StageId = StageId.init(2 * STAGE_GAP + (STAGE_GAP / 4));
+        pub const operation: StageId.AtomicOperation = .sync;
+    };
+    pub const FixedUpdate = struct {
+        // 250,000
+        pub const priority: StageId = StageId.init(2 * STAGE_GAP + (STAGE_GAP / 2));
+        pub const operation: StageId.AtomicOperation = .sync;
+    };
+    pub const PostFixedUpdate = struct {
+        // 275,000
+        pub const priority: StageId = StageId.init(2 * STAGE_GAP + ((3 * STAGE_GAP) / 4));
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     pub const Update = struct {
         // 300,000
         pub const priority: StageId = StageId.init(3 * STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .async;
     };
     pub const PostUpdate = struct {
         // 400,000
         pub const priority: StageId = StageId.init(4 * STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .async;
     };
     pub const PreDraw = struct {
         // 500,000
@@ -159,29 +180,35 @@ pub const Stages = struct {
     pub const Last = struct {
         // 800,000
         pub const priority: StageId = StageId.init(8 * STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
 
     /// Internal use for States
     const StateTransition = struct {
         pub const priority: StageId = .init(1_000_000);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     /// Internal use for States
     const StateOnExit = struct {
         pub const priority: StageId = .init(StateTransition.priority.value + STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     /// Internal use for States
     const StateOnEnter = struct {
         pub const priority: StageId = .init(StateOnExit.priority.value + STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     /// Internal use for States
     const StateUpdate = struct {
         pub const priority: StageId = .init(StateOnEnter.priority.value + STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
 
     /// Exit stage, final stage to run.
     /// Range Exit -> Max.
     pub const Exit = struct {
         pub const priority: StageId = StageId.init(std.math.maxInt(i32) - STAGE_GAP);
+        pub const operation: StageId.AtomicOperation = .sync;
     };
     pub const Max = struct {
         pub const priority: StageId = StageId.init(std.math.maxInt(i32));
@@ -228,6 +255,7 @@ pub const Scheduler = struct {
     allocator: std.mem.Allocator,
     /// Thread pool backend for concurrent system dispatch.
     threaded: *std.Io.Threaded,
+    systems_mutex: std.Io.Mutex,
     systems: std.AutoHashMap(i32, std.ArrayList(StageEntry)),
     stage_order: std.ArrayList(StageId),
     // State management - stores state enum type hash and current value
@@ -257,6 +285,9 @@ pub const Scheduler = struct {
         Stage(Stages.Startup),
         Stage(Stages.First),
         Stage(Stages.PreUpdate),
+        Stage(Stages.PreFixedUpdate),
+        Stage(Stages.FixedUpdate),
+        Stage(Stages.PostFixedUpdate),
         Stage(Stages.Update),
         Stage(Stages.PostUpdate),
         Stage(Stages.PreDraw),
@@ -301,6 +332,7 @@ pub const Scheduler = struct {
         const self: Scheduler = .{
             .allocator = allocator,
             .threaded = threaded,
+            .systems_mutex = .init,
             .systems = _systems,
             .stage_order = _stage_order,
             .states = std.AutoHashMap(u64, StateInfo).init(allocator),
@@ -333,6 +365,9 @@ pub const Scheduler = struct {
     }
 
     fn ensureStageList(self: *Scheduler, stage: StageId, initial_capacity: usize) error{OutOfMemory}!*std.ArrayList(StageEntry) {
+        std.Io.Threaded.mutexLock(&self.systems_mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.systems_mutex);
+
         const gop = try self.systems.getOrPut(stage.value);
         if (!gop.found_existing) {
             errdefer _ = self.systems.remove(stage.value);
@@ -348,6 +383,8 @@ pub const Scheduler = struct {
     }
 
     inline fn insertStage(self: *Scheduler, stage: StageId, initial_capacity: usize) error{ InvalidStageBounds, StageExists, OutOfMemory }!void {
+        std.Io.Threaded.mutexLock(&self.systems_mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.systems_mutex);
         if (stage.value < Stage(Stages.Min).value or stage.value > Stage(Stages.Max).value) {
             return error.InvalidStageBounds;
         }
@@ -366,7 +403,7 @@ pub const Scheduler = struct {
         try insertStageValueSorted(self.allocator, &self.stage_order, stage);
     }
 
-    pub fn addSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype, comptime param_registry: type) void {
+    pub fn addSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype) void {
         const stage_list = self.ensureStageList(stage, 4) catch |err| @panic(@errorName(err));
         const SystemType = @TypeOf(system);
         // Detect chain entries created by chain()
@@ -382,7 +419,7 @@ pub const Scheduler = struct {
                 const sys = @field(system.tuple, field.name);
                 const SysType = @TypeOf(sys);
                 const untyped = switch (comptime systems.getSystemTypeFromType(SysType)) {
-                    .func => ecs.createSystemCached(sys, param_registry).eraseType(),
+                    .func => ecs.cacheSystem(ecs.createSystem(sys)).eraseType(),
                     .handle => sys.eraseType(),
                     .untyped => sys,
                     .system => ecs.cacheSystem(sys).eraseType(),
@@ -394,10 +431,13 @@ pub const Scheduler = struct {
             stage_list.append(self.allocator, StageEntry{ .chain = owned_handles }) catch |err| @panic(@errorName(err));
             return;
         }
-        const untyped_system_handle = switch (comptime systems.getSystemTypeFromType(SystemType)) {
-            .func => ecs.createSystemCached(system, param_registry).eraseType(),
-            .handle => system.eraseType(),
-            .untyped => system,
+        const untyped_system_handle = blk: switch (comptime systems.getSystemTypeFromType(SystemType)) {
+            .func => {
+                const sys = ecs.createSystem(system);
+                break :blk ecs.cacheSystem(sys).eraseType();
+            },
+            .handle => @as(systems.UntypedSystemHandle, system.eraseType()),
+            .untyped => @as(systems.UntypedSystemHandle, system),
             .system => ecs.cacheSystem(system).eraseType(),
             else => std.debug.panic("Invalid system type: {s}. Expected a function, SystemHandle, System(T), or chain().", .{@typeName(SystemType)}),
         };
@@ -409,6 +449,9 @@ pub const Scheduler = struct {
     }
 
     pub fn removeStage(self: *Scheduler, stage: StageId) error{StageHasNoSystems}!void {
+        std.Io.Threaded.mutexLock(&self.systems_mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.systems_mutex);
+
         if (self.systems.fetchRemove(stage.value)) |kv| {
             for (kv.value.items) |stage_entry| {
                 switch (stage_entry) {
@@ -424,10 +467,12 @@ pub const Scheduler = struct {
         }
     }
 
-    pub fn removeSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype, comptime ParamRegistry: type) void {
+    pub fn removeSystem(self: *Scheduler, ecs: *ecs_mod.Manager, stage: StageId, system: anytype) void {
+        std.Io.Threaded.mutexLock(&self.systems_mutex);
+        defer std.Io.Threaded.mutexUnlock(&self.systems_mutex);
         const SystemType = @TypeOf(system);
         const target_handle = switch (comptime systems.getSystemTypeFromType(SystemType)) {
-            .func => ecs.createSystemCached(system, ParamRegistry).eraseType(),
+            .func => ecs.createSystemCached(system).eraseType(),
             .handle => system.eraseType(),
             .untyped => system,
             .system => ecs.cacheSystem(system).eraseType(),
@@ -513,12 +558,12 @@ pub const Scheduler = struct {
             return ErrorGroup.none;
         }
 
-        ecs.defer_command_flush.store(true, .release);
-        defer ecs.defer_command_flush.store(false, .release);
+        ecs.inner().defer_command_flush.store(true, .release);
+        defer ecs.inner().defer_command_flush.store(false, .release);
 
         var capture: ErrorGroupCapture = .{};
 
-        const is_async = stage.operation == .async;
+        const is_async = stage.op == .async;
         if (!is_async or list.items.len == 1) {
             for (list.items) |entry| {
                 switch (entry) {
@@ -550,10 +595,10 @@ pub const Scheduler = struct {
             group.await(io_) catch |err| capture.add(err);
         }
 
-        ecs.defer_command_flush.store(false, .release);
+        ecs.inner().defer_command_flush.store(false, .release);
 
         // Flush all queued Commands concurrently if thread pool available.
-        ecs.flushQueuedCommands(self.io()) catch |err| capture.add(err);
+        ecs.inner().flushQueuedCommands(self.io()) catch |err| capture.add(err);
 
         discardHandledComponentEventsIfLastStage(ecs, stage);
 
@@ -599,8 +644,8 @@ pub const Scheduler = struct {
 
     /// Register an event with the scheduler
     /// This creates an EventStore resource and adds a cleanup system at the Last stage
-    pub fn registerEvent(self: *Scheduler, ecs: *ecs_mod.Manager, comptime T: type, comptime ParamRegistry: type) ecs_mod.errors!void {
-        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.Last), ParamRegistry);
+    pub fn registerEvent(self: *Scheduler, ecs: *ecs_mod.Manager, comptime T: type) ecs_mod.errors!void {
+        return self.registerEventWithCleanupAtStage(ecs, T, Stage(Stages.Last));
     }
 
     /// Register an event with cleanup at a specific stage
@@ -609,10 +654,9 @@ pub const Scheduler = struct {
         ecs: *ecs_mod.Manager,
         comptime T: type,
         cleanup_stage: StageId,
-        comptime ParamRegistry: type,
     ) error{OutOfMemory}!void {
         if (!ecs.hasResource(events.EventStore(T))) {
-            ecs.addResourceRetained(events.EventStore(T), try events.EventStore(T).init(ecs.allocator, 10)) catch |err| switch (err) {
+            ecs.addResourceRetained(events.EventStore(T), try events.EventStore(T).init(ecs.allocator(), 10)) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 error.ResourceAlreadyExists => std.debug.panic("Resource already exists when adding EventStore for newly registered event type: {s}", .{@typeName(T)}),
             };
@@ -627,7 +671,7 @@ pub const Scheduler = struct {
         }.cleanup;
 
         // Add cleanup system
-        self.addSystem(ecs, cleanup_stage, cleanup_system, ParamRegistry);
+        self.addSystem(ecs, cleanup_stage, cleanup_system);
     }
 
     // ============================================================================
@@ -663,6 +707,36 @@ pub const Scheduler = struct {
         // Automatically add StateManager resource for this state type
         const state_mgr = self.getStateManager(ecs, StateEnum);
         try ecs.addResourceRetained(state_mod.StateManager(StateEnum), state_mgr);
+    }
+
+    /// Unregister a state enum type and remove its StateManager resource.
+    /// If the state is currently active, the active state is cleared.
+    pub fn unregisterState(
+        self: *Scheduler,
+        ecs: *ecs_mod.Manager,
+        comptime StateEnum: type,
+    ) error{ StateNotRegistered, ExpectedEnumType }!void {
+        const type_info = @typeInfo(StateEnum);
+        if (type_info != .@"enum") {
+            return error.ExpectedEnumType;
+        }
+
+        const type_hash = reflect.typeHash(StateEnum);
+        if (!self.states.contains(type_hash)) {
+            return error.StateNotRegistered;
+        }
+
+        _ = self.states.remove(type_hash);
+
+        if (self.active_state) |active| {
+            if (active.enum_type_hash == type_hash) {
+                self.active_state = null;
+            }
+        }
+
+        if (ecs.hasResource(state_mod.StateManager(StateEnum))) {
+            ecs.removeResource(state_mod.StateManager(StateEnum));
+        }
     }
 
     /// Check if a specific state value is currently active
@@ -847,8 +921,8 @@ inline fn isStateManagedStageValue(stage: StageId) bool {
 fn discardHandledComponentEventsIfLastStage(ecs: *ecs_mod.Manager, stage: StageId) void {
     if (!stage.eql(Stage(Stages.Last))) return;
 
-    ecs.component_added.discardHandled();
-    ecs.component_removed.discardHandled();
+    ecs.inner().component_added.discardHandled();
+    ecs.inner().component_removed.discardHandled();
 }
 
 /// Returns a temporary stage ID for systems that should run when entering a specific state
@@ -928,7 +1002,7 @@ test "Scheduler registerEventType" {
     defer scheduler.deinit();
 
     // Register the event type
-    scheduler.registerEvent(&ecs, TestEvent, registry.DefaultParamRegistry) catch |err| {
+    scheduler.registerEvent(&ecs, TestEvent) catch |err| {
         return err;
     };
 
@@ -969,7 +1043,7 @@ test "Scheduler addStage" {
 
     const first_custom_stage = StageId.init(350_000);
     const second_custom_stage = StageId.init(150_000);
-    const third_custom_stage = StageId.init(250_000);
+    const third_custom_stage = StageId.init(260_000);
     const invalid_stage = StageId.init(-1);
 
     try scheduler.addStage(first_custom_stage);
@@ -1070,7 +1144,7 @@ test "Scheduler assign outside scope" {
         }
     }.run;
 
-    scheduler.addSystem(&ecs, custom_stage, test_system, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, custom_stage, test_system);
 
     // Run stages from First to PostUpdate, which includes the custom stage
     _ = scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
@@ -1129,9 +1203,9 @@ test "Scheduler runStages executes custom stages in sorted order" {
         }
     }.run;
 
-    scheduler.addSystem(&ecs, late_stage, record_late, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, early_stage, record_early, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, middle_stage, record_middle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, late_stage, record_late);
+    scheduler.addSystem(&ecs, early_stage, record_early);
+    scheduler.addSystem(&ecs, middle_stage, record_middle);
 
     _ = scheduler.runStages(&ecs, Stage(Stages.First), Stage(Stages.PostUpdate));
 
@@ -1150,9 +1224,6 @@ test "Scheduler discards handled component events in Last stage" {
     const allocator = std.testing.allocator;
     var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
-
-    var scheduler = try Scheduler.init(allocator);
-    defer scheduler.deinit();
 
     const commands_mod = @import("commands.zig");
 
@@ -1174,28 +1245,26 @@ test "Scheduler discards handled component events in Last stage" {
     }.run;
 
     const add_tag_system = systems.ToSystemWithArgs(add_tag, .{entity}, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(Stages.Update), add_tag_system, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(Stages.PostUpdate), count_added, registry.DefaultParamRegistry);
+    const scheduler = ecs.scheduler();
+    scheduler.addSystem(&ecs, Stage(Stages.Update), add_tag_system);
+    scheduler.addSystem(&ecs, Stage(Stages.PostUpdate), count_added);
 
     _ = scheduler.runStage(&ecs, Stage(Stages.Update));
-    try std.testing.expectEqual(@as(usize, 1), ecs.component_added.count());
-    try std.testing.expect(!ecs.component_added.peek().?.handled);
+    try std.testing.expectEqual(@as(usize, 1), ecs.inner().component_added.count());
+    try std.testing.expect(!ecs.inner().component_added.peek().?.handled);
 
     _ = scheduler.runStage(&ecs, Stage(Stages.PostUpdate));
-    try std.testing.expectEqual(@as(usize, 1), ecs.component_added.count());
-    try std.testing.expect(ecs.component_added.peek().?.handled);
+    try std.testing.expectEqual(@as(usize, 1), ecs.inner().component_added.count());
+    try std.testing.expect(ecs.inner().component_added.peek().?.handled);
 
     _ = scheduler.runStage(&ecs, Stage(Stages.Last));
-    try std.testing.expectEqual(@as(usize, 0), ecs.component_added.count());
+    try std.testing.expectEqual(@as(usize, 0), ecs.inner().component_added.count());
 }
 
 test "Custom stage types with explicit priorities" {
     const allocator = std.testing.allocator;
     var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
-
-    var scheduler = try Scheduler.init(allocator);
-    defer scheduler.deinit();
 
     // Define custom stages with explicit priorities
     const CustomStages = struct {
@@ -1215,9 +1284,10 @@ test "Custom stage types with explicit priorities" {
         pub fn run(_: *ecs_mod.Manager) void {}
     }.run;
 
-    scheduler.addSystem(&ecs, Stage(CustomStages.EarlyGame), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(CustomStages.LateUpdate), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(CustomStages.PreCleanup), test_sys, registry.DefaultParamRegistry);
+    const scheduler = ecs.scheduler();
+    scheduler.addSystem(&ecs, Stage(CustomStages.EarlyGame), test_sys);
+    scheduler.addSystem(&ecs, Stage(CustomStages.LateUpdate), test_sys);
+    scheduler.addSystem(&ecs, Stage(CustomStages.PreCleanup), test_sys);
 
     // Verify stages have correct priority values
     try std.testing.expect(Stage(CustomStages.EarlyGame).value == 50_000);
@@ -1235,9 +1305,6 @@ test "Custom stage types with hash-based IDs" {
     var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator);
-    defer scheduler.deinit();
-
     // Define custom stages without priorities (will get hash-based IDs)
     const CustomStages = struct {
         pub const Physics = struct {};
@@ -1250,9 +1317,10 @@ test "Custom stage types with hash-based IDs" {
         pub fn run() void {}
     }.run;
 
-    scheduler.addSystem(&ecs, Stage(CustomStages.Physics), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(CustomStages.Audio), test_sys, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(CustomStages.Networking), test_sys, registry.DefaultParamRegistry);
+    const scheduler = ecs.scheduler();
+    scheduler.addSystem(&ecs, Stage(CustomStages.Physics), test_sys);
+    scheduler.addSystem(&ecs, Stage(CustomStages.Audio), test_sys);
+    scheduler.addSystem(&ecs, Stage(CustomStages.Networking), test_sys);
 
     // Verify hash-based IDs are in the correct range (2M+)
     try std.testing.expect(Stage(CustomStages.Physics).value >= 2_000_000);
@@ -1303,15 +1371,13 @@ test "State management without registration throws errors" {
     var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator);
-    defer scheduler.deinit();
-
     const GameState = enum {
         Menu,
         Playing,
         Paused,
     };
 
+    const scheduler = ecs.scheduler();
     // Test 1: transitionTo without registration should return error.StateNotRegistered
     const transition_result = scheduler.transitionTo(&ecs, GameState, .Menu);
     try std.testing.expectError(error.StateNotRegistered, transition_result.throw());
@@ -1330,9 +1396,6 @@ test "Scheduler runStages skips internal state-managed stages" {
     var ecs = try ecs_mod.Manager.init(allocator, std.testing.io);
     defer ecs.deinit();
 
-    var scheduler = try Scheduler.init(allocator);
-    defer scheduler.deinit();
-
     const GameState = enum {
         Menu,
     };
@@ -1341,6 +1404,7 @@ test "Scheduler runStages skips internal state-managed stages" {
     const InStateRan = struct { value: bool };
     const PostStateRan = struct { value: bool };
 
+    const scheduler = ecs.scheduler();
     try scheduler.registerState(&ecs, GameState);
     try ecs.addResourceRetained(EnterRan, .{ .value = false });
     try ecs.addResourceRetained(InStateRan, .{ .value = false });
@@ -1363,9 +1427,9 @@ test "Scheduler runStages skips internal state-managed stages" {
         }
     }.run;
 
-    scheduler.addSystem(&ecs, OnEnter(GameState.Menu), enter_system, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, InState(GameState.Menu), in_state_system, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, post_state_stage, post_state_system, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, OnEnter(GameState.Menu), enter_system);
+    scheduler.addSystem(&ecs, InState(GameState.Menu), in_state_system);
+    scheduler.addSystem(&ecs, post_state_stage, post_state_system);
 
     _ = scheduler.transitionTo(&ecs, GameState, .Menu);
 
@@ -1433,8 +1497,8 @@ test "Concurrent stage: two independent systems both run" {
     var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
-    scheduler.addSystem(&ecs, Stage(Stages.Update), sysA, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, Stage(Stages.Update), sysB, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(Stages.Update), sysA);
+    scheduler.addSystem(&ecs, Stage(Stages.Update), sysB);
 
     _ = scheduler.runStage(&ecs, Stage(Stages.Update));
 
@@ -1490,7 +1554,7 @@ test "chain(): systems within a chain run in order" {
     var scheduler = try Scheduler.init(allocator);
     defer scheduler.deinit();
 
-    scheduler.addSystem(&ecs, Stage(Stages.Update), chain(.{ sys1, sys2, sys3 }), registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, Stage(Stages.Update), chain(.{ sys1, sys2, sys3 }));
 
     _ = scheduler.runStage(&ecs, Stage(Stages.Update));
 
@@ -1537,12 +1601,10 @@ test "Concurrent stage: Commands deferred flush adds components" {
     // System(void) to addSystem via the .system / cacheSystem path.
     const prebuilt = systems.ToSystemWithArgs(tagSys, .{entity}, registry.DefaultParamRegistry);
 
-    var scheduler = try Scheduler.init(allocator);
-    defer scheduler.deinit();
+    ecs.scheduler().addSystem(&ecs, Stage(Stages.Update), prebuilt);
 
-    scheduler.addSystem(&ecs, Stage(Stages.Update), prebuilt, registry.DefaultParamRegistry);
-
-    _ = scheduler.runStage(&ecs, Stage(Stages.Update));
+    const eg = ecs.scheduler().runStage(&ecs, Stage(Stages.Update));
+    try std.testing.expect(eg.hasErrors() == false);
 
     // Component must exist after runStage — proving deferred flush ran.
     const tag = try ecs.getComponent(entity, Tag);

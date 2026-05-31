@@ -456,11 +456,21 @@ pub inline fn ToSystemWithArgs(system_fn: anytype, args: anytype, comptime Regis
 /// Infers the return type of a system function, unwrapping error unions to get the payload type if necessary.
 ///
 /// TODO: Rename this to `SystemReturnType`
-pub fn ToSystemReturnType(comptime system_fn: anytype) type {
-    const FnInfo = @typeInfo(@TypeOf(system_fn));
+pub fn ToSystemReturnType(system_fn: anytype) type {
+    return ToSystemReturnTypeFromType(@TypeOf(system_fn));
+}
 
-    // Get the function's actual return type
-    const fn_return_type = FnInfo.@"fn".return_type orelse void;
+/// Infers the return type of a system function from a compile-time function type.
+pub fn ToSystemReturnTypeFromType(comptime fn_type: type) type {
+    const type_info = @typeInfo(fn_type);
+    const fn_type_info = if (type_info == .@"fn")
+        type_info
+    else if (type_info == .pointer and @typeInfo(type_info.pointer.child) == .@"fn")
+        @typeInfo(type_info.pointer.child)
+    else
+        @compileError("ToSystemReturnTypeFromType requires a function or pointer-to-function type");
+
+    const fn_return_type = fn_type_info.@"fn".return_type orelse void;
     const fn_return_info = @typeInfo(fn_return_type);
 
     // If function returns an error union, unwrap to get the payload type

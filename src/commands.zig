@@ -14,6 +14,11 @@ inline fn commandsInner(commands: Commands) *CommandsInner._Inner {
     return @ptrCast(@alignCast(commands));
 }
 
+pub const QueuedCommand = struct {
+    buffer: command_buffer.CommandBuffer,
+    manager_ptr: *anyopaque,
+};
+
 /// PendingEntity represents an entity that will be created when flush() is called.
 /// The actual Entity is populated after creation.
 pub const PendingEntity = struct {
@@ -66,7 +71,7 @@ pub const CommandsInner = opaque {
     }
 
     pub fn io(self: Commands) std.Io {
-        return commandsInner(self)._manager.io;
+        return commandsInner(self)._manager.io();
     }
 
     /// Create a deferred entity and return EntityCommands for chaining operations.
@@ -91,10 +96,10 @@ pub const CommandsInner = opaque {
             }
             fn batchExecute(data_ptrs: []const *const anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
-                var ents = try mgr.allocator.alloc(ecs.Entity, data_ptrs.len);
-                defer mgr.allocator.free(ents);
-                var values = try mgr.allocator.alloc(T, data_ptrs.len);
-                defer mgr.allocator.free(values);
+                var ents = try mgr.allocator().alloc(ecs.Entity, data_ptrs.len);
+                defer mgr.allocator().free(ents);
+                var values = try mgr.allocator().alloc(T, data_ptrs.len);
+                defer mgr.allocator().free(values);
 
                 for (data_ptrs, 0..) |data_ptr, i| {
                     const d: *const Data = @ptrCast(@alignCast(data_ptr));
@@ -119,8 +124,8 @@ pub const CommandsInner = opaque {
             }
             fn batchExecute(data_ptrs: []const *const anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
-                var ents = try mgr.allocator.alloc(ecs.Entity, data_ptrs.len);
-                defer mgr.allocator.free(ents);
+                var ents = try mgr.allocator().alloc(ecs.Entity, data_ptrs.len);
+                defer mgr.allocator().free(ents);
 
                 for (data_ptrs, 0..) |data_ptr, i| {
                     const d: *const Data = @ptrCast(@alignCast(data_ptr));
@@ -201,39 +206,83 @@ pub const CommandsInner = opaque {
         }.execute, null);
     }
 
-    pub fn addSystem(self: Commands, stage: scheduler.StageId, system_fn: anytype, comptime SystemParamRegistry: type) error{OutOfMemory}!void {
+    fn resolveSystemHandle(comptime SystemType: type, system_fn: anytype, mgr: *ecs.Manager) systems.UntypedSystemHandle {
+        const system_type = comptime systems.getSystemTypeFromType(SystemType);
+        if (comptime system_type == .func) {
+            return mgr.cacheSystem(mgr.createSystemFromType(SystemType, system_fn)).eraseType();
+        } else if (comptime system_type == .handle) {
+            return system_fn.eraseType();
+        } else if (comptime system_type == .untyped) {
+            return system_fn;
+        } else if (comptime system_type == .system) {
+            return mgr.cacheSystem(system_fn).eraseType();
+        } else {
+            return std.debug.panic("Invalid system type: {s}", .{@typeName(SystemType)});
+        }
+    }
+
+    pub fn addSystem(self: Commands, stage: scheduler.StageId, system_fn: anytype) error{OutOfMemory}!void {
         const SystemType = @TypeOf(system_fn);
-        const Data = struct { stage: scheduler.StageId, system_fn: SystemType };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .stage = stage, .system_fn = system_fn }, &struct {
+        // Resolve to an UntypedSystemHandle at enqueue time so the queued data
+        // is runtime-representable and does not require storing comptime-only
+        // function values inside the command buffer.
+        const mgr = commandsInner(self)._manager;
+        const untyped_handle = resolveSystemHandle(SystemType, system_fn, mgr);
+
+        const Data = struct { stage: scheduler.StageId, handle: systems.UntypedSystemHandle };
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .stage = stage, .handle = untyped_handle }, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
-                const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
-                const sched = mgr.scheduler;
-                sched.addSystem(mgr, d.stage, d.system_fn, SystemParamRegistry);
+                const mgr_exec: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
+                const sched = mgr_exec.scheduler();
+                sched.addSystem(mgr_exec, d.stage, d.handle);
             }
         }.execute, null);
     }
 
-    pub fn removeSystem(self: Commands, stage: scheduler.StageId, system_fn: anytype, comptime SystemParamRegistry: type) error{OutOfMemory}!void {
+    pub fn removeSystem(self: Commands, stage: scheduler.StageId, system_fn: anytype) error{OutOfMemory}!void {
         const SystemType = @TypeOf(system_fn);
-        const Data = struct { stage: scheduler.StageId, system_fn: SystemType };
-        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .stage = stage, .system_fn = system_fn }, &struct {
+        const mgr = commandsInner(self)._manager;
+        const untyped_handle = resolveSystemHandle(SystemType, system_fn, mgr);
+
+        const Data = struct { stage: scheduler.StageId, handle: systems.UntypedSystemHandle };
+        try commandsInner(self).buffer.appendCommand(commandsInner(self)._allocator, Data, .{ .stage = stage, .handle = untyped_handle }, &struct {
             fn execute(ptr: *anyopaque, mgr_ptr: *anyopaque) anyerror!void {
                 const d: *Data = @ptrCast(@alignCast(ptr));
-                const mgr: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
-                mgr.scheduler.removeSystem(mgr, d.stage, d.system_fn, SystemParamRegistry);
+                const mgr_exec: *ecs.Manager = @ptrCast(@alignCast(mgr_ptr));
+                mgr_exec.scheduler().removeSystem(mgr_exec, d.stage, d.handle);
             }
         }.execute, null);
     }
 
-    /// Enqueue all queued commands onto the manager's deferred command queue.
+    /// Enqueue the local command buffer onto the manager's deferred queue.
+    ///
+    /// This moves ownership of the `Commands`' internal `CommandBuffer` into the
+    /// `Manager`'s deferred queue (`ManagerImpl.queued_commands`) under a mutex.
+    /// The scheduler (or explicit calls to `Manager.flushQueuedCommands`) will
+    /// later flush queued buffers on the manager's context. Use `queue` when
+    /// called from systems that must defer mutations until after all stage work
+    /// completes (the Scheduler toggles `defer_command_flush` around stage runs).
+    ///
+    /// Characteristics:
+    /// - Thread-safe: appends under the manager's command-queue mutex.
+    /// - Deferred: does not execute commands immediately.
+    /// - Preserves ordering and the originating `Manager` context for flush time.
     pub fn queue(self: Commands) error{OutOfMemory}!void {
-        try commandsInner(self)._manager.enqueueCommandBuffer(commandsInner(self).buffer.take());
+        const mgr_wrapper = commandsInner(self)._manager;
+        const impl = mgr_wrapper.inner();
+        try impl.enqueueCommandBuffer(@ptrCast(@alignCast(mgr_wrapper)), commandsInner(self).buffer.take());
     }
 
-    /// Execute all queued commands and clear the buffer (retaining capacity for reuse).
+    /// Execute all queued commands in this `Commands` buffer immediately.
+    ///
+    /// This applies operations synchronously to the supplied `*ecs.Manager` and
+    /// does not interact with the manager's deferred queue. Use `flush` when
+    /// immediate effects are required (for example, `EntityCommands.flush`),
+    /// and use `queue` when mutations must be deferred until after concurrent
+    /// stage work completes.
     pub fn flush(self: Commands, ecsManager: *ecs.Manager) anyerror!void {
-        try commandsInner(self).buffer.flush(ecsManager.allocator, ecsManager);
+        try commandsInner(self).buffer.flush(ecsManager.allocator(), ecsManager);
     }
 };
 
@@ -402,12 +451,12 @@ test "Commands.addSystem queues and executes scheduler systems" {
         }
     }.run;
 
-    const handle = manager.createSystemCached(test_system, registry.DefaultParamRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(test_system));
     const update_stage = scheduler.Stage(scheduler.Stages.Update);
-    try commands.addSystem(update_stage, handle, registry.DefaultParamRegistry);
+    try commands.addSystem(update_stage, handle);
     try commands.flush(&manager);
 
-    var stage_info = manager.scheduler.getStageInfo(std.testing.allocator);
+    var stage_info = manager.scheduler().getStageInfo(std.testing.allocator);
     defer stage_info.deinit(std.testing.allocator);
     var found_update = false;
     for (stage_info.items) |info| {
@@ -418,7 +467,7 @@ test "Commands.addSystem queues and executes scheduler systems" {
         }
     }
     try std.testing.expect(found_update);
-    try std.testing.expect(manager.systems.count() == 1);
+    try std.testing.expect(manager.systems().count() == 1);
 }
 
 test "Commands.removeSystem removes scheduler stage entry and cached system" {
@@ -426,7 +475,7 @@ test "Commands.removeSystem removes scheduler stage entry and cached system" {
     var manager = try ecs.Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
-    var commands = try CommandsInner.init(std.testing.allocator, &manager);
+    const commands = try CommandsInner.init(std.testing.allocator, &manager);
     defer commands.deinit();
 
     const TestCounter = struct { count: u32 };
@@ -438,20 +487,83 @@ test "Commands.removeSystem removes scheduler stage entry and cached system" {
         }
     }.run;
 
-    const handle = manager.createSystemCached(test_system, registry.DefaultParamRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(test_system));
     const update_stage = scheduler.Stage(scheduler.Stages.Update);
-    try commands.addSystem(update_stage, handle, registry.DefaultParamRegistry);
+    try commands.addSystem(update_stage, handle);
     try commands.flush(&manager);
 
-    try commands.removeSystem(update_stage, handle.eraseType(), registry.DefaultParamRegistry);
+    try commands.removeSystem(update_stage, handle.eraseType());
     try commands.flush(&manager);
 
-    var stage_info = manager.scheduler.getStageInfo(std.testing.allocator);
+    var stage_info = manager.scheduler().getStageInfo(std.testing.allocator);
     defer stage_info.deinit(std.testing.allocator);
     for (stage_info.items) |info| {
         if (info.stage.value == update_stage.value) {
             try std.testing.expect(info.system_count == 0);
         }
     }
-    try std.testing.expect(manager.systems.count() == 0);
+    try std.testing.expect(manager.systems().count() == 0);
+}
+
+test "Commands.queue enqueues buffer" {
+    const allocator = std.testing.allocator;
+    var manager = try ecs.Manager.init(allocator, std.testing.io);
+    defer manager.deinit();
+
+    var commands = try CommandsInner.init(allocator, &manager);
+    defer commands.deinit();
+
+    // Append a simple command and enqueue it; the manager should own the buffer afterwards.
+    try commands.addResource(i32, 42);
+    try commands.queue();
+
+    const impl = manager.inner();
+    try std.testing.expectEqual(@as(usize, 1), impl.queued_commands.items.len);
+    const queued = &impl.queued_commands.items[0];
+    try std.testing.expect(!queued.buffer.isEmpty());
+
+    // Cleanup will deinit the queued buffer via manager.deinit().
+}
+
+test "Commands.flush vs queue (immediate vs deferred)" {
+    const allocator = std.testing.allocator;
+
+    // Immediate flush: commands.flush applies effects right away.
+    var m1 = try ecs.Manager.init(allocator, std.testing.io);
+    defer m1.deinit();
+
+    var c1 = try CommandsInner.init(allocator, &m1);
+    defer c1.deinit();
+
+    try c1.addResource(i32, 7);
+    try c1.flush(&m1);
+
+    const r1 = m1.getResource(i32).?;
+    defer r1.deinit();
+    var gr1 = r1.lockRead();
+    defer gr1.deinit();
+    try std.testing.expectEqual(@as(i32, 7), gr1.get().*);
+
+    // Deferred queue: commands.queue moves buffer to manager.queued_commands
+    // and effects are not visible until the manager flushes queued commands.
+    var m2 = try ecs.Manager.init(allocator, std.testing.io);
+    defer m2.deinit();
+
+    var c2 = try CommandsInner.init(allocator, &m2);
+    defer c2.deinit();
+
+    try c2.addResource(i32, 9);
+    try c2.queue();
+
+    // Not applied yet
+    try std.testing.expect(m2.getResource(i32) == null);
+
+    // Now flush queued buffers on the manager (sequential path)
+    try m2.inner().flushQueuedCommands(null);
+
+    const r2 = m2.getResource(i32).?;
+    defer r2.deinit();
+    var gr2 = r2.lockRead();
+    defer gr2.deinit();
+    try std.testing.expectEqual(@as(i32, 9), gr2.get().*);
 }

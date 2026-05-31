@@ -240,7 +240,7 @@ const EventReaderSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const EventType = BaseType(ParamType).EventType;
         var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
-            const store = try events.EventStore(EventType).init(e.allocator, 16);
+            const store = try events.EventStore(EventType).init(e.allocator(), 16);
             try e.addResourceRetained(events.EventStore(EventType), store);
             break :blk e.getResource(events.EventStore(EventType)) orelse std.debug.panic("Resource not found: {s}", .{@typeName(events.EventStore(EventType))});
         };
@@ -297,7 +297,7 @@ const EventWriterSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const EventType = BaseType(ParamType).EventType;
         var ref = e.getResource(events.EventStore(EventType)) orelse blk: {
-            const store = try events.EventStore(EventType).init(e.allocator, 16);
+            const store = try events.EventStore(EventType).init(e.allocator(), 16);
             try e.addResourceRetained(events.EventStore(EventType), store);
             break :blk e.getResource(events.EventStore(EventType)) orelse std.debug.panic("Resource not found: {s}", .{@typeName(events.EventStore(EventType))});
         };
@@ -405,14 +405,14 @@ const NextStateSystemParamImpl = struct {
         var guard = ref.lockRead();
         const state_mgr = guard.get().*;
         guard.deinit();
-        const next_state_ptr = try e.allocator.create(BaseType(ParamType));
+        const next_state_ptr = try e.allocator().create(BaseType(ParamType));
         next_state_ptr.* = BaseType(ParamType){ .state_mgr = state_mgr };
         return next_state_ptr;
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         const next_state: ParamType = @ptrCast(@alignCast(ptr));
-        e.allocator.destroy(next_state);
+        e.allocator().destroy(next_state);
     }
 };
 
@@ -492,7 +492,7 @@ const ResourceSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const ResourceType = BaseType(ParamType).ResType;
         const ref = e.getResource(ResourceType) orelse std.debug.panic("Resource not found: {s}", .{@typeName(ResourceType)});
-        const inner = try e.allocator.create(BaseType(ParamType)._Inner);
+        const inner = try e.allocator().create(BaseType(ParamType)._Inner);
         inner.* = .{ .ref = ref, .guard = ref.lockRead() };
         return @ptrCast(inner);
     }
@@ -501,7 +501,7 @@ const ResourceSystemParamImpl = struct {
         const inner: *BaseType(ParamType)._Inner = @ptrCast(@alignCast(ptr));
         inner.guard.deinit();
         inner.ref.deinit();
-        e.allocator.destroy(inner);
+        e.allocator().destroy(inner);
     }
 };
 
@@ -512,7 +512,7 @@ const ResourceMutSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const ResourceType = BaseType(ParamType).ResMutType;
         const ref = e.getResource(ResourceType) orelse std.debug.panic("Resource not found: {s}", .{@typeName(ResourceType)});
-        const inner = try e.allocator.create(BaseType(ParamType)._Inner);
+        const inner = try e.allocator().create(BaseType(ParamType)._Inner);
         inner.* = .{ .ref = ref, .guard = ref.lockWrite() };
         return @ptrCast(inner);
     }
@@ -521,7 +521,7 @@ const ResourceMutSystemParamImpl = struct {
         const inner: *BaseType(ParamType)._Inner = @ptrCast(@alignCast(ptr));
         inner.guard.deinit();
         inner.ref.deinit();
-        e.allocator.destroy(inner);
+        e.allocator().destroy(inner);
     }
 };
 
@@ -538,7 +538,7 @@ const QuerySystemParamMatcher = struct {
 const QuerySystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         var query = e.query(ParamType.IncludeTypesParam);
-        const released = try e.allocator.create(bool);
+        const released = try e.allocator().create(bool);
         query.shareDeinitState(released);
         return query;
     }
@@ -548,7 +548,7 @@ const QuerySystemParamImpl = struct {
         query_ptr.deinit();
         if (query_ptr.shared_guard_released) |shared_state| {
             query_ptr.shared_guard_released = null;
-            e.allocator.destroy(shared_state);
+            e.allocator().destroy(shared_state);
         }
     }
 };
@@ -682,12 +682,12 @@ pub const Relations = *RelationsInner;
 const RelationsSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         if (e.hasResource(relations_mod.RelationManager) == false) {
-            const rel_mgr = relations_mod.RelationManager.init(e.allocator);
+            const rel_mgr = relations_mod.RelationManager.init(e.allocator());
             try e.addResourceRetained(relations_mod.RelationManager, rel_mgr);
         }
-        const ref = e.getResource(relations_mod.RelationManager) orelse return error.RelationsManagerNotFound;
+        const ref = e.getResource(relations_mod.RelationManager).?;
         const guard = ref.lockWrite();
-        const rel_ptr = try e.allocator.create(BaseType(ParamType)._Inner);
+        const rel_ptr = try e.allocator().create(BaseType(ParamType)._Inner);
         rel_ptr.* = .{ .ref = ref, .guard = guard };
         return @ptrCast(rel_ptr);
     }
@@ -697,7 +697,7 @@ const RelationsSystemParamImpl = struct {
         const rel_ptr: *RelationsInner._Inner = @ptrCast(@alignCast(ptr));
         rel_ptr.guard.deinit();
         rel_ptr.ref.deinit();
-        e.allocator.destroy(rel_ptr);
+        e.allocator().destroy(rel_ptr);
     }
 };
 
@@ -735,14 +735,14 @@ const OnAddedSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const Component = BaseType(ParamType).ComponentType;
         const event_type_hash = zevy_reflect.typeHash(Component);
-        var results = try std.ArrayList(OnAdded(Component).Item).initCapacity(e.allocator, 16);
-        defer results.deinit(e.allocator);
+        var results = try std.ArrayList(OnAdded(Component).Item).initCapacity(e.allocator(), 16);
+        defer results.deinit(e.allocator());
 
-        var iter = e.component_added.iterator();
+        var iter = e.inner().component_added.iterator();
         while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
             if (try e.getComponent(ev.data.entity, Component)) |comp_ptr| {
-                try results.append(e.allocator, .{
+                try results.append(e.allocator(), .{
                     .entity = ev.data.entity,
                     .comp = comp_ptr,
                 });
@@ -750,7 +750,7 @@ const OnAddedSystemParamImpl = struct {
             ev.handled = true;
         }
 
-        const slice = try results.toOwnedSlice(e.allocator);
+        const slice = try results.toOwnedSlice(e.allocator());
         return ParamType{ .items = slice };
     }
 
@@ -758,7 +758,7 @@ const OnAddedSystemParamImpl = struct {
         const Component = BaseType(ParamType).ComponentType;
         // Cast the opaque pointer back to OnAdded and free its allocated items
         const on_added: *OnAdded(Component) = @ptrCast(@alignCast(ptr));
-        e.allocator.free(on_added.items);
+        e.allocator().free(on_added.items);
     }
 };
 
@@ -794,17 +794,17 @@ const OnRemovedSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
         const Component = BaseType(ParamType).ComponentType;
         const event_type_hash = zevy_reflect.typeHash(Component);
-        var results = try std.ArrayList(ecs.Entity).initCapacity(e.allocator, 16);
-        defer results.deinit(e.allocator);
+        var results = try std.ArrayList(ecs.Entity).initCapacity(e.allocator(), 16);
+        defer results.deinit(e.allocator());
 
-        var iter = e.component_removed.iterator();
+        var iter = e.inner().component_removed.iterator();
         while (iter.next()) |ev| {
             if (ev.data.type_hash != event_type_hash) continue;
-            try results.append(e.allocator, ev.data.entity);
+            try results.append(e.allocator(), ev.data.entity);
             ev.handled = true;
         }
 
-        const slice = try results.toOwnedSlice(e.allocator);
+        const slice = try results.toOwnedSlice(e.allocator());
         return ParamType{ .removed = slice };
     }
 
@@ -812,7 +812,7 @@ const OnRemovedSystemParamImpl = struct {
         const Component = BaseType(ParamType).ComponentType;
         // Cast the opaque pointer back to OnRemoved and free its allocated items
         const on_removed: *OnRemoved(Component) = @ptrCast(@alignCast(ptr));
-        e.allocator.free(on_removed.removed);
+        e.allocator().free(on_removed.removed);
     }
 };
 
@@ -821,15 +821,15 @@ pub const OnRemovedSystemParam = SystemParam(DeclMatcher(false, &.{ "ComponentTy
 /// Commands SystemParam matcher and applier
 const CommandsSystemParamImpl = struct {
     pub fn apply(e: *ecs.Manager, comptime ParamType: type) anyerror!ParamType {
-        return try CommandsInner.init(e.allocator, e);
+        return try CommandsInner.init(e.allocator(), e);
     }
 
     pub fn deinit(e: *ecs.Manager, ptr: *anyopaque, comptime ParamType: type) void {
         _ = ParamType;
         const commands: Commands = @ptrCast(@alignCast(ptr));
         commands.queue() catch |err| @panic(@errorName(err));
-        if (!e.defer_command_flush.load(.acquire)) {
-            e.flushQueuedCommands(null) catch |err| @panic(@errorName(err));
+        if (!e.inner().defer_command_flush.load(.acquire)) {
+            e.inner().flushQueuedCommands(null) catch |err| @panic(@errorName(err));
         }
         commands.deinit();
     }

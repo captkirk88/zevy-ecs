@@ -80,6 +80,47 @@ test "Scheduler duplicate state registration" {
     try std.testing.expectError(error.StateAlreadyRegistered, scheduler.registerState(&ecs, GameState));
 }
 
+test "Scheduler unregister state type" {
+    const allocator = std.testing.allocator;
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    var scheduler = try Scheduler.init(allocator);
+    defer scheduler.deinit();
+
+    const GameState = enum {
+        Menu,
+        Playing,
+    };
+
+    try scheduler.registerState(&ecs, GameState);
+    try scheduler.unregisterState(&ecs, GameState);
+
+    try std.testing.expect(!scheduler.states.contains(reflect.typeHash(GameState)));
+    try std.testing.expect(!ecs.hasResource(StateManager(GameState)));
+}
+
+test "Scheduler unregister state clears active state" {
+    const allocator = std.testing.allocator;
+    var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    var scheduler = try Scheduler.init(allocator);
+    defer scheduler.deinit();
+
+    const GameState = enum {
+        Menu,
+        Playing,
+    };
+
+    try scheduler.registerState(&ecs, GameState);
+    _ = scheduler.transitionTo(&ecs, GameState, .Menu);
+    try std.testing.expect(scheduler.isInState(GameState, .Menu));
+
+    try scheduler.unregisterState(&ecs, GameState);
+    try std.testing.expect(scheduler.getActiveState(GameState) == null);
+}
+
 test "Scheduler state transition" {
     const allocator = std.testing.allocator;
     var ecs = try ecs_mod.Manager.init(std.testing.allocator, std.testing.io);
@@ -216,8 +257,7 @@ test "States parameter in system" {
     }.run;
 
     // Create and run the system
-    const registry = @import("systems.registry.zig");
-    const system = ecs.createSystem(test_system, registry.DefaultParamRegistry);
+    const system = ecs.createSystem(test_system);
     try system.run(&ecs, system.ctx);
 
     // Verify transition happened immediately
@@ -303,19 +343,18 @@ test "OnEnter and OnExit systems" {
     }.run;
 
     // Register systems for state transitions
-    const registry = @import("systems.registry.zig");
     const OnEnter = @import("scheduler.zig").OnEnter;
     const OnExit = @import("scheduler.zig").OnExit;
 
-    const menu_enter_handle = ecs.createSystemCached(menu_enter_system, registry.DefaultParamRegistry);
-    const menu_exit_handle = ecs.createSystemCached(menu_exit_system, registry.DefaultParamRegistry);
-    const playing_enter_handle = ecs.createSystemCached(playing_enter_system, registry.DefaultParamRegistry);
-    const playing_exit_handle = ecs.createSystemCached(playing_exit_system, registry.DefaultParamRegistry);
+    const menu_enter_handle = ecs.cacheSystem(ecs.createSystem(menu_enter_system));
+    const menu_exit_handle = ecs.cacheSystem(ecs.createSystem(menu_exit_system));
+    const playing_enter_handle = ecs.cacheSystem(ecs.createSystem(playing_enter_system));
+    const playing_exit_handle = ecs.cacheSystem(ecs.createSystem(playing_exit_system));
 
-    scheduler.addSystem(&ecs, OnEnter(GameState.Menu), menu_enter_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, OnExit(GameState.Menu), menu_exit_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, OnEnter(GameState.Playing), playing_enter_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, OnExit(GameState.Playing), playing_exit_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, OnEnter(GameState.Menu), menu_enter_handle);
+    scheduler.addSystem(&ecs, OnExit(GameState.Menu), menu_exit_handle);
+    scheduler.addSystem(&ecs, OnEnter(GameState.Playing), playing_enter_handle);
+    scheduler.addSystem(&ecs, OnExit(GameState.Playing), playing_exit_handle);
 
     // Transition to Menu state - should trigger OnEnter(Menu)
     _ = scheduler.transitionTo(&ecs, GameState, .Menu);
@@ -418,16 +457,15 @@ test "InState systems" {
     }.run;
 
     // Register systems for specific states
-    const registry = @import("systems.registry.zig");
     const InState = @import("scheduler.zig").InState;
 
-    const menu_handle = ecs.createSystemCached(menu_system, registry.DefaultParamRegistry);
-    const playing_handle = ecs.createSystemCached(playing_system, registry.DefaultParamRegistry);
-    const paused_handle = ecs.createSystemCached(paused_system, registry.DefaultParamRegistry);
+    const menu_handle = ecs.cacheSystem(ecs.createSystem(menu_system));
+    const playing_handle = ecs.cacheSystem(ecs.createSystem(playing_system));
+    const paused_handle = ecs.cacheSystem(ecs.createSystem(paused_system));
 
-    scheduler.addSystem(&ecs, InState(GameState.Menu), menu_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, InState(GameState.Playing), playing_handle, registry.DefaultParamRegistry);
-    scheduler.addSystem(&ecs, InState(GameState.Paused), paused_handle, registry.DefaultParamRegistry);
+    scheduler.addSystem(&ecs, InState(GameState.Menu), menu_handle);
+    scheduler.addSystem(&ecs, InState(GameState.Playing), playing_handle);
+    scheduler.addSystem(&ecs, InState(GameState.Paused), paused_handle);
 
     // Transition to Menu state
     _ = scheduler.transitionTo(&ecs, GameState, .Menu);

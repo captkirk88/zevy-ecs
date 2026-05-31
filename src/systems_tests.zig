@@ -304,7 +304,7 @@ test "System - createSystemCached" {
     var manager = try Manager.init(std.testing.allocator, std.testing.io);
     defer manager.deinit();
 
-    const handle = manager.createSystemCached(simpleSystem, DefaultRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(simpleSystem));
     _ = try manager.runSystem(handle);
 }
 
@@ -313,7 +313,7 @@ test "System - cacheSystem" {
     defer manager.deinit();
 
     // Create a system manually
-    const system = manager.createSystem(simpleSystem, DefaultRegistry);
+    const system = manager.createSystem(simpleSystem);
 
     // Cache it (should infer return type automatically)
     const handle = manager.cacheSystem(system);
@@ -412,8 +412,8 @@ test "System - OnAdded and OnRemoved system params" {
     defer manager.deinit();
     const system = ToSystem(onAddedRemovedSystem, DefaultRegistry);
     // Ensure no leftover component events from earlier tests
-    manager.component_added.clear();
-    manager.component_removed.clear();
+    manager.inner().component_added.clear();
+    manager.inner().component_removed.clear();
 
     const entity = manager.create(.{});
     try manager.addComponent(entity, Position, .{ .x = 1, .y = 2 });
@@ -453,7 +453,7 @@ test "SystemHandle signature in Debug mode" {
         pub fn run(_: *Manager) void {}
     }.run;
 
-    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(TestSystem));
 
     if (is_debug) {
         // In debug mode, debug_info should be populated with function signature
@@ -475,7 +475,7 @@ test "UntypedSystemHandle signature in Debug mode" {
         pub fn run(_: *Manager) void {}
     }.run;
 
-    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(TestSystem));
     const untyped = handle.eraseType();
 
     if (is_debug) {
@@ -498,7 +498,7 @@ test "UntypedSystemHandle format includes sig in Debug mode" {
         pub fn run(_: *Manager) void {}
     }.run;
 
-    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(TestSystem));
     const untyped = handle.eraseType();
 
     // Format the handle as a string using {f} to call format method
@@ -529,7 +529,7 @@ test "SystemHandle format with {d} shows only number" {
         pub fn run(_: *Manager) void {}
     }.run;
 
-    const handle = manager.createSystemCached(TestSystem, DefaultRegistry);
+    const handle = manager.cacheSystem(manager.createSystem(TestSystem));
     const untyped = handle.eraseType();
 
     // Format with {d} specifier
@@ -564,8 +564,8 @@ test "Multiple systems have different debug sigs" {
         }
     }.run;
 
-    const handle1 = manager.createSystemCached(System1, DefaultRegistry);
-    const handle2 = manager.createSystemCached(System2, DefaultRegistry);
+    const handle1 = manager.cacheSystem(manager.createSystem(System1));
+    const handle2 = manager.cacheSystem(manager.createSystem(System2));
 
     // Different systems should have different debug sigs (different return types)
     try std.testing.expect(!std.mem.eql(u8, handle1.debug_info.signature, handle2.debug_info.signature));

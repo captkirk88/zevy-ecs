@@ -1186,6 +1186,10 @@ The Scheduler manages system execution order through stages. Systems are organiz
 > [!NOTE]
 > The Scheduler runs stage work internally using `io.async`. If you need a specific set of systems to run synchronously and in-order within a stage, wrap them with `chain(...)` and register that chained system instead of registering those systems separately.
 
+When a `zevy_app.FixedTimestepAccumulator` resource exists, `App.run()` drives `Stages.PreFixedUpdate -> Stages.FixedUpdate -> Stages.PostFixedUpdate` in a fixed-step catch-up loop between `Stages.PreUpdate` and `Stages.Update`. These fixed-step stages run synchronously so each fixed tick is completed deterministically before the next tick or render work begins.
+
+The accumulator exposes per-frame overload diagnostics through `accumulator.diagnostics`, including the measured frame time, accepted catch-up time, dropped simulation time, fixed steps run, whether the update cap was hit, and cumulative overload counters.
+
 #### Predefined Stages
 
 zevy_ecs comes with the following predefined stages (in execution order) but these are not required and you can create your own custom stages with any priority:
@@ -1194,6 +1198,9 @@ zevy_ecs comes with the following predefined stages (in execution order) but the
 - `Stages.Startup` - Initial setup and initialization
 - `Stages.First` - First stage of the main loop
 - `Stages.PreUpdate` - Before main update logic
+- `Stages.PreFixedUpdate` - Before fixed-step game logic
+- `Stages.FixedUpdate` - Fixed-step game logic
+- `Stages.PostFixedUpdate` - After fixed-step game logic
 - `Stages.Update` - Main game/app logic
 - `Stages.PostUpdate` - After main update logic
 - `Stages.PreDraw` - Before rendering

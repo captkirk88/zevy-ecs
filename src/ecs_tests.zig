@@ -1,8 +1,11 @@
 const std = @import("std");
-const ecs = @import("ecs.zig");
-const Manager = ecs.Manager;
-const Entity = ecs.Entity;
+const ecs_mod = @import("ecs.zig");
+const Manager = ecs_mod.Manager;
+const Entity = ecs_mod.Entity;
+const scheduler_mod = @import("scheduler.zig");
 const relations = @import("relations.zig");
+const params = @import("systems.params.zig");
+const registry = @import("systems.registry.zig");
 const Query = @import("query.zig").Query;
 
 fn pointerSystem(query: Query(struct { pcA: ?PointerComp, pcB: ?PointerCompToPointerComp })) void {
@@ -25,8 +28,8 @@ const Position = packed struct {
 };
 
 const Velocity = packed struct {
-    dx: f32,
-    dy: f32,
+    x: f32,
+    y: f32,
 };
 
 const Health = struct {
@@ -71,7 +74,7 @@ test "Manager - create entity with components" {
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
-    const vel = Velocity{ .dx = 1.0, .dy = 2.0 };
+    const vel = Velocity{ .x = 1.0, .y = 2.0 };
 
     const entity = manager.create(.{ pos, vel });
 
@@ -102,7 +105,7 @@ test "Manager - createBatch" {
     defer manager.deinit();
 
     const pos = Position{ .x = 5.0, .y = 10.0 };
-    const vel = Velocity{ .dx = 0.5, .dy = -0.5 };
+    const vel = Velocity{ .x = 0.5, .y = -0.5 };
 
     const entities = try manager.createBatch(std.testing.allocator, 1000, .{ pos, vel });
     defer std.testing.allocator.free(entities);
@@ -229,7 +232,7 @@ test "Manager - removeComponent" {
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
-    const vel = Velocity{ .dx = 1.0, .dy = 1.0 };
+    const vel = Velocity{ .x = 1.0, .y = 1.0 };
     const entity = manager.create(.{ pos, vel });
 
     try std.testing.expect(try manager.hasComponent(entity, Velocity));
@@ -267,7 +270,7 @@ test "Manager - getAllComponents" {
     defer manager.deinit();
 
     const pos = Position{ .x = 5.0, .y = 10.0 };
-    const vel = Velocity{ .dx = 2.0, .dy = 3.0 };
+    const vel = Velocity{ .x = 2.0, .y = 3.0 };
     const health = Health{ .current = 100, .max = 100 };
 
     const entity = manager.create(.{ pos, vel, health });
@@ -356,13 +359,15 @@ test "Manager - removeResource" {
     defer manager.deinit();
 
     const config = GameConfig{ .difficulty = 4, .max_players = 8 };
-    try manager.addResourceRetained(GameConfig, config);
-
+    const config_ptr = try manager.addResource(GameConfig, config);
+    defer config_ptr.deinit();
     try std.testing.expect(manager.hasResource(GameConfig));
 
     manager.removeResource(GameConfig);
 
     try std.testing.expect(!manager.hasResource(GameConfig));
+    try std.testing.expectEqual(1, config_ptr.strongCount());
+    config_ptr.deinit();
 }
 
 test "Manager - listResourceTypeHashes" {
@@ -417,7 +422,7 @@ test "Manager - multiple component types per entity" {
     defer manager.deinit();
 
     const pos = Position{ .x = 10.0, .y = 20.0 };
-    const vel = Velocity{ .dx = 5.0, .dy = -5.0 };
+    const vel = Velocity{ .x = 5.0, .y = -5.0 };
     const health = Health{ .current = 50, .max = 100 };
 
     const entity = manager.create(.{ pos, vel, health });
@@ -437,7 +442,7 @@ test "Manager - component migration when adding to existing entity" {
     try std.testing.expect(try manager.hasComponent(entity, Position));
     try std.testing.expect(!try manager.hasComponent(entity, Velocity));
 
-    const vel = Velocity{ .dx = 3.0, .dy = 4.0 };
+    const vel = Velocity{ .x = 3.0, .y = 4.0 };
     try manager.addComponent(entity, Velocity, vel);
 
     try std.testing.expect(try manager.hasComponent(entity, Position));
@@ -505,14 +510,14 @@ test "Manager - component with pointer field" {
     defer manager.deinit();
 
     // Allocate a byte on the test allocator and store its pointer in the component
-    const ptr = try manager.allocator.create(u8);
+    const ptr = try manager.allocator().create(u8);
     ptr.* = 42;
 
     const pointer_comp = PointerComp{ .ptr = ptr };
     const entity = manager.create(.{pointer_comp});
 
     // Run a system that modifies the pointed value
-    const sys = manager.createSystem(pointerSystem, @import("systems.registry.zig").DefaultParamRegistry);
+    const sys = manager.createSystem(pointerSystem);
     try sys.run(&manager, sys.ctx);
 
     const retrieved = try manager.getComponent(entity, PointerComp);
@@ -520,7 +525,7 @@ test "Manager - component with pointer field" {
     try std.testing.expect(retrieved.?.ptr.* == 100);
 
     // Clean up externally-managed memory
-    manager.allocator.destroy(ptr);
+    manager.allocator().destroy(ptr);
 }
 
 test "Manager - component with pointer to another component" {
@@ -537,7 +542,7 @@ test "Manager - component with pointer to another component" {
     defer manager.deinit();
 
     // Allocate a byte on the test allocator and store its pointer in the first component
-    const ptr = try manager.allocator.create(u8);
+    const ptr = try manager.allocator().create(u8);
     ptr.* = 42;
 
     var pointer_comp = PointerComp{ .ptr = ptr };
@@ -547,7 +552,7 @@ test "Manager - component with pointer to another component" {
     try manager.addComponent(entity, PointerCompToPointerComp, pointer_to_pointer_comp);
 
     // Run a system that modifies the pointed value
-    const sys = manager.createSystem(pointerSystem, @import("systems.registry.zig").DefaultParamRegistry);
+    const sys = manager.createSystem(pointerSystem);
     try sys.run(&manager, sys.ctx);
 
     const retrieved = try manager.getComponent(entity, PointerCompToPointerComp);
@@ -560,5 +565,380 @@ test "Manager - component with pointer to another component" {
     try std.testing.expect(pointer_comp.ptr.* == 100);
     try std.testing.expect(retrieved.?.ptr.ptr.* == 100);
     // Clean up externally-managed memory
-    manager.allocator.destroy(ptr);
+    manager.allocator().destroy(ptr);
+}
+
+test "Query with just Entity" {
+    var ecs_instance = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs_instance.deinit();
+    const amount = 100;
+    for (0..amount) |_| {
+        _ = ecs_instance.createEmpty();
+    }
+
+    var query = ecs_instance.query(struct { entity: Entity });
+    defer query.deinit();
+    var count: usize = 0;
+    while (query.next()) |q| {
+        _ = q.entity;
+        count += 1;
+    }
+    try std.testing.expect(count == amount);
+}
+
+test "Create entity using create() with null or empty" {
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs.deinit();
+    const amount = 100;
+    for (0..amount) |_| {
+        _ = ecs.create(null);
+        _ = ecs.create(.{});
+    }
+
+    var query = ecs.query(struct { entity: Entity });
+    defer query.deinit();
+    var count: usize = 0;
+    while (query.next()) |q| {
+        _ = q.entity;
+        count += 1;
+    }
+    try std.testing.expect(count == amount * 2);
+}
+
+// Focused test to exercise migration/remove and check archetype invariants
+test "World migration and archetype invariants" {
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs.deinit();
+
+    const A = struct { a: u32 };
+    const B = struct { b: u64 };
+    const C = struct { c: u32 };
+
+    // Create entities with different component sets
+    const e1 = ecs.create(.{ A{ .a = 1 }, B{ .b = 2 } });
+    const e2 = ecs.create(.{ B{ .b = 3 }, C{ .c = 4 } });
+
+    // Sanity: verify getAllComponents
+    const comps1 = try ecs.getAllComponents(std.testing.allocator, e1);
+    defer std.testing.allocator.free(comps1);
+    try std.testing.expect(comps1.len == 2);
+
+    const comps2 = try ecs.getAllComponents(std.testing.allocator, e2);
+    defer std.testing.allocator.free(comps2);
+    try std.testing.expect(comps2.len == 2);
+
+    // Remove component A from e1, force migration
+    try ecs.removeComponent(e1, A);
+
+    // Now validate archetype invariants: for each archetype, arr_len == entities_count * comp_size
+    var storage_guard = ecs.world().archetypes.readGuard();
+    defer storage_guard.deinit();
+    var it = storage_guard.get().archetypes.valueIterator();
+    while (it.next()) |a_ptr| {
+        const a = a_ptr.*;
+        const ent_count = a.entities.items.len;
+        var i: usize = 0;
+        while (i < a.component_sizes.len) : (i += 1) {
+            const comp_size = a.component_sizes[i];
+            const arr_len = a.component_arrays[i].items.len;
+            try std.testing.expect(arr_len == ent_count * comp_size);
+            // Also ensure comp_size > 0
+            try std.testing.expect(comp_size > 0);
+        }
+        // For each entity in archetype, check that getAllComponents succeeds and matches counts
+        var k: usize = 0;
+        while (k < ent_count) : (k += 1) {
+            const ent = a.entities.items[k];
+            const cl = try ecs.getAllComponents(std.testing.allocator, ent);
+            defer std.testing.allocator.free(cl);
+            try std.testing.expect(cl.len >= 1);
+        }
+    }
+}
+
+test "removeSystem removes cached system" {
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    // Create a test resource to verify system execution
+    const TestCounter = struct { count: u32 };
+    try ecs.addResourceRetained(TestCounter, .{ .count = 0 });
+
+    // Define a test system that increments the counter
+    const test_system = struct {
+        pub fn run(res: params.ResMut(TestCounter)) void {
+            res.get().count += 1;
+        }
+    }.run;
+
+    // Cache the system
+    const handle = ecs.cacheSystem(ecs.createSystem(test_system));
+
+    // Verify the system is cached and runs
+    try std.testing.expect(ecs.systems().count() == 1);
+    _ = try ecs.runSystem(handle);
+    const ctr_ref = ecs.getResource(TestCounter).?;
+    defer ctr_ref.deinit();
+    var ctr_guard = ctr_ref.lockRead();
+    defer ctr_guard.deinit();
+    try std.testing.expect(ctr_guard.get().count == 1);
+
+    // Remove the system
+    ecs.removeSystem(handle);
+
+    // Verify the system is removed from cache
+    try std.testing.expect(ecs.systems().count() == 0);
+
+    // Verify running the removed system returns error
+    const result = ecs.runSystem(handle);
+    try std.testing.expectError(error.InvalidSystemHandle, result);
+}
+
+test "removeSystem with same function cached twice returns same handle" {
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    const TestCounter = struct { count: u32 };
+    try ecs.addResourceRetained(TestCounter, .{ .count = 0 });
+
+    const test_system = struct {
+        pub fn run(_: *Manager, res: params.ResMut(TestCounter)) void {
+            res.get().count += 1;
+        }
+    }.run;
+
+    // Cache the same system twice - should return the same handle
+    const handle1 = ecs.cacheSystem(ecs.createSystem(test_system));
+    const handle2 = ecs.cacheSystem(ecs.createSystem(test_system));
+
+    // Verify they are the same handle
+    try std.testing.expect(handle1.handle == handle2.handle);
+    // Verify only one system is cached
+    try std.testing.expect(ecs.systems().count() == 1);
+
+    // Remove the system once
+    ecs.removeSystem(handle1);
+
+    // Verify the system is removed
+    try std.testing.expect(ecs.systems().count() == 0);
+
+    // Verify both handles now return error
+    try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle1));
+    try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle2));
+}
+
+test "Entity destruction and reuse" {
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs.deinit();
+
+    const entity1 = ecs.createEmpty();
+    const entity2 = ecs.createEmpty();
+
+    try std.testing.expect(ecs.isAlive(entity1));
+    try std.testing.expect(ecs.isAlive(entity2));
+
+    try ecs.destroy(entity1);
+    try std.testing.expect(!ecs.isAlive(entity1));
+    try std.testing.expect(ecs.isAlive(entity2));
+
+    const entity3 = ecs.createEmpty();
+    try std.testing.expect(entity3.id == entity1.id); // ID should be reused
+    try std.testing.expect(entity3.generation != entity1.generation); // Generation should be incremented
+
+    try std.testing.expect(ecs.isAlive(entity3));
+    try std.testing.expect(ecs.isAlive(entity2));
+}
+
+test "copyEntityFrom copies components between managers" {
+    var ecs_src = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs_src.deinit();
+
+    var ecs_dst = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs_dst.deinit();
+
+    const e_src = ecs_src.create(.{ Position{ .x = 1, .y = 2 }, Velocity{ .x = 3, .y = 4 } });
+
+    const e_dst = ecs_dst.copyEntityFrom(std.testing.allocator, &ecs_src, e_src) catch unreachable;
+
+    const pos_src = ecs_src.getComponent(e_src, Position) catch unreachable;
+    const vel_src = ecs_src.getComponent(e_src, Velocity) catch unreachable;
+    const pos_dst = ecs_dst.getComponent(e_dst, Position) catch unreachable;
+    const vel_dst = ecs_dst.getComponent(e_dst, Velocity) catch unreachable;
+
+    try std.testing.expect(pos_src != null and vel_src != null);
+    try std.testing.expect(pos_dst != null and vel_dst != null);
+    try std.testing.expectEqual(pos_src.?.x, pos_dst.?.x);
+    try std.testing.expectEqual(pos_src.?.y, pos_dst.?.y);
+    try std.testing.expectEqual(vel_src.?.x, vel_dst.?.x);
+    try std.testing.expectEqual(vel_src.?.y, vel_dst.?.y);
+}
+
+test "moveEntityTo moves components and destroys source" {
+    var ecs_src = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs_src.deinit();
+
+    var ecs_dst = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs_dst.deinit();
+
+    const e_src = ecs_src.create(.{Position{ .x = 10, .y = 20 }});
+
+    const e_dst = ecs_src.moveEntityTo(std.testing.allocator, &ecs_dst, e_src) catch unreachable;
+
+    try std.testing.expect(!ecs_src.isAlive(e_src));
+    try std.testing.expect(ecs_dst.isAlive(e_dst));
+
+    const pos_dst = ecs_dst.getComponent(e_dst, Position) catch unreachable;
+    try std.testing.expect(pos_dst != null);
+    try std.testing.expectEqual(@as(f32, 10), pos_dst.?.x);
+    try std.testing.expectEqual(@as(f32, 20), pos_dst.?.y);
+}
+
+test "copyEntityFrom same manager duplicates components" {
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs.deinit();
+
+    const source = ecs.create(.{ Position{ .x = 7, .y = 9 }, Velocity{ .x = 1, .y = 2 } });
+    const duplicate = ecs.copyEntityFrom(std.testing.allocator, &ecs, source) catch unreachable;
+
+    try std.testing.expect(ecs.isAlive(source));
+    try std.testing.expect(ecs.isAlive(duplicate));
+    try std.testing.expect(source.id != duplicate.id);
+
+    const src_pos = ecs.getComponent(source, Position) catch unreachable;
+    const dup_pos = ecs.getComponent(duplicate, Position) catch unreachable;
+    const src_vel = ecs.getComponent(source, Velocity) catch unreachable;
+    const dup_vel = ecs.getComponent(duplicate, Velocity) catch unreachable;
+
+    try std.testing.expect(src_pos != null and dup_pos != null);
+    try std.testing.expect(src_vel != null and dup_vel != null);
+    try std.testing.expectEqual(src_pos.?.x, dup_pos.?.x);
+    try std.testing.expectEqual(src_pos.?.y, dup_pos.?.y);
+    try std.testing.expectEqual(src_vel.?.x, dup_vel.?.x);
+    try std.testing.expectEqual(src_vel.?.y, dup_vel.?.y);
+}
+
+test "getOrAddResource" {
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs.deinit();
+
+    const MyResource = struct {
+        value: u32,
+    };
+
+    const res = ecs.getOrAddResource(MyResource, MyResource{ .value = 32 }, null) catch unreachable;
+    res.deinit();
+
+    try std.testing.expect(ecs.hasResource(MyResource));
+}
+
+test "addResource keeps manager-owned reference" {
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    const res = try ecs.addResource(u32, 42);
+    try std.testing.expectEqual(@as(usize, 2), res.strongCount());
+    res.deinit();
+
+    const again = ecs.getResource(u32) orelse return error.ResourceNotFound;
+    defer again.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), again.strongCount());
+    var guard = again.lockRead();
+    defer guard.deinit();
+    try std.testing.expectEqual(@as(u32, 42), guard.get().*);
+}
+
+test "Manager-owned scheduler survives repeated access" {
+    var ecs = try Manager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    const TestEvent = struct { value: u32 };
+    const Counter = struct { value: u32 };
+
+    const first = ecs.scheduler();
+    try first.registerEvent(&ecs, TestEvent);
+
+    try ecs.addResourceRetained(Counter, .{ .value = 0 });
+
+    const second = ecs.scheduler();
+
+    const increment = struct {
+        fn run(counter: params.ResMut(Counter)) void {
+            counter.get().value += 1;
+        }
+    }.run;
+
+    second.addSystem(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update), increment);
+    _ = second.runStage(&ecs, scheduler_mod.Stage(scheduler_mod.Stages.Update));
+
+    const counter_ref = ecs.getResource(Counter) orelse return error.ResourceNotFound;
+    defer counter_ref.deinit();
+    var counter_guard = counter_ref.lockRead();
+    defer counter_guard.deinit();
+    try std.testing.expectEqual(@as(u32, 1), counter_guard.get().value);
+}
+
+// Stress test to try to surface migration/invariant issues
+test "World randomized churn stress test" {
+    var ecs = Manager.init(std.testing.allocator, std.testing.io) catch unreachable;
+    defer ecs.deinit();
+
+    const A = struct { a: u32 };
+    const B = struct { b: u64 };
+    const C = struct { c: u32 };
+
+    var rng = std.Random.DefaultPrng.init(1234);
+    var rand = rng.random();
+    const N: usize = 200;
+    var entities = try std.ArrayList(Entity).initCapacity(std.testing.allocator, N);
+    defer entities.deinit(std.testing.allocator);
+
+    // Create initial entities with random component sets
+    for (0..N) |_| {
+        const v = rand.intRangeAtMost(i32, 0, 4);
+        const ent = switch (v) {
+            0 => ecs.create(.{A{ .a = 1 }}),
+            1 => ecs.create(.{B{ .b = 2 }}),
+            2 => ecs.create(.{ A{ .a = 1 }, B{ .b = 2 } }),
+            else => ecs.create(.{C{ .c = 3 }}),
+        };
+        try entities.append(std.testing.allocator, ent);
+    }
+
+    const OPS: usize = 2000;
+    var i: usize = 0;
+    while (i < OPS) : (i += 1) {
+        const idx = rand.uintLessThan(usize, entities.items.len);
+        const ent = entities.items[idx];
+        const op = rand.uintLessThan(usize, 4);
+        switch (op) {
+            0 => _ = ecs.addComponent(ent, A, A{ .a = 5 }) catch {},
+            1 => _ = ecs.addComponent(ent, B, B{ .b = 6 }) catch {},
+            2 => _ = ecs.addComponent(ent, C, C{ .c = 7 }) catch {},
+            3 => {
+                // Randomly remove components
+                _ = ecs.removeComponent(ent, A) catch {};
+                _ = ecs.removeComponent(ent, B) catch {};
+                _ = ecs.removeComponent(ent, C) catch {};
+            },
+            else => {},
+        }
+
+        // Occasionally validate invariants
+        if ((i % 50) == 0) {
+            var storage_guard = ecs.world().archetypes.readGuard();
+            defer storage_guard.deinit();
+            var it = storage_guard.get().archetypes.valueIterator();
+            while (it.next()) |a_ptr| {
+                const a = a_ptr.*;
+                const ent_count = a.entities.items.len;
+                var j: usize = 0;
+                while (j < a.component_sizes.len) : (j += 1) {
+                    const comp_size = a.component_sizes[j];
+                    const arr_len = a.component_arrays[j].items.len;
+                    try std.testing.expect(arr_len == ent_count * comp_size);
+                }
+            }
+        }
+    }
 }

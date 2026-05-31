@@ -46,9 +46,6 @@ const SystemParamTemplate = reflect.Template(struct {
 
 /// SystemParam registry for runtime-extensible parameter type analysis and instantiation
 pub fn SystemParamRegistry(comptime RegisteredParams: []const type) type {
-    inline for (RegisteredParams) |T| {
-        SystemParamTemplate.validate(T);
-    }
     return struct {
         pub const registered_params = RegisteredParams;
 

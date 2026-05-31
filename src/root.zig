@@ -137,14 +137,34 @@ pub const relations = struct {
 
 pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");
+const app_interface = @import("app_interface.zig");
+
+pub const app = struct {
+    pub const App = app_interface.App;
+    pub const VTable = app_interface.VTable;
+    pub const populate = app_interface.populate;
+};
+
+pub const plugins = @import("plugin.zig");
+pub const PluginManager = plugins.PluginManager;
+pub const Plugin = plugins.Plugin;
+pub const PluginTemplate = plugins.PluginTemplate;
 
 /// Panic handler that logs the panic message and exits gracefully
-const panic = std.debug.FullPanic(gracefulPanic);
+///
+/// Expose to Zig's std panic handler:
+/// ```zig
+/// pub const panic = zevy_ecs.panic;
+/// ```
+pub const panic = std.debug.FullPanic(gracefulPanic);
 
 fn gracefulPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
-    _ = first_trace_addr;
     const log = std.log.scoped(.zevy_ecs);
     log.err("PANIC: {s}", .{msg});
+    var addr_buf: [16]usize = undefined;
+    const stack = std.debug.captureCurrentStackTrace(.{ .first_address = first_trace_addr }, &addr_buf);
+    log.err("Stack trace:", .{});
+    std.debug.dumpStackTrace(&stack);
     std.process.exit(1);
 }
 
@@ -164,4 +184,5 @@ test {
     std.testing.refAllDecls(events);
     std.testing.refAllDecls(errors);
     std.testing.refAllDecls(commands);
+    std.testing.refAllDecls(plugins);
 }

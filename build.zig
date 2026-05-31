@@ -37,15 +37,16 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    const plugin_mod = b.addModule("plugins", .{
-        .root_source_file = b.path("src/plugin.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "zevy_ecs", .module = self_mod },
-            .{ .name = "zevy_reflect", .module = reflect_mod },
-        },
-    });
+    // const app_interface_mod = b.addModule("app_interface", .{
+    //     .root_source_file = b.path("src/app_interface.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    //     .imports = &.{
+    //         .{ .name = "zevy_ecs", .module = self_mod },
+    //         .{ .name = "zevy_reflect", .module = reflect_mod },
+    //         .{ .name = "plugins", .module = plugin_mod },
+    //     },
+    // });
 
     const app_mod = b.addModule("app", .{
         .root_source_file = b.path("src/app.zig"),
@@ -55,17 +56,13 @@ pub fn build(b: *std.Build) !void {
             .{ .name = "zevy_ecs", .module = self_mod },
             .{ .name = "zevy_reflect", .module = reflect_mod },
             .{ .name = "zevy_mem", .module = mem_mod },
-            .{ .name = "plugins", .module = plugin_mod },
+            //.{ .name = "app_interface", .module = app_interface_mod },
         },
     });
 
     // Setup tests
     const tests = b.addTest(.{
         .root_module = self_mod,
-    });
-    const plugin_tests = b.addTest(.{
-        .root_module = plugin_mod,
-        .name = "plugin_tests",
     });
     const app_tests = b.addTest(.{
         .root_module = app_mod,
@@ -77,13 +74,11 @@ pub fn build(b: *std.Build) !void {
     });
 
     const run_tests = b.addRunArtifact(tests);
-    const run_plugin_tests = b.addRunArtifact(plugin_tests);
     const run_app_tests = b.addRunArtifact(app_tests);
     const run_benchmark_tests = b.addRunArtifact(benchmark_tests);
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
-    test_step.dependOn(&run_plugin_tests.step);
     test_step.dependOn(&run_app_tests.step);
     if (b.release_mode == .fast) {
         test_step.dependOn(&run_benchmark_tests.step);

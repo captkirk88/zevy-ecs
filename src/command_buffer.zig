@@ -90,7 +90,7 @@ pub const CommandBuffer = struct {
         }
     }
 
-    pub fn flush(self: *CommandBuffer, allocator: std.mem.Allocator, manager: *ecs.Manager) anyerror!void {
+    pub fn flush(self: *CommandBuffer, allocator: std.mem.Allocator, manager: *anyopaque) anyerror!void {
         var offset: usize = 0;
         while (offset < self.bytes.items.len) {
             const header: *const CommandHeader = @ptrCast(@alignCast(self.bytes.items[offset..].ptr));
@@ -127,7 +127,7 @@ pub const CommandBuffer = struct {
                 }
 
                 for (groups.items) |group| {
-                    try group.batch_execute(group.data_ptrs.items, @ptrCast(manager));
+                    try group.batch_execute(group.data_ptrs.items, manager);
                 }
                 continue;
             }

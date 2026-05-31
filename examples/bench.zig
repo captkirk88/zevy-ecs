@@ -82,7 +82,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         defer entities.deinit(allocator);
         setupScheduledMixedSystems(&manager);
 
-        var stage_infos = manager.scheduler.getStageInfo(allocator);
+        var stage_infos = manager.scheduler().getStageInfo(allocator);
         defer stage_infos.deinit(allocator);
         var active_stages = try std.ArrayList(StageId).initCapacity(allocator, stage_infos.items.len);
         defer active_stages.deinit(allocator);
@@ -108,7 +108,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         var entities = try setupMixedEntities(&manager, allocator, count);
         defer entities.deinit(allocator);
 
-        const crud_system = manager.createSystemCached(systemCrudAddRemoveComponents, zevy_ecs.DefaultParamRegistry);
+        const crud_system = manager.cacheSystem(manager.createSystem(systemCrudAddRemoveComponents));
 
         const label = try std.fmt.allocPrint(allocator, "Run CRUD System on {d} Entities", .{count});
         defer allocator.free(label);
@@ -140,7 +140,7 @@ fn runBenchmarks(bench: *Benchmark, allocator: std.mem.Allocator, io: std.Io) !v
         defer entities.deinit(bench.allocator());
 
         // Create system that uses Query with Relation component
-        const system_handle = manager.createSystemCached(systemUpdateTransforms, zevy_ecs.DefaultParamRegistry);
+        const system_handle = manager.cacheSystem(manager.createSystem(systemUpdateTransforms));
 
         const label = try std.fmt.allocPrint(allocator, "Scene Graph {d} Entities", .{count});
         defer allocator.free(label);
@@ -603,15 +603,14 @@ fn setupMixedEntities(manager: *Manager, allocator: std.mem.Allocator, comptime 
 }
 
 fn setupMixedSystems(e: *Manager) [7]zevy_ecs.UntypedSystemHandle {
-    const DefaultRegistry = zevy_ecs.DefaultParamRegistry;
     var results: [7]zevy_ecs.UntypedSystemHandle = undefined;
-    results[0] = e.createSystemCached(systemMovement, DefaultRegistry).eraseType();
-    results[1] = e.createSystemCached(systemHealthRegen, DefaultRegistry).eraseType();
-    results[2] = e.createSystemCached(systemDamageWithArmor, DefaultRegistry).eraseType();
-    results[3] = e.createSystemCached(systemDamageNoArmor, DefaultRegistry).eraseType();
-    results[4] = e.createSystemCached(systemTeamCollision, DefaultRegistry).eraseType();
-    results[5] = e.createSystemCached(systemTargetTracking, DefaultRegistry).eraseType();
-    results[6] = e.createSystemCached(systemVelocityDamping, DefaultRegistry).eraseType();
+    results[0] = e.cacheSystem(e.createSystem(systemMovement)).eraseType();
+    results[1] = e.cacheSystem(e.createSystem(systemHealthRegen)).eraseType();
+    results[2] = e.cacheSystem(e.createSystem(systemDamageWithArmor)).eraseType();
+    results[3] = e.cacheSystem(e.createSystem(systemDamageNoArmor)).eraseType();
+    results[4] = e.cacheSystem(e.createSystem(systemTeamCollision)).eraseType();
+    results[5] = e.cacheSystem(e.createSystem(systemTargetTracking)).eraseType();
+    results[6] = e.cacheSystem(e.createSystem(systemVelocityDamping)).eraseType();
     return results;
 }
 
@@ -625,15 +624,14 @@ fn benchMixedSystems(e: *Manager, systems: *const [7]zevy_ecs.UntypedSystemHandl
 }
 
 fn setupScheduledMixedSystems(manager: *Manager) void {
-    const scheduler = manager.scheduler;
-    const DefaultRegistry = zevy_ecs.DefaultParamRegistry;
-    scheduler.addSystem(manager, Stage(Stages.Update), systemMovement, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Update), systemHealthRegen, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Update), systemDamageWithArmor, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Draw), systemDamageNoArmor, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Draw), systemTeamCollision, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Draw), systemTargetTracking, DefaultRegistry);
-    scheduler.addSystem(manager, Stage(Stages.Last), systemVelocityDamping, DefaultRegistry);
+    const scheduler = manager.scheduler();
+    scheduler.addSystem(manager, Stage(Stages.Update), systemMovement);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemHealthRegen);
+    scheduler.addSystem(manager, Stage(Stages.Update), systemDamageWithArmor);
+    scheduler.addSystem(manager, Stage(Stages.Draw), systemDamageNoArmor);
+    scheduler.addSystem(manager, Stage(Stages.Draw), systemTeamCollision);
+    scheduler.addSystem(manager, Stage(Stages.Draw), systemTargetTracking);
+    scheduler.addSystem(manager, Stage(Stages.Last), systemVelocityDamping);
 }
 
 /// Benchmarks running the mixed systems through the scheduler from the first stage to the last stage
@@ -641,7 +639,7 @@ fn setupScheduledMixedSystems(manager: *Manager) void {
 /// *Note*: This runs 7 systems through all entity counts (up to 1,000,000 entities as in the benchmarks above) split into
 /// stages according to the scheduler stages (Update / Draw / Last) so that each system runs in the stage it was added to
 fn benchSchedulerMixedSystems(manager: *Manager) void {
-    const eg = manager.scheduler.runStages(manager, Stage(Stages.First), Stage(Stages.Last));
+    const eg = manager.scheduler().runStages(manager, Stage(Stages.First), Stage(Stages.Last));
     var iter = eg.iterator();
     while (iter.next()) |err| {
         std.debug.print("Error running scheduler stage: {s}\n", .{@errorName(err)});
@@ -669,7 +667,7 @@ const Transform = struct {
 
 // Setup hierarchical scene graph (game objects with parent-child relationships)
 fn setupSceneGraph(manager: *Manager, rel: *zevy_ecs.relations.RelationManager, count: usize) !std.ArrayList(Entity) {
-    const allocator = manager.allocator;
+    const allocator = manager.allocator();
     var all_entities = try std.ArrayList(Entity).initCapacity(allocator, count);
 
     // Create root scene node
