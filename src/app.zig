@@ -307,13 +307,6 @@ pub const AppImpl = opaque {
         finalizeApp(inner);
     }
 
-    fn exit(_: *Self, inner: *AppInner) void {
-        if (inner.is_empty) return;
-
-        // Exit of app
-        runStages(inner, Stage(Stages.Exit), Stage(Stages.Max)) catch |err| handleError(err, @errorReturnTrace());
-    }
-
     pub fn deinit(self: *Self) void {
         const inner = appInner(self);
         if (inner.is_empty) return;
