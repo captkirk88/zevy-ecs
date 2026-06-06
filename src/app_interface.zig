@@ -6,13 +6,13 @@ const plugins = @import("plugin.zig");
 const zreflect = @import("zevy_reflect");
 
 pub const AppVTable = zreflect.DynamicVTable;
-pub const FnEntry = zreflect.FnEntry;
+pub const VTableEntry = zreflect.VTableEntry;
 
 /// Base App interface entries that zevy-ecs guarantees.
 ///
 /// Downstream libraries can evolve this interface additively with:
 /// `const Extended = BaseVTableType.Extend(&.{ ... });`
-pub const BaseEntries: []const FnEntry = &.{
+pub const BaseEntries: []const VTableEntry = &.{
     .{ .name = "io", .Fn = fn (*anyopaque) std.Io },
     .{ .name = "allocator", .Fn = fn (*anyopaque) std.mem.Allocator },
     .{ .name = "ecs", .Fn = fn (*anyopaque) *ecs_mod.Manager },

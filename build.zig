@@ -48,25 +48,9 @@ pub fn build(b: *std.Build) !void {
     //     },
     // });
 
-    const app_mod = b.addModule("app", .{
-        .root_source_file = b.path("src/app.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "zevy_ecs", .module = self_mod },
-            .{ .name = "zevy_reflect", .module = reflect_mod },
-            .{ .name = "zevy_mem", .module = mem_mod },
-            //.{ .name = "app_interface", .module = app_interface_mod },
-        },
-    });
-
     // Setup tests
     const tests = b.addTest(.{
         .root_module = self_mod,
-    });
-    const app_tests = b.addTest(.{
-        .root_module = app_mod,
-        .name = "app_tests",
     });
     const benchmark_tests = b.addTest(.{
         .root_module = benchmark_mod,
@@ -74,12 +58,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     const run_tests = b.addRunArtifact(tests);
-    const run_app_tests = b.addRunArtifact(app_tests);
     const run_benchmark_tests = b.addRunArtifact(benchmark_tests);
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
-    test_step.dependOn(&run_app_tests.step);
     if (b.release_mode == .fast) {
         test_step.dependOn(&run_benchmark_tests.step);
     }

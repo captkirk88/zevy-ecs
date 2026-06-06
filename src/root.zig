@@ -139,11 +139,15 @@ pub const relations = struct {
 pub const serialize = @import("serialize.zig");
 pub const reflect = @import("reflect.zig");
 const app_interface = @import("app_interface.zig");
+const app_impl = @import("app.zig");
 
 pub const app = struct {
+    pub const ExitAppEvent = app_impl.ExitAppEvent;
+    pub const new = app_impl.new;
+    pub const FixedTimestepAccumulator = app_impl.FixedTimestepAccumulator;
     pub const App = app_interface.App;
     pub const AppExt = app_interface.AppExt;
-    pub const FnEntry = app_interface.FnEntry;
+    pub const VTableEntry = app_interface.VTableEntry;
     pub const AppVTable = app_interface.AppVTable;
     pub const BaseEntries = app_interface.BaseEntries;
     pub const BaseVTableType = app_interface.BaseVTableType;

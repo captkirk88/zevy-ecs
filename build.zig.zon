@@ -9,8 +9,8 @@
 
     .dependencies = .{
         .zevy_reflect = .{
-            .url = "git+https://github.com/captkirk88/zevy-reflect#368bc9457ff1034e0cd35a446c7583bd784852be",
-            .hash = "zevy_reflect-1.5.2-Ob80cIK-AwDnRQS-ZVxU724RZabKZ-kAaaxLH8x1RblO",
+            .url = "git+https://github.com/captkirk88/zevy-reflect#6d8e572e7626742379e21d25704f79ce3411664c",
+            .hash = "zevy_reflect-1.5.3-Ob80cMO-AwDhkFsHbb3CLokOCToC9WESaukn1PxzK_3e",
         },
         .zevy_buildtools = .{
             .url = "git+https://github.com/captkirk88/zevy-buildtools#ef611bb2308a577eca6c2cceba68bbdcab6e10e7",
