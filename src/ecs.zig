@@ -112,8 +112,6 @@ const ManagerImpl = struct {
     queued_commands: std.ArrayList(QueuedCommand),
     defer_command_flush: std.atomic.Value(bool),
 
-    /// Initialize the ECS with an optional custom allocator.
-    /// If no allocator is provided, the default page allocator is used.
     pub fn init(
         allocator: std.mem.Allocator,
         init_io: std.Io,
@@ -779,221 +777,226 @@ const ManagerImpl = struct {
     }
 };
 
-// Export `Manager` as the concrete non-generic, vtable-backed interface using
-// the default SystemParamRegistry.
-pub const Manager = struct {
-    ptr: *anyopaque,
+/// Same as Manager but with a custom ParamRegistry for systems that use non-default system params.
+pub fn ManagerW(comptime ParamRegistry: type) type {
+    return struct {
+        ptr: *anyopaque,
 
-    pub const SystemParamRegistry = registry.DefaultParamRegistry;
+        pub const SystemParamRegistry = ParamRegistry;
 
-    const Self = @This();
+        const Self = @This();
 
-    pub fn init(alloc: std.mem.Allocator, init_io: std.Io) !Self {
-        const impl_val = try ManagerImpl.init(alloc, init_io);
-        const boxed = try alloc.create(ManagerImpl);
-        boxed.* = impl_val;
-        // Initialize the stable manager wrapper owned by the impl so
-        // queued commands can reference a durable Manager pointer.
-        boxed.manager_wrapper = ManagerWrapper{ .ptr = @ptrCast(boxed) };
-        return Self{ .ptr = @ptrCast(boxed) };
-    }
+        pub fn init(alloc: std.mem.Allocator, init_io: std.Io) !Self {
+            const impl_val = try ManagerImpl.init(alloc, init_io);
+            const boxed = try alloc.create(ManagerImpl);
+            boxed.* = impl_val;
+            // Initialize the stable manager wrapper owned by the impl so
+            // queued commands can reference a durable Manager pointer.
+            boxed.manager_wrapper = ManagerWrapper{ .ptr = @ptrCast(boxed) };
+            return Self{ .ptr = @ptrCast(boxed) };
+        }
 
-    pub fn deinit(self: *Self) void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        impl.deinit();
-        const alloc = impl.allocator;
-        alloc.destroy(impl);
-    }
+        pub fn deinit(self: *Self) void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            impl.deinit();
+            const alloc = impl.allocator;
+            alloc.destroy(impl);
+        }
 
-    pub fn hasComponent(self: *Self, entity: Entity, comptime T: type) error{EntityNotAlive}!bool {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.hasComponent(entity, T);
-    }
+        pub fn hasComponent(self: *Self, entity: Entity, comptime T: type) error{EntityNotAlive}!bool {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.hasComponent(entity, T);
+        }
 
-    pub fn allocator(self: *Self) std.mem.Allocator {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.allocator;
-    }
+        pub fn allocator(self: *Self) std.mem.Allocator {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.allocator;
+        }
 
-    pub fn io(self: *Self) std.Io {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.io;
-    }
+        pub fn io(self: *Self) std.Io {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.io;
+        }
 
-    pub fn scheduler(self: *Self) *scheduler_mod.Scheduler {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.scheduler;
-    }
+        pub fn scheduler(self: *Self) *scheduler_mod.Scheduler {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.scheduler;
+        }
 
-    pub fn createEmpty(self: *Self) Entity {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.createEmpty();
-    }
+        pub fn createEmpty(self: *Self) Entity {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.createEmpty();
+        }
 
-    pub fn create(self: *Self, components: anytype) Entity {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.create(components);
-    }
+        pub fn create(self: *Self, components: anytype) Entity {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.create(components);
+        }
 
-    pub fn createFromComponents(self: *Self, components: []const serialize.ComponentInstance) !Entity {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.createFromComponents(components);
-    }
+        pub fn createFromComponents(self: *Self, components: []const serialize.ComponentInstance) !Entity {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.createFromComponents(components);
+        }
 
-    pub fn isAlive(self: *Self, entity: Entity) bool {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.isAlive(entity);
-    }
+        pub fn isAlive(self: *Self, entity: Entity) bool {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.isAlive(entity);
+        }
 
-    pub fn destroy(self: *Self, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.destroy(entity);
-    }
+        pub fn destroy(self: *Self, entity: Entity) error{ EntityNotAlive, OutOfMemory }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.destroy(entity);
+        }
 
-    pub fn addComponent(self: *Self, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.addComponent(entity, T, value);
-    }
+        pub fn addComponent(self: *Self, entity: Entity, comptime T: type, value: T) error{ EntityNotAlive, OutOfMemory }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.addComponent(entity, T, value);
+        }
 
-    pub fn removeComponent(self: *Self, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.removeComponent(entity, T);
-    }
+        pub fn removeComponent(self: *Self, entity: Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.removeComponent(entity, T);
+        }
 
-    pub fn getComponent(self: *Self, entity: Entity, comptime T: type) error{EntityNotAlive}!?*T {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.getComponent(entity, T);
-    }
+        pub fn getComponent(self: *Self, entity: Entity, comptime T: type) error{EntityNotAlive}!?*T {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.getComponent(entity, T);
+        }
 
-    pub fn addResource(self: *Self, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.addResource(T, value);
-    }
+        pub fn addResource(self: *Self, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!Ref(T) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.addResource(T, value);
+        }
 
-    pub fn addResourceRetained(self: *Self, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.addResourceRetained(T, value);
-    }
+        pub fn addResourceRetained(self: *Self, comptime T: type, value: T) error{ OutOfMemory, ResourceAlreadyExists }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.addResourceRetained(T, value);
+        }
 
-    pub fn addResourceRef(self: *Self, comptime T: type, ref: Ref(T)) error{ OutOfMemory, ResourceAlreadyExists, RefDeinitialized }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.addResourceRef(T, ref);
-    }
+        pub fn addResourceRef(self: *Self, comptime T: type, ref: Ref(T)) error{ OutOfMemory, ResourceAlreadyExists, RefDeinitialized }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.addResourceRef(T, ref);
+        }
 
-    pub fn getResource(self: *Self, comptime T: type) ?Ref(T) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.getResource(T);
-    }
+        pub fn getResource(self: *Self, comptime T: type) ?Ref(T) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.getResource(T);
+        }
 
-    pub fn getOrAddResource(self: *Self, comptime T: type, default_value: T, alloc: ?std.mem.Allocator) error{OutOfMemory}!Ref(T) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.getOrAddResource(T, default_value, alloc);
-    }
+        pub fn getOrAddResource(self: *Self, comptime T: type, default_value: T, alloc: ?std.mem.Allocator) error{OutOfMemory}!Ref(T) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.getOrAddResource(T, default_value, alloc);
+        }
 
-    pub fn hasResource(self: *Self, comptime T: type) bool {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.hasResource(T);
-    }
+        pub fn hasResource(self: *Self, comptime T: type) bool {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.hasResource(T);
+        }
 
-    pub fn removeResource(self: *Self, comptime T: type) void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.removeResource(T);
-    }
+        pub fn removeResource(self: *Self, comptime T: type) void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.removeResource(T);
+        }
 
-    pub fn query(self: *Self, types: anytype) qry.Query(types) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.query(types);
-    }
+        pub fn query(self: *Self, types: anytype) qry.Query(types) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.query(types);
+        }
 
-    pub fn createSystem(self: *Self, system_fn: anytype) sys.System(sys.ToSystemReturnTypeFromType(@TypeOf(system_fn))) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return ManagerImpl.createSystem(impl, system_fn, SystemParamRegistry);
-    }
+        pub fn createSystem(self: *Self, system_fn: anytype) sys.System(sys.ToSystemReturnTypeFromType(@TypeOf(system_fn))) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return ManagerImpl.createSystem(impl, system_fn, SystemParamRegistry);
+        }
 
-    pub fn createSystemFromType(self: *Self, comptime SystemType: type, system_fn: anytype) sys.System(sys.ToSystemReturnTypeFromType(SystemType)) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return ManagerImpl.createSystemFromType(impl, SystemType, system_fn, SystemParamRegistry);
-    }
+        pub fn createSystemFromType(self: *Self, comptime SystemType: type, system_fn: anytype) sys.System(sys.ToSystemReturnTypeFromType(SystemType)) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return ManagerImpl.createSystemFromType(impl, SystemType, system_fn, SystemParamRegistry);
+        }
 
-    pub fn cacheSystem(self: *Self, system: anytype) blk: {
-        const SystemType = @TypeOf(system);
-        break :blk sys.SystemHandle(SystemType.return_type);
-    } {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.cacheSystem(system);
-    }
+        pub fn cacheSystem(self: *Self, system: anytype) blk: {
+            const SystemType = @TypeOf(system);
+            break :blk sys.SystemHandle(SystemType.return_type);
+        } {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.cacheSystem(system);
+        }
 
-    pub fn runSystem(self: *Self, sys_handle: anytype) anyerror!@TypeOf(sys_handle).return_type {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.runSystem(sys_handle);
-    }
+        pub fn runSystem(self: *Self, sys_handle: anytype) anyerror!@TypeOf(sys_handle).return_type {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.runSystem(sys_handle);
+        }
 
-    pub fn runSystemUntyped(self: *Self, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.runSystemUntyped(ReturnType, sys_handle);
-    }
+        pub fn runSystemUntyped(self: *Self, comptime ReturnType: type, sys_handle: sys.UntypedSystemHandle) anyerror!ReturnType {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.runSystemUntyped(ReturnType, sys_handle);
+        }
 
-    pub fn inner(self: *Self) *ManagerImpl {
-        return @ptrCast(@alignCast(self.ptr));
-    }
+        pub fn inner(self: *Self) *ManagerImpl {
+            return @ptrCast(@alignCast(self.ptr));
+        }
 
-    pub fn count(self: *Self) usize {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.count();
-    }
+        pub fn count(self: *Self) usize {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.count();
+        }
 
-    pub fn createBatch(self: *Self, alloc: std.mem.Allocator, entity_count: usize, components: anytype) ![]Entity {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.createBatch(alloc, entity_count, components);
-    }
+        pub fn createBatch(self: *Self, alloc: std.mem.Allocator, entity_count: usize, components: anytype) ![]Entity {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.createBatch(alloc, entity_count, components);
+        }
 
-    pub fn addComponentBatch(self: *Self, entities: []const Entity, comptime T: type, values: []const T) error{ EntityNotAlive, OutOfMemory }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.addComponentBatch(entities, T, values);
-    }
+        pub fn addComponentBatch(self: *Self, entities: []const Entity, comptime T: type, values: []const T) error{ EntityNotAlive, OutOfMemory }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.addComponentBatch(entities, T, values);
+        }
 
-    pub fn removeComponentBatch(self: *Self, entities: []const Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.removeComponentBatch(entities, T);
-    }
+        pub fn removeComponentBatch(self: *Self, entities: []const Entity, comptime T: type) error{ EntityNotAlive, OutOfMemory }!void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.removeComponentBatch(entities, T);
+        }
 
-    pub fn getAllComponents(self: *Self, alloc: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.getAllComponents(alloc, entity);
-    }
+        pub fn getAllComponents(self: *Self, alloc: std.mem.Allocator, entity: Entity) error{ EntityNotAlive, OutOfMemory }![]serialize.ComponentInstance {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.getAllComponents(alloc, entity);
+        }
 
-    pub fn copyEntityFrom(self: *Self, alloc: std.mem.Allocator, src: *Self, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        const src_impl: *ManagerImpl = @ptrCast(@alignCast(src.ptr));
-        return impl.copyEntityFrom(alloc, src_impl, entity);
-    }
+        pub fn copyEntityFrom(self: *Self, alloc: std.mem.Allocator, src: *Self, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            const src_impl: *ManagerImpl = @ptrCast(@alignCast(src.ptr));
+            return impl.copyEntityFrom(alloc, src_impl, entity);
+        }
 
-    pub fn moveEntityTo(self: *Self, alloc: std.mem.Allocator, dest: *Self, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        const dest_impl: *ManagerImpl = @ptrCast(@alignCast(dest.ptr));
-        return impl.moveEntityTo(alloc, dest_impl, entity);
-    }
+        pub fn moveEntityTo(self: *Self, alloc: std.mem.Allocator, dest: *Self, entity: Entity) error{ EntityNotAlive, OutOfMemory }!Entity {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            const dest_impl: *ManagerImpl = @ptrCast(@alignCast(dest.ptr));
+            return impl.moveEntityTo(alloc, dest_impl, entity);
+        }
 
-    pub fn listResourceTypeHashes(self: *Self, alloc: std.mem.Allocator) std.ArrayList(u64) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return impl.listResourceTypeHashes(alloc);
-    }
+        pub fn listResourceTypeHashes(self: *Self, alloc: std.mem.Allocator) std.ArrayList(u64) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return impl.listResourceTypeHashes(alloc);
+        }
 
-    pub fn removeSystem(self: *Self, sys_handle: anytype) void {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        impl.removeSystem(sys_handle);
-    }
+        pub fn removeSystem(self: *Self, sys_handle: anytype) void {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            impl.removeSystem(sys_handle);
+        }
 
-    pub fn systems(self: *Self) *std.AutoHashMap(u64, *anyopaque) {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return &impl.systems;
-    }
+        pub fn systems(self: *Self) *std.AutoHashMap(u64, *anyopaque) {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return &impl.systems;
+        }
 
-    pub fn world(self: *Self) *World {
-        const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
-        return &impl.world;
-    }
-};
+        pub fn world(self: *Self) *World {
+            const impl: *ManagerImpl = @ptrCast(@alignCast(self.ptr));
+            return &impl.world;
+        }
+    };
+}
+
+// Export `Manager` as the default vtable-backed interface using
+// `registry.DefaultParamRegistry`.
+pub const Manager = ManagerW(registry.DefaultParamRegistry);
 
 /// Internal helpers used by serialize.zig — not re-exported via root.zig.
 pub fn resourceEntryByHash(manager: *Manager, type_hash: u64) ?ResourceEntry {
@@ -1260,6 +1263,39 @@ test "removeSystem with same function cached twice returns same handle" {
     // Verify both handles now return error
     try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle1));
     try std.testing.expectError(error.InvalidSystemHandle, ecs.runSystem(handle2));
+}
+
+test "ManagerWith binds createSystem to custom SystemParamRegistry" {
+    const InjectedValueParam = struct {
+        pub fn matches(comptime T: type) bool {
+            return T == u32;
+        }
+
+        pub fn apply(_: *Manager, comptime T: type) anyerror!T {
+            return 42;
+        }
+
+        pub fn deinit(_: *Manager, _: *anyopaque, _: type) void {}
+    };
+
+    const CustomRegistry = registry.MergedSystemParamRegistry(.{
+        registry.DefaultParamRegistry,
+        InjectedValueParam,
+    });
+
+    const CustomManager = ManagerW(CustomRegistry);
+    var ecs = try CustomManager.init(std.testing.allocator, std.testing.io);
+    defer ecs.deinit();
+
+    const test_system = struct {
+        fn run(injected: u32) u32 {
+            return injected;
+        }
+    }.run;
+
+    const handle = ecs.cacheSystem(ecs.createSystem(test_system));
+    const result = try ecs.runSystem(handle);
+    try std.testing.expectEqual(@as(u32, 42), result);
 }
 
 test "Entity destruction and reuse" {

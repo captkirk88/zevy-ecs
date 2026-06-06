@@ -22,7 +22,7 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 - **Extensible parameter system**: Create custom system parameters by implementing `matches`, `apply`, and optional `deinit` functions
 - **Zero runtime overhead**: All system parameter resolution happens at compile time
 
-## Build Modules
+## Build Modules Available (`b.dependency(...).module(...)`)
 - `zevy_ecs` - Main ECS functionality (entities, components, queries, systems, resources, events, relations)
 - `plugins` - Plugin system for modular functionality
 - `app` - Application framework with lifecycle management and plugin support
@@ -873,6 +873,21 @@ const CustomParamRegistry = zevy_ecs.MergedSystemParamRegistry(.{
     zevy_ecs.DefaultParamRegistry,
     CustomComplexParam,
 });
+
+// Keep the default manager behavior:
+var manager = try zevy_ecs.Manager.init(allocator, std.Io.default);
+
+// Or bind a custom default registry to manager.createSystem(...):
+const CustomManager = zevy_ecs.ManagerW(CustomParamRegistry);
+var custom_manager = try CustomManager.init(allocator, std.Io.default);
+defer custom_manager.deinit();
+
+const system = custom_manager.createSystem(myCustomSystem);
+const handle = custom_manager.cacheSystem(system);
+_ = try custom_manager.runSystem(handle);
+
+// Note: runtime manager pointers remain layout-compatible with zevy_ecs.Manager,
+// so deferred commands and existing manager-pointer-based APIs continue to work.
 ```
 
 ### Serialization

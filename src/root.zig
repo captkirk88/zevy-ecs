@@ -11,6 +11,7 @@ const scheduler = @import("scheduler.zig");
 const sparse = @import("sparse_set.zig");
 
 pub const Manager = ecs.Manager;
+pub const ManagerW = ecs.ManagerW;
 pub const Entity = ecs.Entity;
 pub const Ref = ecs.Ref;
 pub const World = world.World;
