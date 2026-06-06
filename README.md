@@ -34,6 +34,7 @@ Good question.  The std API has changed to the point I don't even know anymore. 
     - [Installation](#installation)
     - [Basic Usage](#basic-usage)
 - [Core Concepts](#core-concepts)
+    - [Extending App Interface](#extending-app-interface)
     - [Entities](#entities)
     - [Components](#components)
     - [Queries](#queries)
@@ -160,6 +161,38 @@ fn movementSystem(
 ```
 
 ## Core Concepts
+
+### Extending App Interface
+
+`zevy_ecs.app` now exposes a DynamicVTable-based base interface so separate libraries can add functions without breaking existing callers that only rely on the base subset.
+
+```zig
+const std = @import("std");
+const zevy_ecs = @import("zevy_ecs");
+
+const AppBase = zevy_ecs.app.BaseVTableType;
+
+const ExtendedAppVTable = AppBase.Extend(&.{
+    .{ .name = "setWindowTitle", .Fn = fn (*anyopaque, []const u8) void },
+});
+
+pub const ExtendedApp = struct {
+    ptr: *anyopaque,
+    vtable: *const ExtendedAppVTable.VTable,
+    pub fn setWindowTitle(self: @This(), title: []const u8) void {
+        self.vtable.setWindowTitle(self.ptr, title);
+    }
+};
+
+pub fn example(base_app: zevy_ecs.app.App, ext_vt: ExtendedAppVTable) void {
+    // Compile-time validation that extension still contains all base App entries.
+    comptime std.debug.assert(ExtendedAppVTable.containsAll(AppBase));
+
+    const ext_app = base_app.extend(ExtendedAppVTable, &ext_vt.vtable);
+    ext_app.vtable.setWindowTitle(ext_app.ptr, "My Window");
+    _ = ext_app.call("setWindowTitle", .{"My Window Again"});
+}
+```
 
 ### Entities
 

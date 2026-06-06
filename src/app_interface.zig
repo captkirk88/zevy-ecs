@@ -3,6 +3,81 @@ const std = @import("std");
 const ecs_mod = @import("ecs.zig");
 const schedule = @import("scheduler.zig");
 const plugins = @import("plugin.zig");
+const zreflect = @import("zevy_reflect");
+
+pub const AppVTable = zreflect.DynamicVTable;
+pub const FnEntry = zreflect.FnEntry;
+
+/// Base App interface entries that zevy-ecs guarantees.
+///
+/// Downstream libraries can evolve this interface additively with:
+/// `const Extended = BaseVTableType.Extend(&.{ ... });`
+pub const BaseEntries: []const FnEntry = &.{
+    .{ .name = "io", .Fn = fn (*anyopaque) std.Io },
+    .{ .name = "allocator", .Fn = fn (*anyopaque) std.mem.Allocator },
+    .{ .name = "ecs", .Fn = fn (*anyopaque) *ecs_mod.Manager },
+    .{ .name = "scheduler", .Fn = fn (*anyopaque) *schedule.Scheduler },
+    .{ .name = "pluginManager", .Fn = fn (*anyopaque) *plugins.PluginManager },
+    .{ .name = "update", .Fn = fn (*anyopaque) anyerror!void },
+    .{ .name = "run", .Fn = fn (*anyopaque) anyerror!void },
+    .{ .name = "deinit", .Fn = fn (*anyopaque) void },
+};
+
+pub const BaseVTableType = AppVTable(BaseEntries);
+
+/// AppExt is a view of the App with an extended DynamicVTable.  This allows downstream libraries to expose additional methods on App without sacrificing interoperability with other libraries or the base App interface.
+///
+/// Example:
+/// ```zig
+/// const Extended = BaseVTableType.Extend(&.{
+///     .{ .name = "customFn", .Fn = fn (*anyopaque) void },
+/// });
+/// const ext_vt = Extended.create(struct {
+///     pub const customFn = myCustomFnImpl;
+/// });
+/// const extended_app = app.extend(Extended, &ext_vt.vtable);
+/// extended_app.call("customFn", .{}) // calls myCustomFnImpl
+/// ```
+pub fn AppExt(comptime VTableType: type) type {
+    comptime if (!VTableType.containsAll(BaseVTableType)) {
+        @compileError("AppExt requires a DynamicVTable type that contains all base App entries");
+    };
+
+    return struct {
+        ptr: *anyopaque,
+        vtable: *const VTableType.VTable,
+
+        pub fn call(self: @This(), comptime name: [:0]const u8, args: anytype) blk: {
+            const FnType = @TypeOf((@as(VTableType, undefined)).get(name));
+            break :blk @typeInfo(@typeInfo(FnType).pointer.child).@"fn".return_type orelse void;
+        } {
+            const fn_ptr = @field(self.vtable, name);
+            const fn_type = @TypeOf(fn_ptr.*);
+            const fn_info = @typeInfo(fn_type).@"fn";
+            const args_type = @TypeOf(args);
+            const args_info = @typeInfo(args_type);
+
+            if (fn_info.params.len == 0) {
+                if (args_info == .@"struct" and args_info.@"struct".is_tuple) {
+                    return @call(.auto, fn_ptr, args);
+                }
+                return @call(.auto, fn_ptr, .{args});
+            }
+
+            const self_param = fn_info.params[0].type orelse {
+                @compileError("AppExt.call: first parameter for '" ++ name ++ "' must be concrete");
+            };
+
+            const erased_self = @as(self_param, @ptrCast(self.ptr));
+
+            if (args_info == .@"struct" and args_info.@"struct".is_tuple) {
+                return @call(.auto, fn_ptr, .{erased_self} ++ args);
+            }
+
+            return @call(.auto, fn_ptr, .{ erased_self, args });
+        }
+    };
+}
 
 pub const App = struct {
     ptr: *anyopaque,
@@ -30,19 +105,30 @@ pub const App = struct {
     }
 
     pub fn addEventWithCleanupAtStage(self: App, comptime EventType: type, stage: schedule.StageId) App {
-        return self.vtable.addEventWithCleanupAtStage(self.ptr, EventType, stage);
+        const sched = self.vtable.scheduler(self.ptr);
+        const mgr = self.vtable.ecs(self.ptr);
+        sched.registerEventWithCleanupAtStage(mgr, EventType, stage) catch |err| std.debug.panic("registerEventWithCleanupAtStage failed: {s}", .{@errorName(err)});
+        return self;
     }
 
     pub fn addStage(self: App, stage: schedule.StageId) App {
-        return self.vtable.addStage(self.ptr, stage);
+        const sched = self.vtable.scheduler(self.ptr);
+        sched.addStage(stage) catch |err| std.debug.panic("addStage failed: {s}", .{@errorName(err)});
+        return self;
     }
 
     pub fn registerState(self: App, comptime StateEnum: type) App {
-        return self.vtable.registerState(self.ptr, StateEnum);
+        const sched = self.vtable.scheduler(self.ptr);
+        const mgr = self.vtable.ecs(self.ptr);
+        sched.registerState(mgr, StateEnum) catch |err| std.debug.panic("registerState failed: {s}", .{@errorName(err)});
+        return self;
     }
 
     pub fn unregisterState(self: App, comptime StateEnum: type) App {
-        return self.vtable.unregisterState(self.ptr, StateEnum);
+        const sched = self.vtable.scheduler(self.ptr);
+        const mgr = self.vtable.ecs(self.ptr);
+        sched.unregisterState(mgr, StateEnum) catch |err| std.debug.panic("unregisterState failed: {s}", .{@errorName(err)});
+        return self;
     }
 
     pub fn addResource(self: App, comptime ResourceType: type, resource: ResourceType) App {
@@ -96,28 +182,28 @@ pub const App = struct {
     pub fn deinit(self: App) void {
         self.vtable.deinit(self.ptr);
     }
+
+    /// View this App with an extended DynamicVTable.
+    ///
+    /// Example:
+    /// ```zig
+    /// const Extended = BaseVTableType.Extend(&.{
+    ///     .{ .name = "customFn", .Fn = fn (*anyopaque) void },
+    /// });
+    /// const ext_vt = Extended.create(struct {
+    ///     pub const customFn = myCustomFnImpl;
+    /// });
+    /// const extended_app = app.extend(Extended, &ext_vt.vtable);
+    /// ```
+    pub fn extend(self: App, comptime VTableType: type, vtable: *const VTableType.VTable) AppExt(VTableType) {
+        return .{
+            .ptr = self.ptr,
+            .vtable = vtable,
+        };
+    }
 };
 
-pub const VTable = struct {
-    addSystem: *const fn (*anyopaque, schedule.StageId, anytype) App,
-    addPlugin: *const fn (*anyopaque, anytype) App,
-    addEvent: *const fn (*anyopaque, comptime anytype) App,
-    addEventWithCleanupAtStage: *const fn (*anyopaque, comptime anytype, schedule.StageId) App,
-    addStage: *const fn (*anyopaque, schedule.StageId) App,
-    registerState: *const fn (*anyopaque, comptime anytype) App,
-    unregisterState: *const fn (*anyopaque, comptime anytype) App,
-    addResource: *const fn (*anyopaque, comptime anytype, anytype) App,
-    addResourceRef: *const fn (*anyopaque, comptime anytype, anytype) App,
-    removeResource: *const fn (*anyopaque, comptime anytype) App,
-    io: *const fn (*anyopaque) std.Io,
-    allocator: *const fn (*anyopaque) std.mem.Allocator,
-    ecs: *const fn (*anyopaque) *ecs_mod.Manager,
-    scheduler: *const fn (*anyopaque) *schedule.Scheduler,
-    pluginManager: *const fn (*anyopaque) *plugins.PluginManager,
-    update: *const fn (*anyopaque) anyerror!void,
-    run: *const fn (*anyopaque) anyerror!void,
-    deinit: *const fn (*anyopaque) void,
-};
+pub const VTable = BaseVTableType.VTable;
 
 pub fn populate(app: *App, ptr: *anyopaque, vtable: *const VTable) void {
     app.ptr = ptr;

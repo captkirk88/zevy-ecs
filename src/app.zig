@@ -6,7 +6,7 @@ const zevy_mem = @import("zevy_mem");
 const plugins = zevy_ecs.plugins;
 const app = zevy_ecs.app;
 const App = app.App;
-const AppVTable = zevy_ecs.app.VTable;
+const AppVTable = zevy_ecs.app.BaseVTableType;
 const populate = zevy_ecs.app.populate;
 const Plugin = plugins.PluginTemplate.Interface;
 
@@ -47,107 +47,26 @@ const empty = struct {
     };
 };
 
-const app_vtable: AppVTable = .{
-    .addSystem = app_addSystem,
-    .addPlugin = app_addPlugin,
-    .addEvent = app_addEvent,
-    .addEventWithCleanupAtStage = app_addEventWithCleanupAtStage,
-    .addStage = app_addStage,
-    .registerState = app_registerState,
-    .unregisterState = app_unregisterState,
-    .addResource = app_addResource,
-    .addResourceRef = app_addResourceRef,
-    .removeResource = app_removeResource,
-    .io = app_io,
-    .allocator = app_allocator,
-    .ecs = app_ecs,
-    .scheduler = app_scheduler,
-    .pluginManager = app_pluginManager,
-    .update = app_update,
-    .run = app_run,
-    .deinit = app_deinit,
-};
+const app_vtable = AppVTable.create(struct {
+    pub const io = app_io;
+    pub const allocator = app_allocator;
+    pub const ecs = app_ecs;
+    pub const scheduler = app_scheduler;
+    pub const pluginManager = app_pluginManager;
+    pub const update = app_update;
+    pub const run = app_run;
+    pub const deinit = app_deinit;
+});
 
 fn app_to_interface(inner: *AppInner) App {
     var app_iface: App = undefined;
-    populate(&app_iface, inner, &app_vtable);
+    populate(&app_iface, inner, &app_vtable.vtable);
     return app_iface;
-}
-
-fn app_addSystem(self: *anyopaque, stage: zevy_ecs.schedule.StageId, system: anytype) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.scheduler().addSystem(&inner.ecs_man, stage, system);
-    return app_to_interface(inner);
-}
-
-fn app_addPlugin(self: *anyopaque, plugin: anytype) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    const PluginType = @TypeOf(plugin);
-    inner.plugin_man.add(PluginType, plugin) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
 }
 
 fn app_pluginManager(self: *anyopaque) *plugins.PluginManager {
     const inner: *AppInner = @ptrCast(@alignCast(self));
     return &inner.plugin_man;
-}
-
-fn app_addEvent(self: *anyopaque, comptime EventType: type) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.scheduler().registerEvent(&inner.ecs_man, EventType) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_addEventWithCleanupAtStage(self: *anyopaque, comptime EventType: type, stage: zevy_ecs.schedule.StageId) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.scheduler().registerEventWithCleanupAtStage(&inner.ecs_man, EventType, stage) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_addStage(self: *anyopaque, stage: zevy_ecs.schedule.StageId) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.scheduler().addStage(stage) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_registerState(self: *anyopaque, comptime StateEnum: type) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.scheduler().registerState(&inner.ecs_man, StateEnum) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_unregisterState(self: *anyopaque, comptime StateEnum: type) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.scheduler().unregisterState(&inner.ecs_man, StateEnum) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_addResource(self: *anyopaque, comptime ResourceType: type, resource: anytype) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.addResourceRetained(ResourceType, resource) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_addResourceRef(self: *anyopaque, comptime ResourceType: type, resource_ref: anytype) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.addResourceRef(ResourceType, resource_ref) catch |err| handleError(err, @errorReturnTrace());
-    return app_to_interface(inner);
-}
-
-fn app_removeResource(self: *anyopaque, comptime ResourceType: type) App {
-    const inner: *AppInner = @ptrCast(@alignCast(self));
-    if (inner.is_empty) return app_to_interface(inner);
-    inner.ecs_man.removeResource(ResourceType);
-    return app_to_interface(inner);
 }
 
 fn app_io(self: *anyopaque) std.Io {

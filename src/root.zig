@@ -142,6 +142,11 @@ const app_interface = @import("app_interface.zig");
 
 pub const app = struct {
     pub const App = app_interface.App;
+    pub const AppExt = app_interface.AppExt;
+    pub const FnEntry = app_interface.FnEntry;
+    pub const AppVTable = app_interface.AppVTable;
+    pub const BaseEntries = app_interface.BaseEntries;
+    pub const BaseVTableType = app_interface.BaseVTableType;
     pub const VTable = app_interface.VTable;
     pub const populate = app_interface.populate;
 };

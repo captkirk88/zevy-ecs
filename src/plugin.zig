@@ -54,31 +54,21 @@ const TestApp = struct {
     }
 };
 
-const test_app_vtable: app.VTable = .{
-    .addSystem = test_app_addSystem,
-    .addPlugin = test_app_addPlugin,
-    .addEvent = test_app_addEvent,
-    .addEventWithCleanupAtStage = test_app_addEventWithCleanupAtStage,
-    .addStage = test_app_addStage,
-    .registerState = test_app_registerState,
-    .unregisterState = test_app_unregisterState,
-    .addResource = test_app_addResource,
-    .addResourceRef = test_app_addResourceRef,
-    .removeResource = test_app_removeResource,
-    .io = test_app_io,
-    .allocator = test_app_allocator,
-    .ecs = test_app_ecs,
-    .scheduler = test_app_scheduler,
-    .pluginManager = test_app_pluginManager,
-    .update = test_app_update,
-    .run = test_app_run,
-    .deinit = test_app_deinit,
-};
+const test_app_vtable = app.BaseVTableType.create(struct {
+    pub const io = test_app_io;
+    pub const allocator = test_app_allocator;
+    pub const ecs = test_app_ecs;
+    pub const scheduler = test_app_scheduler;
+    pub const pluginManager = test_app_pluginManager;
+    pub const update = test_app_update;
+    pub const run = test_app_run;
+    pub const deinit = test_app_deinit;
+});
 
 fn test_app_to_interface(app_impl: *TestApp) app.App {
     return .{
         .ptr = @ptrCast(@alignCast(app_impl)),
-        .vtable = &test_app_vtable,
+        .vtable = &test_app_vtable.vtable,
     };
 }
 
