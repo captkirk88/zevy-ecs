@@ -574,3 +574,60 @@ test "fixed timestep accumulator records overload diagnostics" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), accum.accumulator, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f64, 0.15), diagnostics.total_dropped_time, 0.0001);
 }
+
+test "App extend interface methods work" {
+    var app_ = new(testInit());
+    defer app_.deinit();
+
+    const ExtVTable = AppVTable.Extend(&.{
+        .{ .name = "customFn", .Fn = fn (*anyopaque, App) void },
+    });
+
+    const usesBaseApp = struct {
+        fn run(app_iface: App) void {
+            _ = app_iface.scheduler();
+        }
+    }.run;
+
+    const myCustomFnImpl = struct {
+        pub fn customFn(_: *anyopaque, app_iface: App) void {
+            _ = app_iface.io();
+        }
+    }.customFn;
+
+    const VT = ExtVTable.create(.{ app_vtable, struct {
+        pub const customFn = myCustomFnImpl;
+    } });
+
+    const base_vtable = VT.projectTo(AppVTable).vtable;
+
+    const CustomApp = struct {
+        ptr: *anyopaque,
+        vtable: *const ExtVTable.VTable,
+        base_vtable: *const AppVTable.VTable,
+        called: bool = false,
+
+        pub fn asApp(self: @This()) App {
+            return .{
+                .ptr = self.ptr,
+                .vtable = self.base_vtable,
+            };
+        }
+
+        pub fn customFn(self: *@This(), app_inst: App) void {
+            self.vtable.customFn(self.ptr, app_inst);
+            self.called = true;
+        }
+    };
+
+    var custom_app = CustomApp{
+        .ptr = app_.ptr,
+        .vtable = &VT.vtable,
+        .base_vtable = &base_vtable,
+    };
+
+    custom_app.customFn(app_);
+    usesBaseApp(custom_app.asApp());
+
+    try std.testing.expect(custom_app.called);
+}

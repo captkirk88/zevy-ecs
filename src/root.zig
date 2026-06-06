@@ -195,4 +195,5 @@ test {
     std.testing.refAllDecls(errors);
     std.testing.refAllDecls(commands);
     std.testing.refAllDecls(plugins);
+    std.testing.refAllDecls(app);
 }

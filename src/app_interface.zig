@@ -52,8 +52,8 @@ pub fn AppExt(comptime VTableType: type) type {
             break :blk @typeInfo(@typeInfo(FnType).pointer.child).@"fn".return_type orelse void;
         } {
             const fn_ptr = @field(self.vtable, name);
-            const fn_type = @TypeOf(fn_ptr.*);
-            const fn_info = @typeInfo(fn_type).@"fn";
+            const FnType = @TypeOf((@as(VTableType, undefined)).get(name));
+            const fn_info = @typeInfo(@typeInfo(FnType).pointer.child).@"fn";
             const args_type = @TypeOf(args);
             const args_info = @typeInfo(args_type);
 
