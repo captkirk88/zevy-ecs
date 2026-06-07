@@ -612,10 +612,11 @@ pub fn Query(comptime IncludeTypes: anytype) type {
 
         /// Deinitialize the query, releasing the read guard on the archetype storage
         /// if it has not already been released via `isGuardReleased()` / `shareDeinitState()`.
-        pub fn deinit(self: *@This()) void {
-            if (!self.isGuardReleased()) {
-                self.guard.deinit();
-                self.setGuardReleased(true);
+        pub fn deinit(self: *const @This()) void {
+            const self_mut: *@This() = @constCast(self);
+            if (!self_mut.isGuardReleased()) {
+                self_mut.guard.deinit();
+                self_mut.setGuardReleased(true);
             }
         }
 
