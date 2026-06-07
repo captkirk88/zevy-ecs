@@ -93,10 +93,20 @@ pub const Archetype = struct {
     /// `component_data` is an array of pointers to bytes, one per component type, matching the signature order
     pub fn addEntity(self: *Archetype, entity: Entity, component_data: [][]const u8) !void {
         try self.entities.append(self.allocator, entity);
+        var appended_count: usize = 0;
+        errdefer {
+            var i: usize = 0;
+            while (i < appended_count) : (i += 1) {
+                self.component_arrays[i].items.len -= self.component_sizes[i];
+            }
+            self.entities.items.len -= 1;
+        }
+
         for (component_data, 0..) |data, i| {
             const size = self.component_sizes[i];
             const arr = &self.component_arrays[i];
             try arr.appendSlice(self.allocator, data[0..size]);
+            appended_count += 1;
         }
     }
 };

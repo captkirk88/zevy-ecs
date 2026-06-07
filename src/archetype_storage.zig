@@ -102,7 +102,11 @@ pub const ArchetypeStorage = struct {
             const types_heap = try self.allocator.alloc(u64, types_len);
             std.mem.copyForwards(u64, types_heap, signature.types);
             const heap_sig = ArchetypeSignature{ .types = types_heap };
+            errdefer self.allocator.free(types_heap);
+
             const new_archetype = try Archetype.init(self.allocator, heap_sig, component_sizes);
+            errdefer new_archetype.deinit();
+
             try storage.archetypes.put(heap_sig, new_archetype);
             return new_archetype;
         }
@@ -119,6 +123,12 @@ pub const ArchetypeStorage = struct {
         const archetype = try self.getOrCreateWithStorage(storage, signature, component_sizes);
         try archetype.addEntity(entity, component_data);
         const idx = archetype.entities.items.len - 1;
+        errdefer {
+            archetype.entities.items.len -= 1;
+            for (archetype.component_arrays, 0..) |*arr, i| {
+                arr.items.len -= archetype.component_sizes[i];
+            }
+        }
         try storage.entity_sparse_set.set(entity.id, EntityMapEntry{ .archetype = archetype, .index = idx });
     }
 
