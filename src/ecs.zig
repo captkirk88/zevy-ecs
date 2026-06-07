@@ -120,38 +120,66 @@ const ManagerImpl = struct {
         manager.allocator = allocator;
         manager.io = init_io;
         manager.next_entity_id = 0;
-        manager.generations = try std.ArrayList(u32).initCapacity(allocator, 1024);
-        manager.free_ids = try std.ArrayList(u32).initCapacity(allocator, 256);
-        manager.world = World.init(allocator);
-        manager.resources = try zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)).init(allocator, std.AutoHashMap(u64, ResourceEntry).init(allocator));
-        manager.resource_codecs = std.AutoHashMap(u64, ResourceCodec).init(allocator);
-        manager.systems = std.AutoHashMap(u64, *anyopaque).init(allocator);
-        manager.scheduler = undefined;
-        // manager.manager_wrapper will be initialized by Manager.init after
-        // the impl is boxed; initialize it to a safe zero value here.
         manager.manager_wrapper = ManagerWrapper{ .ptr = @ptrCast(@alignCast(&manager)) };
-        manager.component_added = try events.EventStore(ComponentEvent).init(allocator, 64);
-        manager.component_removed = try events.EventStore(ComponentEvent).init(allocator, 64);
         manager.command_queue_mutex = .init;
-        manager.queued_commands = try std.ArrayList(QueuedCommand).initCapacity(allocator, 4);
         manager.defer_command_flush = std.atomic.Value(bool).init(false);
-        manager.relations = undefined;
 
-        manager.relations = try manager.addResource(relations.RelationManager, relations.RelationManager.init(allocator));
+        var generations = try std.ArrayList(u32).initCapacity(allocator, 1024);
+        errdefer generations.deinit(allocator);
 
-        var scheduler_ptr: ?*scheduler_mod.Scheduler = null;
+        var free_ids = try std.ArrayList(u32).initCapacity(allocator, 256);
+        errdefer free_ids.deinit(allocator);
+
+        var world_inst = World.init(allocator);
+        errdefer world_inst.deinit();
+
+        var resources = try zevy_mem.lock.Mutex(std.AutoHashMap(u64, ResourceEntry)).init(allocator, std.AutoHashMap(u64, ResourceEntry).init(allocator));
         errdefer {
-            if (scheduler_ptr) |sched| {
-                sched.deinit();
-                allocator.destroy(sched);
-            }
+            var res_guard = resources.lock();
+            var res_it = res_guard.get().valueIterator();
+            while (res_it.next()) |entry| entry.deinit();
+            res_guard.get().clearAndFree();
+            res_guard.deinit();
+            resources.deinit();
         }
 
+        var resource_codecs = std.AutoHashMap(u64, ResourceCodec).init(allocator);
+        errdefer resource_codecs.deinit();
+
+        var systems = std.AutoHashMap(u64, *anyopaque).init(allocator);
+        errdefer systems.deinit();
+
+        var component_added = try events.EventStore(ComponentEvent).init(allocator, 64);
+        errdefer component_added.deinit();
+
+        var component_removed = try events.EventStore(ComponentEvent).init(allocator, 64);
+        errdefer component_removed.deinit();
+
+        var queued_commands = try std.ArrayList(QueuedCommand).initCapacity(allocator, 4);
+        errdefer {
+            for (queued_commands.items) |*queued| queued.buffer.deinit(allocator);
+            queued_commands.deinit(allocator);
+        }
+
+        manager.generations = generations;
+        manager.free_ids = free_ids;
+        manager.world = world_inst;
+        manager.resources = resources;
+        manager.resource_codecs = resource_codecs;
+        manager.systems = systems;
+        manager.component_added = component_added;
+        manager.component_removed = component_removed;
+        manager.queued_commands = queued_commands;
+        manager.relations = undefined;
+
+        const relations_ref = try manager.addResource(relations.RelationManager, relations.RelationManager.init(allocator));
+        errdefer relations_ref.deinit();
+        manager.relations = relations_ref;
+
         const scheduler = try allocator.create(scheduler_mod.Scheduler);
+        errdefer allocator.destroy(scheduler);
         scheduler.* = try scheduler_mod.Scheduler.init(allocator);
-        scheduler_ptr = scheduler;
         manager.scheduler = scheduler;
-        scheduler_ptr = null;
 
         return manager;
     }
