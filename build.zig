@@ -37,17 +37,6 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
-    // const app_interface_mod = b.addModule("app_interface", .{
-    //     .root_source_file = b.path("src/app_interface.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    //     .imports = &.{
-    //         .{ .name = "zevy_ecs", .module = self_mod },
-    //         .{ .name = "zevy_reflect", .module = reflect_mod },
-    //         .{ .name = "plugins", .module = plugin_mod },
-    //     },
-    // });
-
     // Setup tests
     const tests = b.addTest(.{
         .root_module = self_mod,

@@ -24,8 +24,13 @@ Good question.  The std API has changed to the point I don't even know anymore. 
 
 ## Build Modules Available (`b.dependency(...).module(...)`)
 - `zevy_ecs` - Main ECS functionality (entities, components, queries, systems, resources, events, relations)
-- `plugins` - Plugin system for modular functionality
 - `benchmark` - Benchmarking for performance testing
+
+## Notable Projects Using zevy_ecs
+- [zevy-alloy](https://github.com/captkirk88/zevy-alloy) - Zig Shader Language (ZSL) compiler. (examples use zevy-ecs, zevy-raylib)
+
+> [!NOTE]
+> If you use zevy-ecs in a project, please let me know!  I'd love to add it to the list above and see what people are building with it or experimenting.
 
 ## Table of Contents
 
