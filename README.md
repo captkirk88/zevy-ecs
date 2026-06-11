@@ -1,3 +1,7 @@
+> [!NOTE]
+> After reviewing my time spent with Zig, I’ve concluded that the language's direction isn't a good fit for me. While its emphasis on strict explicitness is an interesting academic exercise, forcing non-standard practices often comes at the cost of day-to-day productivity. Because of this steep friction, I view it as unlikely to gain widespread industry adoption outside of highly specialized niches. 
+> Consequently, I am archiving my Zig projects to focus on languages with more mainstream viability and ecosystem support. It was a great learning experience, and I'm proud of what I built, but for now, my development focus lies elsewhere.
+
 # zevy_ecs
 
 A high-performance, archetype-based Entity-Component-System (ECS) framework written in Zig. It provides a type-safe, efficient way to manage entities, components, systems, resources, and events in your applications.
